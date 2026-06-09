@@ -91,21 +91,26 @@ def ask_yes_no(prompt, default=True):
     """
     Диалог да/нет.
 
-    Поведение dialogs.alert в Pythonista:
-      - Нажата ПЕРВАЯ кнопка ("Да")  -> возвращает строку "Да"
-      - Нажата ВТОРАЯ кнопка ("Нет") -> бросает KeyboardInterrupt
-      - Нажата кнопка Cancel (если есть) -> бросает KeyboardInterrupt
+    dialogs.alert ненадёжен в Pythonista — при нажатии любой кнопки
+    может бросить KeyboardInterrupt и невозможно отличить "Да" от "Нет".
 
-    Поэтому оборачиваем в try/except: исключение = "Нет".
+    Решение: используем input_alert — он стабильно возвращает введённый
+    текст. Пользователь видит подсказку "да" или "нет" и просто жмёт OK.
     """
     if PYTHONISTA:
+        default_text = "да" if default else "нет"
         try:
-            answer = dialogs.alert("IPA Patcher", prompt, "Да", "Нет")
-            # Сюда попадаем только если нажато "Да"
-            return answer == "Да"
+            answer = dialogs.input_alert(
+                "IPA Patcher",
+                prompt + "\n(введи: да или нет)",
+                default_text,
+                "OK"
+            )
         except KeyboardInterrupt:
-            # Нажато "Нет" или отменено
-            return False
+            return default
+        if answer is None:
+            return default
+        return answer.strip().lower() in ("да", "д", "y", "yes", "1", "+")
     else:
         hint = " [Y/n]" if default else " [y/N]"
         try:
