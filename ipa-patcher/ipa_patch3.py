@@ -46,6 +46,12 @@ try:
 except ImportError:
     INJECT_AVAILABLE = False
 
+try:
+    from tweak_unpack import unpack_tweak, detect_format
+    UNPACK_AVAILABLE = True
+except ImportError:
+    UNPACK_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Определяем среду выполнения
 # ---------------------------------------------------------------------------
@@ -149,48 +155,39 @@ def pick_ipa_file():
 
 def pick_tweak_file():
     """
-    Выбор .dylib твика.
+    Выбор файла твика любого поддерживаемого формата:
+    .dylib, .deb, .framework (папка или zip).
 
-    В Pythonista:
-      Сначала пробуем pick_document с широким типом public.data —
-      это открывает стандартное окно Files где можно выбрать любой файл.
-      Если пикер вернул None (отмена) или пустую строку — предлагаем
-      ввести путь вручную как запасной вариант.
-
-    В CLI:
-      Обычный input() с поддержкой ~.
+    В Pythonista: нативный пикер Files.
+    В CLI: ввод пути вручную.
     """
+    supported = ".dylib, .deb, .framework"
     if PYTHONISTA:
-        print("Открываем Files для выбора .dylib твика...")
+        print(f"Открываем Files для выбора твика ({supported})...")
         try:
-            # public.data — самый широкий тип, открывает Files без фильтрации
-            # Это гарантирует что пикер реально откроется
             path = dialogs.pick_document(types=["public.data"])
         except Exception as e:
             log.warning("pick_document упал: %s", e)
             path = None
 
         if path:
-            # Pythonista копирует файл во временную папку — путь реальный
             log.info("Выбран твик: %s", os.path.basename(path))
             return path
 
-        # Запасной вариант: ручной ввод пути
-        # Это на случай если пикер не открылся или пользователь отменил
+        # Запасной вариант — ручной ввод
         log.info("Пикер не вернул файл — переходим к ручному вводу.")
         manual = dialogs.input_alert(
             "IPA Patcher",
-            "Введи путь к .dylib файлу твика (например: ~/Documents/tweak.dylib)",
+            f"Путь к файлу твика ({supported})",
             "~/Documents/",
             "OK"
         )
         if manual is None:
             return ""
         return os.path.expanduser(manual.strip())
-
     else:
         try:
-            path = input("Путь к .dylib файлу твика: ").strip().strip('"')
+            path = input(f"Путь к файлу твика ({supported}): ").strip().strip('"')
         except KeyboardInterrupt:
             return ""
         return os.path.expanduser(path)
@@ -485,14 +482,67 @@ def main():
             do_inject = ask_yes_no("Добавить .dylib твик в приложение?", default=False)
             if do_inject:
                 tweak_path = pick_tweak_file()
-                if tweak_path and os.path.isfile(tweak_path):
+                if tweak_path and (os.path.isfile(tweak_path) or os.path.isdir(tweak_path)):
                     try:
-                        install_path = inject_dylib(app_dir, tweak_path)
-                        log.info("Твик успешно добавлен: %s", install_path)
+                        # Определяем формат и при необходимости распаковываем
+                        unpack_dir = tempfile.mkdtemp(prefix="tweak_unpack_")
+                        dylib_files = []
+
+                        if UNPACK_AVAILABLE:
+                            fmt = detect_format(tweak_path)
+                            if fmt == "dylib":
+                                # .dylib — сразу инжектим
+                                dylib_files = [tweak_path]
+                            else:
+                                log.info("Распаковка твика формата: %s", fmt)
+                                dylib_files = unpack_tweak(tweak_path, unpack_dir)
+                                log.info("Найдено .dylib после распаковки: %d", len(dylib_files))
+                        else:
+                            # tweak_unpack недоступен — пробуем напрямую
+                            dylib_files = [tweak_path]
+
+                        if not dylib_files:
+                            log.error("Не найдено .dylib файлов в твике.")
+                        else:
+                            # Если несколько .dylib — спрашиваем какой инжектить
+                            if len(dylib_files) > 1:
+                                print("Найдено несколько .dylib в пакете:")
+                                for i, f in enumerate(dylib_files):
+                                    print(f"  {i+1}. {os.path.basename(f)}")
+                                if PYTHONISTA:
+                                    choice_str = dialogs.input_alert(
+                                        "IPA Patcher",
+                                        "Введи номер .dylib для инъекции (или 0 = все)",
+                                        "0", "OK"
+                                    )
+                                    choice = int(choice_str) if choice_str else 0
+                                else:
+                                    choice = int(input("Номер (0 = все): ").strip() or "0")
+
+                                if choice == 0:
+                                    selected = dylib_files
+                                elif 1 <= choice <= len(dylib_files):
+                                    selected = [dylib_files[choice - 1]]
+                                else:
+                                    selected = dylib_files
+                            else:
+                                selected = dylib_files
+
+                            # Инжектим каждый выбранный .dylib
+                            for dylib in selected:
+                                try:
+                                    install_path = inject_dylib(app_dir, dylib)
+                                    log.info("Твик добавлен: %s", install_path)
+                                except Exception as e:
+                                    log.error("Ошибка инъекции %s: %s", os.path.basename(dylib), e)
+
                     except Exception as e:
-                        log.error("Ошибка инъекции твика: %s", e)
+                        log.error("Ошибка обработки твика: %s", e)
                         if not ask_yes_no("Продолжить без твика?", default=True):
                             sys.exit(1)
+                    finally:
+                        shutil.rmtree(unpack_dir, ignore_errors=True)
+
                 elif tweak_path:
                     log.warning("Файл твика не найден: %s", tweak_path)
                 else:
