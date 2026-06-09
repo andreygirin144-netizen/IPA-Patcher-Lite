@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-IPA Patcher Lite - только смена Bundle ID и удаление подписи.
-Бинарник НЕ изменяется (нет добавления LC_LOAD_DYLIB, нет ослабления зависимостей).
-Работает без ошибок ldid.
+IPA Patcher Lite - смена Bundle ID и удаление подписи.
 """
 
 import os
