@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-IPA Patcher - смена Bundle ID и удаление файлов защиты.
-Совместим с Pythonista 3 на iOS и стандартным Python 3 на macOS/Linux.
+IPA Patcher Lite - только смена Bundle ID и удаление подписи.
+Бинарник НЕ изменяется (нет добавления LC_LOAD_DYLIB, нет ослабления зависимостей).
+Работает без ошибок ldid.
 """
 
 import os
@@ -13,35 +14,6 @@ import tempfile
 import logging
 
 try:
-    _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-except NameError:
-    _SCRIPT_DIR = os.getcwd()
-
-if _SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPT_DIR)
-
-try:
-    from macho_patch import patch_app_binaries, audit_dylibs, UNWANTED_FRAMEWORKS as MACHO_TARGETS
-    MACHO_AVAILABLE = True
-except ImportError:
-    MACHO_AVAILABLE = False
-
-try:
-    from tweak_inject import (
-        check_encryption, print_encryption_report,
-        is_binary_encrypted, inject_tweak_any
-    )
-    INJECT_AVAILABLE = True
-except ImportError:
-    INJECT_AVAILABLE = False
-
-try:
-    from tweak_unpack import detect_format, unpack_tweak
-    UNPACK_AVAILABLE = True
-except ImportError:
-    UNPACK_AVAILABLE = False
-
-try:
     import dialogs
     import console
     PYTHONISTA = True
@@ -50,6 +22,7 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
+
 
 def ask_input(prompt, placeholder=""):
     if PYTHONISTA:
@@ -65,6 +38,7 @@ def ask_input(prompt, placeholder=""):
         except KeyboardInterrupt:
             print("\nПрервано пользователем.")
             sys.exit(0)
+
 
 def ask_yes_no(prompt, default=True):
     if PYTHONISTA:
@@ -84,6 +58,7 @@ def ask_yes_no(prompt, default=True):
             return default
         return ans in ("y", "yes", "д", "да")
 
+
 def pick_ipa_file():
     if PYTHONISTA:
         path = dialogs.pick_document(types=["com.apple.itunes.ipa", "public.data"])
@@ -99,37 +74,16 @@ def pick_ipa_file():
             sys.exit(0)
         return os.path.expanduser(path)
 
-def pick_tweak_file():
-    supported = ".dylib, .framework, .zip"
-    if PYTHONISTA:
-        print(f"Открываем Files для выбора твика ({supported})...")
-        try:
-            path = dialogs.pick_document(types=["public.data"])
-        except Exception as e:
-            log.warning("pick_document упал: %s", e)
-            path = None
-        if path:
-            log.info("Выбран твик: %s", os.path.basename(path))
-            return path
-        log.info("Пикер не вернул файл — ручной ввод.")
-        manual = dialogs.input_alert("IPA Patcher", f"Путь к файлу твика ({supported})", "~/Documents/", "OK")
-        if manual is None:
-            return ""
-        return os.path.expanduser(manual.strip())
-    else:
-        try:
-            path = input(f"Путь к файлу твика ({supported}): ").strip().strip('"')
-        except KeyboardInterrupt:
-            return ""
-        return os.path.expanduser(path)
 
 def log_step(message):
     if PYTHONISTA:
         console.hud_alert(message, duration=1.2)
     log.info(message)
 
+
 def print_section(title):
     print(f"\n--- {title} ---")
+
 
 def make_temp_dir():
     if PYTHONISTA:
@@ -138,13 +92,16 @@ def make_temp_dir():
             return tempfile.mkdtemp(prefix="ipa_patch_", dir=docs)
     return tempfile.mkdtemp(prefix="ipa_patch_")
 
+
 def load_plist(path):
     with open(path, "rb") as f:
         return plistlib.load(f)
 
+
 def save_plist(data, path):
     with open(path, "wb") as f:
         plistlib.dump(data, f)
+
 
 def patch_bundle_id(plist_path, old_id, new_id):
     if not os.path.isfile(plist_path):
@@ -182,8 +139,10 @@ def patch_bundle_id(plist_path, old_id, new_id):
         save_plist(plist, plist_path)
         log.info("Bundle ID обновлён: %s", plist_path)
 
+
 SIGNATURE_DIRS = frozenset({"_CodeSignature", "SC_Info"})
 SIGNATURE_FILES = frozenset({"embedded.mobileprovision", "CodeResources"})
+
 
 def clean_signature_files(app_path):
     for root, dirs, files in os.walk(app_path, topdown=True):
@@ -205,22 +164,6 @@ def clean_signature_files(app_path):
                 except OSError as e:
                     log.warning("Не удалось удалить %s: %s", full, e)
 
-def clean_unwanted_frameworks(app_path):
-    frameworks_path = os.path.join(app_path, "Frameworks")
-    if not os.path.isdir(frameworks_path):
-        return
-    for item in os.listdir(frameworks_path):
-        if item not in MACHO_TARGETS:
-            continue
-        full = os.path.join(frameworks_path, item)
-        try:
-            if os.path.isdir(full):
-                shutil.rmtree(full)
-            else:
-                os.remove(full)
-            log.info("Удалён фреймворк/dylib: %s", item)
-        except OSError as e:
-            log.warning("Не удалось удалить %s: %s", full, e)
 
 def pack_ipa(source_dir, output_path):
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
@@ -236,6 +179,7 @@ def pack_ipa(source_dir, output_path):
                     zf.writestr(info, fh.read())
     log.info("IPA упакован: %s", output_path)
 
+
 def find_app_dir(payload_path):
     if not os.path.isdir(payload_path):
         return None
@@ -244,13 +188,11 @@ def find_app_dir(payload_path):
             return os.path.join(payload_path, item)
     return None
 
+
 def main():
     if PYTHONISTA:
         console.clear()
-    print("=== IPA Patcher ===")
-
-    if not MACHO_AVAILABLE:
-        print("\n[ПРЕДУПРЕЖДЕНИЕ] macho_patch.py не найден.\n")
+    print("=== IPA Patcher Lite (без изменений бинарника) ===")
 
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
@@ -264,12 +206,8 @@ def main():
     try:
         print_section("Распаковка")
         log_step("Распаковка IPA...")
-        try:
-            with zipfile.ZipFile(ipa_path, "r") as zf:
-                zf.extractall(temp_dir)
-        except zipfile.BadZipFile as e:
-            log.error("Не удалось распаковать IPA: %s", e)
-            sys.exit(1)
+        with zipfile.ZipFile(ipa_path, "r") as zf:
+            zf.extractall(temp_dir)
 
         payload_path = os.path.join(temp_dir, "Payload")
         app_dir = find_app_dir(payload_path)
@@ -278,76 +216,12 @@ def main():
             sys.exit(1)
         log.info("Найдено приложение: %s", os.path.basename(app_dir))
 
-        app_name = os.path.splitext(os.path.basename(app_dir))[0]
-        binary_path = os.path.join(app_dir, app_name)
-
-        print_section("Проверка шифрования")
-        binary_encrypted = False
-        if INJECT_AVAILABLE and os.path.isfile(binary_path):
-            log_step("Проверка cryptid...")
-            try:
-                enc_results = check_encryption(binary_path)
-                print_encryption_report(enc_results)
-                binary_encrypted = any(e.is_encrypted for e in enc_results)
-            except Exception as e:
-                log.warning("Ошибка проверки шифрования: %s", e)
-            if binary_encrypted:
-                print("\n[СТОП] Бинарник зашифрован App Store DRM. Патч невозможен.")
-                sys.exit(1)
-            else:
-                print("  Бинарник не зашифрован — патч возможен.")
-        else:
-            print("  Проверка шифрования пропущена.")
-
-        if INJECT_AVAILABLE and not binary_encrypted:
-            print_section("Инъекция твика")
-            do_inject = ask_yes_no("Добавить твик (.dylib, .framework, .zip)?", default=False)
-            if do_inject:
-                tweak_path = pick_tweak_file()
-                if tweak_path and (os.path.isfile(tweak_path) or os.path.isdir(tweak_path)):
-                    unpack_dir = tempfile.mkdtemp(prefix="tweak_unpack_")
-                    try:
-                        if UNPACK_AVAILABLE:
-                            fmt = detect_format(tweak_path)
-                            if fmt == "dylib":
-                                tweak_files = [tweak_path]
-                            elif fmt == "framework":
-                                tweak_files = [tweak_path]
-                            elif fmt == "zip":
-                                tweak_files = unpack_tweak(tweak_path, unpack_dir)
-                                log.info("Из ZIP извлечено файлов: %d", len(tweak_files))
-                            else:
-                                log.error("Неподдерживаемый формат. Используйте .dylib, .framework или .zip")
-                                sys.exit(1)
-                        else:
-                            log.error("Модуль распаковки недоступен")
-                            sys.exit(1)
-
-                        for tf in tweak_files:
-                            log.info("Установка: %s", os.path.basename(tf))
-                            inject_tweak_any(app_dir, tf)
-                    except Exception as e:
-                        log.error("Ошибка при обработке твика: %s", e)
-                        if not ask_yes_no("Продолжить без твика?", default=True):
-                            sys.exit(1)
-                    finally:
-                        shutil.rmtree(unpack_dir, ignore_errors=True)
-                elif tweak_path:
-                    log.warning("Файл твика не найден: %s", tweak_path)
-                else:
-                    log.info("Выбор твика отменён.")
-            else:
-                log.info("Инъекция пропущена.")
-
+        # Чтение текущего Bundle ID
         info_plist_path = os.path.join(app_dir, "Info.plist")
         if not os.path.isfile(info_plist_path):
             log.error("Info.plist не найден в .app.")
             sys.exit(1)
-        try:
-            plist = load_plist(info_plist_path)
-        except Exception as e:
-            log.error("Ошибка чтения Info.plist: %s", e)
-            sys.exit(1)
+        plist = load_plist(info_plist_path)
         old_id = plist.get("CFBundleIdentifier", "")
         if old_id:
             log.info("Текущий Bundle ID: %s", old_id)
@@ -359,27 +233,7 @@ def main():
             log.error("Bundle ID не может быть пустым.")
             sys.exit(1)
 
-        if MACHO_AVAILABLE:
-            print_section("Патч бинарных зависимостей")
-            log_step("Ослабление ссылок на удаляемые библиотеки...")
-            try:
-                patched_count = patch_app_binaries(app_dir, MACHO_TARGETS)
-                if patched_count:
-                    log.info("Изменено LC_LOAD_DYLIB -> LC_LOAD_WEAK_DYLIB: %d команд.", patched_count)
-                else:
-                    log.info("Ссылки на целевые библиотеки не найдены.")
-            except Exception as e:
-                log.warning("Ошибка при патче бинарников: %s", e)
-            loose_dylibs = audit_dylibs(app_dir)
-            if loose_dylibs:
-                print("\n[ВНИМАНИЕ] Найдены .dylib без родительского .framework:")
-                for d in loose_dylibs:
-                    print(f"  {os.path.relpath(d, app_dir)}")
-                print("  iOS может отказаться загружать их после переподписи.")
-        else:
-            print_section("Патч бинарных зависимостей")
-            print("Пропущено: macho_patch.py недоступен.")
-
+        # Обновление Bundle ID
         print_section("Обновление Bundle ID")
         log_step("Обновление Bundle ID...")
         patch_bundle_id(info_plist_path, old_id, new_id)
@@ -390,14 +244,12 @@ def main():
                     ext_plist = os.path.join(plugins_path, ext, "Info.plist")
                     patch_bundle_id(ext_plist, old_id, new_id)
 
+        # Очистка подписи
         print_section("Очистка подписи")
         log_step("Удаление файлов подписи...")
         clean_signature_files(app_dir)
 
-        print_section("Удаление нежелательных фреймворков")
-        log_step("Удаление нежелательных фреймворков...")
-        clean_unwanted_frameworks(app_dir)
-
+        # Сохранение
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
         if PYTHONISTA:
             docs = os.path.expanduser("~/Documents")
@@ -409,6 +261,7 @@ def main():
             output_path = os.path.expanduser(output_path)
             if not output_path.endswith(".ipa"):
                 output_path += ".ipa"
+
         if os.path.abspath(output_path) == os.path.abspath(ipa_path):
             log.error("Путь сохранения совпадает с исходным файлом.")
             sys.exit(1)
@@ -427,6 +280,7 @@ def main():
         print("Нажми на файл -> Поделиться -> выбери AltStore или SideStore.")
     else:
         print(f"Новый IPA сохранён: {output_path}")
+
 
 if __name__ == "__main__":
     main()
