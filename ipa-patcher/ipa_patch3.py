@@ -90,12 +90,22 @@ def ask_input(prompt, placeholder=""):
 def ask_yes_no(prompt, default=True):
     """
     Диалог да/нет.
-    dialogs.alert возвращает строку с именем нажатой кнопки.
+
+    Поведение dialogs.alert в Pythonista:
+      - Нажата ПЕРВАЯ кнопка ("Да")  -> возвращает строку "Да"
+      - Нажата ВТОРАЯ кнопка ("Нет") -> бросает KeyboardInterrupt
+      - Нажата кнопка Cancel (если есть) -> бросает KeyboardInterrupt
+
+    Поэтому оборачиваем в try/except: исключение = "Нет".
     """
     if PYTHONISTA:
-        # alert(title, message, *buttons) -> имя нажатой кнопки
-        answer = dialogs.alert("IPA Patcher", prompt, "Да", "Нет")
-        return answer == "Да"
+        try:
+            answer = dialogs.alert("IPA Patcher", prompt, "Да", "Нет")
+            # Сюда попадаем только если нажато "Да"
+            return answer == "Да"
+        except KeyboardInterrupt:
+            # Нажато "Нет" или отменено
+            return False
     else:
         hint = " [Y/n]" if default else " [y/N]"
         try:
