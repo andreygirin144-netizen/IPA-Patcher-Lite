@@ -37,6 +37,15 @@ try:
 except ImportError:
     MACHO_AVAILABLE = False
 
+try:
+    from tweak_inject import (
+        check_encryption, print_encryption_report,
+        is_binary_encrypted, inject_dylib
+    )
+    INJECT_AVAILABLE = True
+except ImportError:
+    INJECT_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Определяем среду выполнения
 # ---------------------------------------------------------------------------
@@ -374,7 +383,68 @@ def main():
             sys.exit(1)
         log.info("Найдено приложение: %s", os.path.basename(app_dir))
 
-        # 5. Чтение текущего Bundle ID
+        # 5. Проверка шифрования
+        app_name = os.path.splitext(os.path.basename(app_dir))[0]
+        binary_path = os.path.join(app_dir, app_name)
+
+        print_section("Проверка шифрования")
+        if INJECT_AVAILABLE and os.path.isfile(binary_path):
+            log_step("Проверка cryptid...")
+            try:
+                enc_results = check_encryption(binary_path)
+                print_encryption_report(enc_results)
+                binary_encrypted = any(e.is_encrypted for e in enc_results)
+            except Exception as e:
+                log.warning("Ошибка проверки шифрования: %s", e)
+                binary_encrypted = False
+
+            if binary_encrypted:
+                print(
+                    "\n[СТОП] Бинарник зашифрован App Store DRM (cryptid=1)."
+                    "\n  Патч и инъекция твиков невозможны."
+                    "\n  Для работы нужна расшифрованная копия IPA."
+                    "\n  Источники: AppDb, AppTeaK, или расшифровка через jailbreak."
+                )
+                sys.exit(1)
+            else:
+                print("  Бинарник не зашифрован — патч возможен.")
+        else:
+            binary_encrypted = False
+            if not INJECT_AVAILABLE:
+                print("  tweak_inject.py не найден — проверка пропущена.")
+            else:
+                print("  Главный бинарник не найден — проверка пропущена.")
+
+        # 5б. Инъекция твика (опционально)
+        if INJECT_AVAILABLE and not binary_encrypted:
+            print_section("Инъекция твика")
+            do_inject = ask_yes_no("Добавить .dylib твик в приложение?", default=False)
+            if do_inject:
+                if PYTHONISTA:
+                    tweak_path = dialogs.pick_document(
+                        types=["public.data"],
+                    )
+                    if tweak_path is None:
+                        log.info("Выбор твика отменён.")
+                        tweak_path = ""
+                else:
+                    tweak_path = ask_input("Путь к .dylib файлу твика:", "")
+                    tweak_path = os.path.expanduser(tweak_path)
+
+                if tweak_path and os.path.isfile(tweak_path):
+                    try:
+                        install_path = inject_dylib(app_dir, tweak_path)
+                        log.info("Твик успешно добавлен: %s", install_path)
+                    except Exception as e:
+                        log.error("Ошибка инъекции твика: %s", e)
+                        if not ask_yes_no("Продолжить без твика?", default=True):
+                            sys.exit(1)
+                elif tweak_path:
+                    log.warning("Файл твика не найден: %s", tweak_path)
+            else:
+                log.info("Инъекция пропущена.")
+
+        # 6. Чтение текущего Bundle ID
         info_plist_path = os.path.join(app_dir, "Info.plist")
         if not os.path.isfile(info_plist_path):
             log.error("Info.plist не найден в .app.")
