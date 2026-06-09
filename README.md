@@ -271,5 +271,6 @@ A: Да. Смена Bundle ID позволяет AltStore воспринять �
 <div align="center">
 
 Сделано для использования на iOS с [Pythonista 3](https://omz-software.com/pythonista/)
+> Разработано с помощью Claude (Anthropic)
 
 </div>
