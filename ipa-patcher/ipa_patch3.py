@@ -132,6 +132,55 @@ def pick_ipa_file():
         return os.path.expanduser(path)
 
 
+def pick_tweak_file():
+    """
+    Выбор .dylib твика.
+
+    В Pythonista:
+      Сначала пробуем pick_document с широким типом public.data —
+      это открывает стандартное окно Files где можно выбрать любой файл.
+      Если пикер вернул None (отмена) или пустую строку — предлагаем
+      ввести путь вручную как запасной вариант.
+
+    В CLI:
+      Обычный input() с поддержкой ~.
+    """
+    if PYTHONISTA:
+        print("Открываем Files для выбора .dylib твика...")
+        try:
+            # public.data — самый широкий тип, открывает Files без фильтрации
+            # Это гарантирует что пикер реально откроется
+            path = dialogs.pick_document(types=["public.data"])
+        except Exception as e:
+            log.warning("pick_document упал: %s", e)
+            path = None
+
+        if path:
+            # Pythonista копирует файл во временную папку — путь реальный
+            log.info("Выбран твик: %s", os.path.basename(path))
+            return path
+
+        # Запасной вариант: ручной ввод пути
+        # Это на случай если пикер не открылся или пользователь отменил
+        log.info("Пикер не вернул файл — переходим к ручному вводу.")
+        manual = dialogs.input_alert(
+            "IPA Patcher",
+            "Введи путь к .dylib файлу твика (например: ~/Documents/tweak.dylib)",
+            "~/Documents/",
+            "OK"
+        )
+        if manual is None:
+            return ""
+        return os.path.expanduser(manual.strip())
+
+    else:
+        try:
+            path = input("Путь к .dylib файлу твика: ").strip().strip('"')
+        except KeyboardInterrupt:
+            return ""
+        return os.path.expanduser(path)
+
+
 def log_step(message):
     """Вывод шага: через console.hud_alert в Pythonista или обычный log."""
     if PYTHONISTA:
@@ -420,17 +469,7 @@ def main():
             print_section("Инъекция твика")
             do_inject = ask_yes_no("Добавить .dylib твик в приложение?", default=False)
             if do_inject:
-                if PYTHONISTA:
-                    tweak_path = dialogs.pick_document(
-                        types=["public.data"],
-                    )
-                    if tweak_path is None:
-                        log.info("Выбор твика отменён.")
-                        tweak_path = ""
-                else:
-                    tweak_path = ask_input("Путь к .dylib файлу твика:", "")
-                    tweak_path = os.path.expanduser(tweak_path)
-
+                tweak_path = pick_tweak_file()
                 if tweak_path and os.path.isfile(tweak_path):
                     try:
                         install_path = inject_dylib(app_dir, tweak_path)
@@ -441,6 +480,8 @@ def main():
                             sys.exit(1)
                 elif tweak_path:
                     log.warning("Файл твика не найден: %s", tweak_path)
+                else:
+                    log.info("Выбор твика отменён, продолжаем без инъекции.")
             else:
                 log.info("Инъекция пропущена.")
 
