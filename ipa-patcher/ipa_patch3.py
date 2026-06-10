@@ -190,7 +190,7 @@ def find_app_dir(payload_path):
 def main():
     if PYTHONISTA:
         console.clear()
-    print("=== IPA Patcher Lite (без изменений бинарника) ===")
+    print("=== IPA Patcher Lite ===")
 
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
