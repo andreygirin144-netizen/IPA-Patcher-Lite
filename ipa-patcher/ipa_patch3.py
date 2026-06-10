@@ -22,6 +22,67 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
 
+# ------------------------------------------------------------
+# Статус бар (прогресс-бар) в консоли
+# ------------------------------------------------------------
+class ProgressBar:
+    def __init__(self, total, description="Progress", width=50):
+        self.total = total
+        self.description = description
+        self.width = width
+        self.current = 0
+
+    def update(self, n=1):
+        self.current += n
+        percent = 100 * self.current // self.total if self.total else 0
+        filled = int(self.width * percent / 100)
+        bar = '[' + '=' * filled + '>' + '.' * (self.width - filled - 1) + ']'
+        sys.stdout.write(f'\r{self.description}: {bar} {percent}%')
+        sys.stdout.flush()
+        if percent == 100:
+            sys.stdout.write('\n')
+
+    def close(self):
+        pass  # ничего не делаем, финальный перевод строки уже есть
+
+
+def extract_ipa_with_progress(ipa_path, dest_dir):
+    with zipfile.ZipFile(ipa_path, 'r') as zf:
+        files = zf.infolist()
+        total = len(files)
+        pb = ProgressBar(total, 'Распаковка')
+        for member in files:
+            zf.extract(member, dest_dir)
+            pb.update()
+        pb.close()
+
+
+def pack_ipa_with_progress(source_dir, output_path):
+    # Собираем список всех файлов
+    file_list = []
+    for root, _, files in os.walk(source_dir):
+        for f in files:
+            full = os.path.join(root, f)
+            arcname = os.path.relpath(full, source_dir)
+            file_list.append((full, arcname))
+
+    total = len(file_list)
+    pb = ProgressBar(total, 'Упаковка')
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+        for full, arcname in file_list:
+            info = zipfile.ZipInfo(arcname)
+            st = os.stat(full)
+            info.external_attr = (st.st_mode & 0xFFFF) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with open(full, 'rb') as fh:
+                zf.writestr(info, fh.read())
+            pb.update()
+    pb.close()
+
+
+# ------------------------------------------------------------
+# Остальные функции (без изменений, кроме удаления смайлов)
+# ------------------------------------------------------------
 def ask_input(prompt, placeholder=""):
     if PYTHONISTA:
         result = dialogs.input_alert("IPA Patcher", prompt, placeholder, "OK")
@@ -163,21 +224,6 @@ def clean_signature_files(app_path):
                     log.warning("Не удалось удалить %s: %s", full, e)
 
 
-def pack_ipa(source_dir, output_path):
-    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-        for root, _dirs, files in os.walk(source_dir):
-            for filename in files:
-                full = os.path.join(root, filename)
-                arcname = os.path.relpath(full, source_dir)
-                info = zipfile.ZipInfo(arcname)
-                st = os.stat(full)
-                info.external_attr = (st.st_mode & 0xFFFF) << 16
-                info.compress_type = zipfile.ZIP_DEFLATED
-                with open(full, "rb") as fh:
-                    zf.writestr(info, fh.read())
-    log.info("IPA упакован: %s", output_path)
-
-
 def find_app_dir(payload_path):
     if not os.path.isdir(payload_path):
         return None
@@ -204,8 +250,7 @@ def main():
     try:
         print_section("Распаковка")
         log_step("Распаковка IPA...")
-        with zipfile.ZipFile(ipa_path, "r") as zf:
-            zf.extractall(temp_dir)
+        extract_ipa_with_progress(ipa_path, temp_dir)
 
         payload_path = os.path.join(temp_dir, "Payload")
         app_dir = find_app_dir(payload_path)
@@ -266,7 +311,7 @@ def main():
 
         print_section("Сборка IPA")
         log_step("Сборка нового IPA...")
-        pack_ipa(temp_dir, output_path)
+        pack_ipa_with_progress(temp_dir, output_path)
 
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
