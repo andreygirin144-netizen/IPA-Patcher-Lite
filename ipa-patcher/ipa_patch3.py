@@ -1,7 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-IPA Patcher Lite - смена Bundle ID и удаление подписи.
-"""
 
 import os
 import sys
@@ -23,7 +20,7 @@ log = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------
-# Статус бар (прогресс-бар) в консоли
+# Консольный прогресс-бар
 # ------------------------------------------------------------
 class ProgressBar:
     def __init__(self, total, description="Progress", width=50):
@@ -34,7 +31,9 @@ class ProgressBar:
 
     def update(self, n=1):
         self.current += n
-        percent = 100 * self.current // self.total if self.total else 0
+        if self.total == 0:
+            return
+        percent = 100 * self.current // self.total
         filled = int(self.width * percent / 100)
         bar = '[' + '=' * filled + '>' + '.' * (self.width - filled - 1) + ']'
         sys.stdout.write(f'\r{self.description}: {bar} {percent}%')
@@ -43,7 +42,7 @@ class ProgressBar:
             sys.stdout.write('\n')
 
     def close(self):
-        pass  # ничего не делаем, финальный перевод строки уже есть
+        pass
 
 
 def extract_ipa_with_progress(ipa_path, dest_dir):
@@ -58,7 +57,6 @@ def extract_ipa_with_progress(ipa_path, dest_dir):
 
 
 def pack_ipa_with_progress(source_dir, output_path):
-    # Собираем список всех файлов
     file_list = []
     for root, _, files in os.walk(source_dir):
         for f in files:
@@ -81,48 +79,14 @@ def pack_ipa_with_progress(source_dir, output_path):
 
 
 # ------------------------------------------------------------
-# Остальные функции (без изменений, кроме удаления смайлов)
+# Вспомогательные функции
 # ------------------------------------------------------------
-def ask_input(prompt, placeholder=""):
-    if PYTHONISTA:
-        result = dialogs.input_alert("IPA Patcher", prompt, placeholder, "OK")
-        if result is None:
-            log.info("Отменено пользователем.")
-            sys.exit(0)
-        return result.strip()
-    else:
-        hint = f" [{placeholder}]" if placeholder else ""
-        try:
-            return input(f"{prompt}{hint}: ").strip().strip('"')
-        except KeyboardInterrupt:
-            print("\nПрервано пользователем.")
-            sys.exit(0)
-
-
-def ask_yes_no(prompt, default=True):
-    if PYTHONISTA:
-        default_text = "да" if default else "нет"
-        try:
-            answer = dialogs.input_alert("IPA Patcher", prompt + "\n(введи: да или нет)", default_text, "OK")
-        except KeyboardInterrupt:
-            return default
-        if answer is None:
-            return default
-        return answer.strip().lower() in ("да", "д", "y", "yes", "1", "+")
-    else:
-        hint = " [Y/n]" if default else " [y/N]"
-        try:
-            ans = input(prompt + hint + " ").strip().lower()
-        except KeyboardInterrupt:
-            return default
-        return ans in ("y", "yes", "д", "да")
-
-
 def pick_ipa_file():
+    """Выбор файла .ipa (графический диалог на Pythonista, иначе консоль)."""
     if PYTHONISTA:
         path = dialogs.pick_document(types=["com.apple.itunes.ipa", "public.data"])
         if path is None:
-            log.info("Выбор файла отменён.")
+            print("Выбор файла отменён.")
             sys.exit(0)
         return path
     else:
@@ -134,10 +98,32 @@ def pick_ipa_file():
         return os.path.expanduser(path)
 
 
-def log_step(message):
-    if PYTHONISTA:
-        console.hud_alert(message, duration=1.2)
-    log.info(message)
+def ask_input(prompt, default=""):
+    """Запрос ввода в консоли."""
+    try:
+        if default:
+            result = input(f"{prompt} [{default}]: ").strip()
+        else:
+            result = input(f"{prompt}: ").strip()
+        if not result and default:
+            return default
+        return result
+    except KeyboardInterrupt:
+        print("\nПрервано пользователем.")
+        sys.exit(0)
+
+
+def ask_yes_no(prompt, default=True):
+    """Запрос подтверждения да/нет."""
+    hint = " [Y/n]" if default else " [y/N]"
+    try:
+        ans = input(prompt + hint + " ").strip().lower()
+        if not ans:
+            return default
+        return ans in ("y", "yes", "д", "да", "1", "+")
+    except KeyboardInterrupt:
+        print("\nПрервано пользователем.")
+        sys.exit(0)
 
 
 def print_section(title):
@@ -163,6 +149,7 @@ def save_plist(data, path):
 
 
 def patch_bundle_id(plist_path, old_id, new_id):
+    """Обновляет Bundle ID в указанном plist (и в связанных полях)."""
     if not os.path.isfile(plist_path):
         log.warning("Info.plist не найден: %s", plist_path)
         return
@@ -233,6 +220,167 @@ def find_app_dir(payload_path):
     return None
 
 
+def browse_app_files(app_path):
+    """Показать список файлов внутри .app (первые 50)."""
+    print("\n--- Список файлов в .app (первые 50) ---")
+    try:
+        all_files = []
+        for root, _, files in os.walk(app_path):
+            for f in files:
+                rel = os.path.relpath(os.path.join(root, f), app_path)
+                all_files.append(rel)
+        if not all_files:
+            print("Файлов не найдено.")
+            return
+        all_files.sort()
+        for i, f in enumerate(all_files[:50], 1):
+            print(f"{i:3}. {f}")
+        if len(all_files) > 50:
+            print(f"... и ещё {len(all_files) - 50} файлов.")
+    except Exception as e:
+        print(f"Ошибка при просмотре файлов: {e}")
+
+
+# ------------------------------------------------------------
+# Функция для добавления поддержки файлов в Info.plist
+# ------------------------------------------------------------
+def add_file_support(plist_data):
+    """Добавляет ключи для доступа к файлам: общий доступ через iTunes и поддержка документов."""
+    modified = False
+    # UIFileSharingEnabled (Application supports iTunes file sharing)
+    if not plist_data.get("UIFileSharingEnabled"):
+        plist_data["UIFileSharingEnabled"] = True
+        modified = True
+    # LSSupportsOpeningDocumentsInPlace
+    if not plist_data.get("LSSupportsOpeningDocumentsInPlace"):
+        plist_data["LSSupportsOpeningDocumentsInPlace"] = True
+        modified = True
+    # UISupportsDocumentBrowser (опционально, но полезно)
+    if not plist_data.get("UISupportsDocumentBrowser"):
+        plist_data["UISupportsDocumentBrowser"] = True
+        modified = True
+    return modified
+
+
+# ------------------------------------------------------------
+# Консольное меню редактирования с подтверждением изменений
+# ------------------------------------------------------------
+def edit_menu(plist_data, app_dir):
+    """
+    Показывает меню, накапливает изменения.
+    При выборе пункта 6 показывает сводку и запрашивает подтверждение.
+    Возвращает (изменённые_данные, флаг_изменений, старый_bundle_id).
+    """
+    # Сохраняем оригинальные значения для отката и сравнения
+    original = plist_data.copy()
+    changes = {}  # словарь накопленных изменений
+    modified = False
+
+    while True:
+        print("\n" + "=" * 50)
+        print("   РЕДАКТИРОВАНИЕ Info.plist")
+        print("=" * 50)
+        print("1. Изменить имя приложения")
+        print(f"   Текущее: {plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName', 'не задано')}")
+        print("2. Изменить версию (CFBundleShortVersionString)")
+        print(f"   Текущая: {plist_data.get('CFBundleShortVersionString', '1.0')}")
+        print("3. Изменить номер сборки (CFBundleVersion)")
+        print(f"   Текущий: {plist_data.get('CFBundleVersion', '1')}")
+        print("4. Изменить Bundle ID")
+        print(f"   Текущий: {plist_data.get('CFBundleIdentifier', 'не задан')}")
+        print("5. Добавить поддержку файлов (доступ к папке приложения)")
+        print("6. Просмотреть файлы внутри .app")
+        print("7. Применить изменения и собрать IPA")
+        print("0. Выход без сохранения")
+        print("=" * 50)
+
+        choice = ask_input("Ваш выбор", "7")
+        if choice == "1":
+            new_name = ask_input("Новое имя приложения", plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName", ""))
+            if new_name and new_name != (plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName", "")):
+                plist_data["CFBundleDisplayName"] = new_name
+                plist_data["CFBundleName"] = new_name
+                changes["name"] = new_name
+                modified = True
+                print(f"Имя изменено на: {new_name}")
+            else:
+                print("Имя не изменено.")
+        elif choice == "2":
+            new_ver = ask_input("Новая версия (например 2.1.0)", plist_data.get("CFBundleShortVersionString", "1.0"))
+            if new_ver and new_ver != plist_data.get("CFBundleShortVersionString", "1.0"):
+                plist_data["CFBundleShortVersionString"] = new_ver
+                changes["version"] = new_ver
+                modified = True
+                print(f"Версия изменена на: {new_ver}")
+            else:
+                print("Версия не изменена.")
+        elif choice == "3":
+            new_build = ask_input("Номер сборки (целое число или строка)", plist_data.get("CFBundleVersion", "1"))
+            if new_build and new_build != plist_data.get("CFBundleVersion", "1"):
+                plist_data["CFBundleVersion"] = new_build
+                changes["build"] = new_build
+                modified = True
+                print(f"Сборка изменена на: {new_build}")
+            else:
+                print("Сборка не изменена.")
+        elif choice == "4":
+            new_id = ask_input("Новый Bundle ID", plist_data.get("CFBundleIdentifier", ""))
+            if new_id and new_id != plist_data.get("CFBundleIdentifier", ""):
+                plist_data["CFBundleIdentifier"] = new_id
+                changes["bundle_id"] = new_id
+                modified = True
+                print(f"Bundle ID изменён на: {new_id}")
+            else:
+                print("Bundle ID не изменён.")
+        elif choice == "5":
+            # Добавляем поддержку файлов
+            if add_file_support(plist_data):
+                changes["file_support"] = True
+                modified = True
+                print("Поддержка файлов включена: iTunes File Sharing и открытие документов.")
+            else:
+                print("Поддержка файлов уже была включена.")
+        elif choice == "6":
+            browse_app_files(app_dir)
+        elif choice == "7":
+            if modified:
+                # Показываем сводку изменений
+                print("\n--- Сводка изменений ---")
+                if "name" in changes:
+                    old_name = original.get("CFBundleDisplayName") or original.get("CFBundleName", "не задано")
+                    print(f"Имя: '{old_name}' -> '{changes['name']}'")
+                if "version" in changes:
+                    old_ver = original.get("CFBundleShortVersionString", "1.0")
+                    print(f"Версия: '{old_ver}' -> '{changes['version']}'")
+                if "build" in changes:
+                    old_build = original.get("CFBundleVersion", "1")
+                    print(f"Сборка: '{old_build}' -> '{changes['build']}'")
+                if "bundle_id" in changes:
+                    old_id = original.get("CFBundleIdentifier", "не задан")
+                    print(f"Bundle ID: '{old_id}' -> '{changes['bundle_id']}'")
+                if "file_support" in changes:
+                    print("Поддержка файлов: ВКЛЮЧЕНА (iTunes File Sharing, открытие документов)")
+                # Запрашиваем подтверждение
+                if ask_yes_no("\nПрименить эти изменения и продолжить сборку?", default=True):
+                    # Возвращаем изменённые данные
+                    return plist_data, modified, original.get("CFBundleIdentifier", "")
+                else:
+                    print("Изменения не приняты. Вы можете продолжить редактирование.")
+                    # Не сбрасываем изменения, пользователь может их скорректировать
+                    continue
+            else:
+                print("Изменений не было. Продолжаем сборку без изменений.")
+                return plist_data, modified, original.get("CFBundleIdentifier", "")
+        elif choice == "0":
+            print("Выход без сохранения. Сборка отменена.")
+            sys.exit(0)
+        else:
+            print("Неверный ввод, попробуйте снова.")
+
+
+# ------------------------------------------------------------
+# Основная функция
+# ------------------------------------------------------------
 def main():
     if PYTHONISTA:
         console.clear()
@@ -249,7 +397,6 @@ def main():
 
     try:
         print_section("Распаковка")
-        log_step("Распаковка IPA...")
         extract_ipa_with_progress(ipa_path, temp_dir)
 
         payload_path = os.path.join(temp_dir, "Payload")
@@ -259,40 +406,44 @@ def main():
             sys.exit(1)
         log.info("Найдено приложение: %s", os.path.basename(app_dir))
 
-        # Чтение текущего Bundle ID
         info_plist_path = os.path.join(app_dir, "Info.plist")
         if not os.path.isfile(info_plist_path):
             log.error("Info.plist не найден в .app.")
             sys.exit(1)
+
         plist = load_plist(info_plist_path)
-        old_id = plist.get("CFBundleIdentifier", "")
-        if old_id:
-            log.info("Текущий Bundle ID: %s", old_id)
+        old_bundle_id = plist.get("CFBundleIdentifier", "")
+        if old_bundle_id:
+            log.info("Текущий Bundle ID: %s", old_bundle_id)
         else:
             log.warning("CFBundleIdentifier не найден.")
 
-        new_id = ask_input("Новый Bundle ID (например: com.example.myapp):", old_id)
-        if not new_id:
-            log.error("Bundle ID не может быть пустым.")
-            sys.exit(1)
+        # Запуск консольного меню редактирования с подтверждением
+        updated_plist, modified, original_bundle_id = edit_menu(plist, app_dir)
 
-        # Обновление Bundle ID
-        print_section("Обновление Bundle ID")
-        log_step("Обновление Bundle ID...")
-        patch_bundle_id(info_plist_path, old_id, new_id)
-        plugins_path = os.path.join(app_dir, "PlugIns")
-        if os.path.isdir(plugins_path):
-            for ext in os.listdir(plugins_path):
-                if ext.endswith(".appex"):
-                    ext_plist = os.path.join(plugins_path, ext, "Info.plist")
-                    patch_bundle_id(ext_plist, old_id, new_id)
+        # Сохраняем изменения в Info.plist, если они были
+        if modified:
+            save_plist(updated_plist, info_plist_path)
+            log.info("Info.plist обновлён.")
+
+        # Если Bundle ID изменился, обновляем расширения
+        new_bundle_id = updated_plist.get("CFBundleIdentifier", original_bundle_id)
+        if new_bundle_id != original_bundle_id:
+            log.info("Обновление Bundle ID в расширениях...")
+            patch_bundle_id(info_plist_path, original_bundle_id, new_bundle_id)
+            plugins_path = os.path.join(app_dir, "PlugIns")
+            if os.path.isdir(plugins_path):
+                for ext in os.listdir(plugins_path):
+                    if ext.endswith(".appex"):
+                        ext_plist = os.path.join(plugins_path, ext, "Info.plist")
+                        patch_bundle_id(ext_plist, original_bundle_id, new_bundle_id)
 
         # Очистка подписи
         print_section("Очистка подписи")
-        log_step("Удаление файлов подписи...")
+        log.info("Удаление файлов подписи...")
         clean_signature_files(app_dir)
 
-        # Сохранение
+        # Определение пути для сохранения
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
         if PYTHONISTA:
             docs = os.path.expanduser("~/Documents")
@@ -300,7 +451,7 @@ def main():
             log.info("Файл будет сохранён в Documents: %s", os.path.basename(output_path))
         else:
             default_out = os.path.splitext(ipa_path)[0] + "_patched.ipa"
-            output_path = ask_input("Путь для сохранения нового .ipa:", default_out)
+            output_path = ask_input("Путь для сохранения нового .ipa", default_out)
             output_path = os.path.expanduser(output_path)
             if not output_path.endswith(".ipa"):
                 output_path += ".ipa"
@@ -310,7 +461,7 @@ def main():
             sys.exit(1)
 
         print_section("Сборка IPA")
-        log_step("Сборка нового IPA...")
+        log.info("Сборка нового IPA...")
         pack_ipa_with_progress(temp_dir, output_path)
 
     finally:
