@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+
 import os
 import sys
 import zipfile
@@ -247,19 +248,81 @@ def browse_app_files(app_path):
 def add_file_support(plist_data):
     """Добавляет ключи для доступа к файлам: общий доступ через iTunes и поддержка документов."""
     modified = False
-    # UIFileSharingEnabled (Application supports iTunes file sharing)
     if not plist_data.get("UIFileSharingEnabled"):
         plist_data["UIFileSharingEnabled"] = True
         modified = True
-    # LSSupportsOpeningDocumentsInPlace
     if not plist_data.get("LSSupportsOpeningDocumentsInPlace"):
         plist_data["LSSupportsOpeningDocumentsInPlace"] = True
         modified = True
-    # UISupportsDocumentBrowser (опционально, но полезно)
     if not plist_data.get("UISupportsDocumentBrowser"):
         plist_data["UISupportsDocumentBrowser"] = True
         modified = True
     return modified
+
+
+# ------------------------------------------------------------
+# Функция замены иконки приложения (универсальная, без pick_image)
+# ------------------------------------------------------------
+def pick_icon_file():
+    """Выбор файла изображения (PNG/JPG) через диалог документов (Pythonista) или консоль."""
+    if PYTHONISTA:
+        # В Pythonista используем pick_document для выбора файла
+        path = dialogs.pick_document(types=["public.png", "public.jpeg", "public.image"])
+        if path:
+            return path
+        else:
+            print("Выбор файла отменён.")
+            return None
+    else:
+        path = input("Путь к файлу иконки (PNG, не менее 60x60): ").strip().strip('"')
+        if path:
+            return os.path.expanduser(path)
+        return None
+
+
+def replace_icon(app_dir, icon_path):
+    """
+    Заменяет стандартные иконки приложения на указанное изображение.
+    Копирует изображение в .app как несколько распространённых имён иконок.
+    """
+    if not os.path.isfile(icon_path):
+        log.error("Файл иконки не найден: %s", icon_path)
+        return False
+    
+    # Список стандартных имён иконок, которые обычно используются
+    icon_names = [
+        "AppIcon60x60@2x.png",
+        "AppIcon60x60@3x.png",
+        "Icon-60@2x.png",
+        "Icon-60@3x.png",
+        "Icon.png",
+        "Icon@2x.png",
+        "Icon-72@2x.png",
+        "Icon-76@2x.png",
+        "iTunesArtwork",
+        "iTunesArtwork@2x"
+    ]
+    
+    replaced = False
+    for name in icon_names:
+        target = os.path.join(app_dir, name)
+        try:
+            shutil.copy2(icon_path, target)
+            log.info("Иконка заменена: %s", name)
+            replaced = True
+        except Exception as e:
+            log.warning("Не удалось заменить %s: %s", name, e)
+    
+    # Также удаляем Assets.car, если есть, чтобы иконка точно применилась (опционально)
+    assets_car = os.path.join(app_dir, "Assets.car")
+    if os.path.exists(assets_car):
+        try:
+            os.remove(assets_car)
+            log.info("Удалён Assets.car для гарантии применения иконки")
+        except Exception as e:
+            log.warning("Не удалось удалить Assets.car: %s", e)
+    
+    return replaced
 
 
 # ------------------------------------------------------------
@@ -268,13 +331,14 @@ def add_file_support(plist_data):
 def edit_menu(plist_data, app_dir):
     """
     Показывает меню, накапливает изменения.
-    При выборе пункта 6 показывает сводку и запрашивает подтверждение.
-    Возвращает (изменённые_данные, флаг_изменений, старый_bundle_id).
+    При выборе пункта 8 показывает сводку и запрашивает подтверждение.
+    Возвращает (изменённые_данные, флаг_изменений, старый_bundle_id, флаг_замены_иконки).
     """
     # Сохраняем оригинальные значения для отката и сравнения
     original = plist_data.copy()
     changes = {}  # словарь накопленных изменений
     modified = False
+    icon_replaced = False
 
     while True:
         print("\n" + "=" * 50)
@@ -289,12 +353,13 @@ def edit_menu(plist_data, app_dir):
         print("4. Изменить Bundle ID")
         print(f"   Текущий: {plist_data.get('CFBundleIdentifier', 'не задан')}")
         print("5. Добавить поддержку файлов (доступ к папке приложения)")
-        print("6. Просмотреть файлы внутри .app")
-        print("7. Применить изменения и собрать IPA")
+        print("6. Заменить иконку приложения")
+        print("7. Просмотреть файлы внутри .app")
+        print("8. Применить изменения и собрать IPA")
         print("0. Выход без сохранения")
         print("=" * 50)
 
-        choice = ask_input("Ваш выбор", "7")
+        choice = ask_input("Ваш выбор", "8")
         if choice == "1":
             new_name = ask_input("Новое имя приложения", plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName", ""))
             if new_name and new_name != (plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName", "")):
@@ -333,7 +398,6 @@ def edit_menu(plist_data, app_dir):
             else:
                 print("Bundle ID не изменён.")
         elif choice == "5":
-            # Добавляем поддержку файлов
             if add_file_support(plist_data):
                 changes["file_support"] = True
                 modified = True
@@ -341,10 +405,21 @@ def edit_menu(plist_data, app_dir):
             else:
                 print("Поддержка файлов уже была включена.")
         elif choice == "6":
-            browse_app_files(app_dir)
+            print("\nВыберите изображение для новой иконки приложения...")
+            img_path = pick_icon_file()
+            if img_path:
+                if replace_icon(app_dir, img_path):
+                    changes["icon"] = True
+                    icon_replaced = True
+                    print("Иконка приложения заменена.")
+                else:
+                    print("Не удалось заменить иконку.")
+            else:
+                print("Выбор изображения отменён.")
         elif choice == "7":
-            if modified:
-                # Показываем сводку изменений
+            browse_app_files(app_dir)
+        elif choice == "8":
+            if modified or icon_replaced:
                 print("\n--- Сводка изменений ---")
                 if "name" in changes:
                     old_name = original.get("CFBundleDisplayName") or original.get("CFBundleName", "не задано")
@@ -360,17 +435,16 @@ def edit_menu(plist_data, app_dir):
                     print(f"Bundle ID: '{old_id}' -> '{changes['bundle_id']}'")
                 if "file_support" in changes:
                     print("Поддержка файлов: ВКЛЮЧЕНА (iTunes File Sharing, открытие документов)")
-                # Запрашиваем подтверждение
+                if "icon" in changes:
+                    print("Иконка приложения: ЗАМЕНЕНА")
                 if ask_yes_no("\nПрименить эти изменения и продолжить сборку?", default=True):
-                    # Возвращаем изменённые данные
-                    return plist_data, modified, original.get("CFBundleIdentifier", "")
+                    return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced
                 else:
                     print("Изменения не приняты. Вы можете продолжить редактирование.")
-                    # Не сбрасываем изменения, пользователь может их скорректировать
                     continue
             else:
                 print("Изменений не было. Продолжаем сборку без изменений.")
-                return plist_data, modified, original.get("CFBundleIdentifier", "")
+                return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced
         elif choice == "0":
             print("Выход без сохранения. Сборка отменена.")
             sys.exit(0)
@@ -419,7 +493,7 @@ def main():
             log.warning("CFBundleIdentifier не найден.")
 
         # Запуск консольного меню редактирования с подтверждением
-        updated_plist, modified, original_bundle_id = edit_menu(plist, app_dir)
+        updated_plist, modified, original_bundle_id, icon_replaced = edit_menu(plist, app_dir)
 
         # Сохраняем изменения в Info.plist, если они были
         if modified:
