@@ -195,10 +195,19 @@ A: Pythonista 3.4.
 **Q: Можно ли откатить изменения?**  
 A: Скрипт не изменяет исходный `.ipa` — результат всегда сохраняется в новый файл с суффиксом `_patched`.
 
+---
+
+## Требования
+
+- Python 3.6+
+- Стандартная библиотека Python (`zipfile`, `plistlib`, `struct`, `shutil`, `tempfile`)
+- Для iOS: [Pythonista 3](https://apps.apple.com/app/pythonista-3/id1085978097) (App Store, платное)
+- Для инъекции твиков: расшифрованный IPA + `libsubstrate.dylib` (опционально)
+
+---
 
 <div align="center">
 
-
-Сделано для iOS · работает на Pythonista 3
+Сделано для iOS · работает на Pythonista 3 · MIT License
 
 </div>
