@@ -1,6 +1,6 @@
 <div align="center">
 
-# IPA Patcher Lite
+#⚙️ IPA Patcher Lite
 
 Патч iOS `.ipa` файлов на чистом Python — без компилятора, без зависимостей, прямо на iPhone.
 
