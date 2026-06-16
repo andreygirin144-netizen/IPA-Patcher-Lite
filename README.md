@@ -197,7 +197,7 @@ A: Скрипт не изменяет исходный `.ipa` — результ
 
 **Q: Что делать, если IPA зашифрован?**  
 A: Инъекция твиков на зашифрованный бинарник невозможна. Расшифруй IPA с помощью jailbroken-устройства или соответствующего инструмента (например, [Bagbak](https://github.com/ChiChou/bagbak)), а затем используй его как входной файл.
-
+Для устройств Jaild, можно перейти на сайт [Decrypt IPA Store](https://decrypt.day) или [ARM to HEX Cnverter](https://armconverter.com)
 -----
 
 <div align="center">
