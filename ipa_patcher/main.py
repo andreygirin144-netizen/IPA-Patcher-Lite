@@ -360,7 +360,7 @@ def clean_non_standard_dirs(app_dir):
 def main():
     if PYTHONISTA:
         console.clear()
-    color_print("=== IPA Patcher Lite v1.0.8 ===", 'cyan')
+    color_print("=== IPA Patcher Lite v1.0.3 ===", 'cyan')
 
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
