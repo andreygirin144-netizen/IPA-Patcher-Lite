@@ -81,6 +81,7 @@ ipa-patcher/
 ├── main.py            # Точка входа: UI и основная логика
 ├── plist_editor.py    # Чтение, запись и патч Info.plist
 ├── ipa_utils.py       # Распаковка, упаковка, файловые диалоги
+├── libsubstrate.dylib # Субтрапт для твиков CYDIA
 ├── macho.py           # Парсинг Mach-O: LC_LOAD_DYLIB, LC_RPATH, шифрование
 ├── signature.py       # Удаление файлов и папок подписи
 ├── substrate.py       # Копирование libsubstrate.dylib в Frameworks/
@@ -190,9 +191,6 @@ A: Нет. Установка через AltStore или SideStore работа�
 
 **Q: Какая версия Pythonista нужна?**  
 A: Pythonista 3.4.
-
-**Q: Тратится ли лимит слотов AltStore?**  
-A: Нет. Смена Bundle ID позволяет системе считать приложение новым — отдельный слот не тратится.
 
 **Q: Можно ли откатить изменения?**  
 A: Скрипт не изменяет исходный `.ipa` — результат всегда сохраняется в новый файл с суффиксом `_patched`.
