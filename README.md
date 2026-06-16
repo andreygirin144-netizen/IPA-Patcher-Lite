@@ -77,7 +77,7 @@
 ## Структура проекта
 
 ```
-ipa-patcher/
+ipa_patcher/
 ├── main.py            # Точка входа: UI и основная логика
 ├── plist_editor.py    # Чтение, запись и патч Info.plist
 ├── ipa_utils.py       # Распаковка, упаковка, файловые диалоги
