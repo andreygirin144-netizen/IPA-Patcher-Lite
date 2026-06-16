@@ -23,10 +23,7 @@ except ImportError:
         print(text)
 
 def clean_signature_files(app_path):
-    """
-    Удаляет папки и файлы подписи (_CodeSignature, SC_Info, embedded.mobileprovision, CodeResources).
-    Все сообщения об удалении выводятся красным цветом.
-    """
+    
     for root, dirs, files in os.walk(app_path, topdown=True):
         # Удаляем папки подписи
         to_delete = [d for d in dirs if d in SIGNATURE_DIRS]
