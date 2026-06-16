@@ -1,20 +1,10 @@
 # -*- coding: utf-8 -*-
-"""
-IPA Patcher Pro v5 – модульная версия.
-Инструмент для инжекта твиков в iOS IPA без джейлбрейка.
-Работает в Pythonista 3 и обычном Python.
-"""
-
-import os
-import sys
-import shutil
-import logging
-
-# Импорты модулей
+import os, sys, shutil, logging, tempfile
 from constants import UNWANTED_DIRS
 from ipa_utils import (
     pick_ipa_file, make_temp_dir, print_section, ask_input, ask_yes_no,
-    extract_ipa_with_progress, pack_ipa_with_progress, find_app_dir
+    extract_ipa_with_progress, pack_ipa_with_progress, find_app_dir,
+    pick_icon_file, pick_substrate_file, pick_tweak_file
 )
 from plist_editor import load_plist, save_plist, patch_bundle_id, add_file_support
 from signature import clean_signature_files
@@ -22,8 +12,7 @@ from macho import is_ipa_encrypted
 from tweak_injector import inject_tweaks
 
 try:
-    import dialogs
-    import console
+    import dialogs, console
     PYTHONISTA = True
 except ImportError:
     PYTHONISTA = False
@@ -31,12 +20,12 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
+USE_RPATH = False
+USE_SUBSTRATE = True
+SUBSTRATE_SOURCE = None
 
 def replace_icon(app_dir, icon_path):
-    """Заменяет стандартные имена иконок на указанный файл."""
-    if not os.path.isfile(icon_path):
-        log.error("Файл иконки не найден")
-        return False
+    if not os.path.isfile(icon_path): return False
     icon_names = [
         "AppIcon60x60@2x.png", "AppIcon60x60@3x.png", "Icon-60@2x.png",
         "Icon-60@3x.png", "Icon.png", "Icon@2x.png", "Icon-72@2x.png",
@@ -49,53 +38,17 @@ def replace_icon(app_dir, icon_path):
             shutil.copy2(icon_path, target)
             log.info("Иконка заменена: %s", name)
             replaced = True
-        except Exception:
-            pass
+        except: pass
     assets_car = os.path.join(app_dir, "Assets.car")
     if os.path.exists(assets_car):
         try:
             os.remove(assets_car)
-            log.info("Удалён Assets.car для гарантии применения иконки")
-        except Exception:
-            pass
+            log.info("Удалён Assets.car")
+        except: pass
     return replaced
 
-
-def pick_icon_file():
-    """Диалог выбора файла иконки."""
-    if PYTHONISTA:
-        path = dialogs.pick_document(types=["public.png", "public.jpeg", "public.image"])
-        if path:
-            return path
-        else:
-            print("Выбор файла отменён.")
-            return None
-    else:
-        path = input("Путь к файлу иконки (PNG): ").strip().strip('"')
-        if path:
-            return os.path.expanduser(path)
-        return None
-
-
-def pick_tweak_file():
-    """Диалог выбора файла твика (dylib, framework, zip, папка)."""
-    if PYTHONISTA:
-        path = dialogs.pick_document(types=["public.data", "com.apple.dylib", "public.zip", "public.folder"])
-        if path:
-            return path
-        else:
-            print("Выбор файла отменён.")
-            return None
-    else:
-        path = input("Путь к твику (.dylib, .framework, .zip или папка): ").strip().strip('"')
-        if path:
-            return os.path.expanduser(path)
-        return None
-
-
 def browse_app_files(app_path):
-    """Выводит список файлов внутри .app (первые 50)."""
-    print("\n--- Список файлов в .app (первые 50) ---")
+    print("\n--- Список файлов в .app (первые 50) ---")
     try:
         all_files = []
         for root, _, files in os.walk(app_path):
@@ -103,22 +56,18 @@ def browse_app_files(app_path):
                 rel = os.path.relpath(os.path.join(root, f), app_path)
                 all_files.append(rel)
         if not all_files:
-            print("Файлов не найдено.")
+            print("Файлов не найдено.")
             return
         all_files.sort()
         for i, f in enumerate(all_files[:50], 1):
             print(f"{i:3}. {f}")
         if len(all_files) > 50:
-            print(f"... и ещё {len(all_files) - 50} файлов.")
+            print(f"... и ещё {len(all_files) - 50} файлов.")
     except Exception as e:
-        print(f"Ошибка при просмотре файлов: {e}")
-
+        print(f"Ошибка при просмотре файлов: {e}")
 
 def edit_menu(plist_data, app_dir, script_dir):
-    """
-    Интерактивное меню редактирования.
-    Возвращает: (plist, modified, old_bundle_id, icon_replaced, tweak_injected, file_support_enabled)
-    """
+    global USE_RPATH, USE_SUBSTRATE, SUBSTRATE_SOURCE
     original = plist_data.copy()
     changes = {}
     modified = False
@@ -134,14 +83,16 @@ def edit_menu(plist_data, app_dir, script_dir):
         print("2. Изменить версию")
         print(f"   Текущая: {plist_data.get('CFBundleShortVersionString', '1.0')}")
         print("3. Изменить номер сборки")
-        print(f"   Текущий: {plist_data.get('CFBundleVersion', '1')}")
+        print(f"   Текущий: {plist_data.get('CFBundleVersion', '1')}")
         print("4. Изменить Bundle ID")
-        print(f"   Текущий: {plist_data.get('CFBundleIdentifier', 'не задан')}")
-        print("5. Добавить поддержку файлов")
+        print(f"   Текущий: {plist_data.get('CFBundleIdentifier', 'не задан')}")
+        print("5. Добавить поддержку файлов")
         print("6. Заменить иконку")
-        print("7. Инъекция твиков (.dylib/.framework/.zip) — с субстратом и .bundle")
-        print("8. Просмотреть файлы .app")
+        print("7. Инъекция твиков (.dylib или .zip)")
+        print("8. Просмотреть файлы .app")
         print("9. Применить изменения и собрать IPA")
+        print("10. Тип пути: " + ("@rpath" if USE_RPATH else "@executable_path"))
+        print("11. Встроить libsubstrate.dylib: " + ("ДА" if USE_SUBSTRATE else "НЕТ (выбрать свой)"))
         print("0. Выход без сохранения")
         print("=" * 50)
 
@@ -166,7 +117,7 @@ def edit_menu(plist_data, app_dir, script_dir):
                 changes["build"] = new_build
                 modified = True
         elif choice == "4":
-            new_id = ask_input("Новый Bundle ID", plist_data.get("CFBundleIdentifier", ""))
+            new_id = ask_input("Новый Bundle ID", plist_data.get("CFBundleIdentifier", ""))
             if new_id:
                 plist_data["CFBundleIdentifier"] = new_id
                 changes["bundle_id"] = new_id
@@ -175,7 +126,7 @@ def edit_menu(plist_data, app_dir, script_dir):
             if add_file_support(plist_data):
                 changes["file_support"] = True
                 modified = True
-                print("Поддержка файлов включена.")
+                print("Поддержка файлов включена.")
             else:
                 print("Уже включена.")
         elif choice == "6":
@@ -191,35 +142,50 @@ def edit_menu(plist_data, app_dir, script_dir):
             print("\nПроверка дешифровки IPA...")
             encrypted = is_ipa_encrypted(app_dir, plist_data)
             if encrypted is None:
-                print("Не удалось проверить, продолжаем на свой страх и риск.")
-                if ask_yes_no("Продолжить инъекцию?", default=False):
-                    tweak_path = pick_tweak_file()
-                    if tweak_path:
-                        ok, msg = inject_tweaks(app_dir, tweak_path, plist_data, script_dir)
-                        if ok:
-                            tweak_injected = True
-                            changes["tweak"] = True
-                            print(msg)
-                        else:
-                            print(f"Ошибка: {msg}")
+                print("Не удалось проверить, продолжаем на свой страх и риск.")
+                if not ask_yes_no("Продолжить инъекцию?", default=False):
+                    continue
             elif encrypted:
                 print("ОШИБКА: IPA зашифрован. Инъекция невозможна.")
+                continue
             else:
                 print("IPA расшифрован. Инъекция разрешена.")
-                tweak_path = pick_tweak_file()
-                if tweak_path:
-                    ok, msg = inject_tweaks(app_dir, tweak_path, plist_data, script_dir)
-                    if ok:
-                        tweak_injected = True
-                        changes["tweak"] = True
-                        print(msg)
-                    else:
-                        print(f"Ошибка: {msg}")
+
+            print("\nВыберите .dylib или .zip с твиками.")
+            tweak_path = pick_tweak_file()
+            if not tweak_path:
+                print("Файл не выбран.")
+                continue
+
+            if not USE_SUBSTRATE:
+                print("Выберите файл libsubstrate.dylib:")
+                sub_path = pick_substrate_file()
+                if sub_path:
+                    SUBSTRATE_SOURCE = sub_path
+                else:
+                    print("Субстрат не выбран. Инъекция отменена.")
+                    continue
+            else:
+                SUBSTRATE_SOURCE = None
+
+            if not ask_yes_no("Инъектировать выбранный твик?", default=True):
+                continue
+
+            ok, msg = inject_tweaks(app_dir, tweak_path, plist_data, script_dir,
+                                    use_rpath=USE_RPATH,
+                                    substrate_source=SUBSTRATE_SOURCE)
+            if ok:
+                tweak_injected = True
+                changes["tweak"] = True
+                print(msg)
+            else:
+                print(f"Ошибка: {msg}")
+
         elif choice == "8":
             browse_app_files(app_dir)
         elif choice == "9":
             if modified or icon_replaced or tweak_injected:
-                print("\n--- Сводка изменений ---")
+                print("\n--- Сводка изменений ---")
                 if "name" in changes:
                     print(f"Имя: {original.get('CFBundleName')} -> {changes['name']}")
                 if "version" in changes:
@@ -229,43 +195,49 @@ def edit_menu(plist_data, app_dir, script_dir):
                 if "bundle_id" in changes:
                     print(f"Bundle ID: {original.get('CFBundleIdentifier')} -> {changes['bundle_id']}")
                 if "file_support" in changes:
-                    print("Поддержка файлов: ВКЛЮЧЕНА")
+                    print("Поддержка файлов: ВКЛЮЧЕНА")
                 if "icon" in changes:
                     print("Иконка приложения: ЗАМЕНЕНА")
                 if "tweak" in changes:
-                    print("Твики: ИНЪЕКТИРОВАНЫ (субстрат + патч путей + .bundle)")
+                    print("Твики: ИНЪЕКТИРОВАНЫ (субстрат + патч путей + .bundle)")
                 if ask_yes_no("\nПрименить изменения и собрать IPA?", default=True):
-                    # Возвращаем также флаг file_support_enabled
                     return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, ("file_support" in changes)
                 else:
                     continue
             else:
-                print("Изменений нет. Сборка без изменений.")
+                print("Изменений нет. Сборка без изменений.")
                 return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, False
+        elif choice == "10":
+            USE_RPATH = not USE_RPATH
+            print(f"Тип пути изменён на: {'@rpath' if USE_RPATH else '@executable_path'}")
+        elif choice == "11":
+            USE_SUBSTRATE = not USE_SUBSTRATE
+            if not USE_SUBSTRATE:
+                print("Теперь нужно будет указать свой libsubstrate.dylib перед инъекцией.")
+            else:
+                SUBSTRATE_SOURCE = None
+            print(f"Встроить субстрат: {'ДА' if USE_SUBSTRATE else 'НЕТ'}")
         elif choice == "0":
             print("Выход без сохранения.")
             sys.exit(0)
         else:
-            print("Неверный ввод.")
-
+            print("Неверный ввод.")
 
 def clean_non_standard_dirs(app_dir):
-    """Удаляет папки, которые не должны быть в .app (Library, Applications и т.д.)."""
     for unwanted in UNWANTED_DIRS:
         path = os.path.join(app_dir, unwanted)
         if os.path.exists(path):
             shutil.rmtree(path, ignore_errors=True)
             log.info("Удалена ненужная папка: %s", path)
 
-
 def main():
     if PYTHONISTA:
         console.clear()
-    print("=== IPA Patcher Pro v5 (модульная версия) ===")
+    print("=== IPA Patcher Lite v1.0.2 ===")
 
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
-        log.error("Файл не найден")
+        log.error("Файл не найден")
         sys.exit(1)
 
     temp_dir = make_temp_dir()
@@ -278,19 +250,19 @@ def main():
         payload_path = os.path.join(temp_dir, "Payload")
         app_dir = find_app_dir(payload_path)
         if not app_dir:
-            log.error("Не найдена .app директория")
+            log.error("Не найдена .app директория")
             sys.exit(1)
-        log.info("Найдено приложение: %s", os.path.basename(app_dir))
+        log.info("Найдено приложение: %s", os.path.basename(app_dir))
 
         info_plist_path = os.path.join(app_dir, "Info.plist")
         if not os.path.isfile(info_plist_path):
-            log.error("Info.plist не найден")
+            log.error("Info.plist не найден")
             sys.exit(1)
 
         plist = load_plist(info_plist_path)
         old_bundle_id = plist.get("CFBundleIdentifier", "")
         if old_bundle_id:
-            log.info("Текущий Bundle ID: %s", old_bundle_id)
+            log.info("Текущий Bundle ID: %s", old_bundle_id)
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
         updated_plist, modified, original_bundle_id, icon_replaced, tweak_injected, file_support_enabled = edit_menu(
@@ -299,7 +271,7 @@ def main():
 
         if modified:
             save_plist(updated_plist, info_plist_path)
-            log.info("Info.plist обновлён")
+            log.info("Info.plist обновлён")
 
         new_bundle_id = updated_plist.get("CFBundleIdentifier", original_bundle_id)
         if new_bundle_id != original_bundle_id:
@@ -318,11 +290,10 @@ def main():
         print_section("Удаление лишних папок (Library, Applications...)")
         clean_non_standard_dirs(app_dir)
 
-        # Создаём папку Documents, если включён файловый шеринг
         if file_support_enabled:
             docs_dir = os.path.join(app_dir, "Documents")
             os.makedirs(docs_dir, exist_ok=True)
-            log.info("Создана папка Documents для файлового шеринга")
+            log.info("Создана папка Documents для файлового шеринга")
 
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
         if PYTHONISTA:
@@ -348,12 +319,9 @@ def main():
 
     print("\n--- Готово ---")
     if PYTHONISTA:
-        print(f"Файл сохранён в Documents:\n  {output_path}")
-        print("Открой Files -> На моём iPhone -> Pythonista 3 -> Documents")
-        print("Нажми на файл -> Поделиться -> выбери AltStore или SideStore.")
+        print(f"Файл сохранён в Documents:\n  {output_path}")
     else:
-        print(f"Новый IPA сохранён: {output_path}")
-
+        print(f"Новый IPA сохранён: {output_path}")
 
 if __name__ == "__main__":
     main()
