@@ -7,18 +7,7 @@ log = logging.getLogger(__name__)
 
 def inject_tweaks(app_dir, tweak_path, plist_data, script_dir,
                   use_rpath=False, substrate_source=None, inject_substrate=True):
-    """
-    Внедряет твики в .app.
-    Параметры:
-        app_dir: путь к .app
-        tweak_path: путь к .dylib или .zip с твиками
-        plist_data: словарь Info.plist (может понадобиться для изменений)
-        script_dir: папка со скриптом (для поиска libsubstrate.dylib по умолчанию)
-        use_rpath: использовать @rpath вместо @executable_path
-        substrate_source: путь к пользовательскому libsubstrate.dylib (если None, берётся из script_dir)
-        inject_substrate: если False, субстрат не встраивается
-    Возвращает: (успех, сообщение)
-    """
+    
     if not os.path.exists(app_dir):
         return False, "Папка .app не найдена"
     if not os.path.exists(tweak_path):
