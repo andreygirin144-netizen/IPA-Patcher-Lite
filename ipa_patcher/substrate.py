@@ -1,28 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Работа с libsubstrate.dylib: поиск, копирование в папку Frameworks."""
-
-import os
-import shutil
-import logging
-
+import os, shutil, logging, sys
 log = logging.getLogger(__name__)
 
-
-def inject_substrate(app_dir, script_dir):
-    """
-    Копирует libsubstrate.dylib из папки скрипта в Frameworks/ приложения.
-    Возвращает путь к скопированному файлу.
-    """
+def inject_substrate(app_dir, script_dir, substrate_source=None):
     frameworks_dir = os.path.join(app_dir, "Frameworks")
     os.makedirs(frameworks_dir, exist_ok=True)
     substrate_path = os.path.join(frameworks_dir, "libsubstrate.dylib")
-
-    # Ищем файл рядом с main.py
-    src = os.path.join(script_dir, "libsubstrate.dylib")
-    if not os.path.isfile(src):
-        log.error("Не найден libsubstrate.dylib. Положите его в папку со скриптом.")
-        sys.exit(1)
-
+    if substrate_source is None:
+        src = os.path.join(script_dir, "libsubstrate.dylib")
+        if not os.path.isfile(src):
+            log.error("Не найден libsubstrate.dylib. Положите его в папку со скриптом или укажите путь.")
+            sys.exit(1)
+    else:
+        src = substrate_source
+        if not os.path.isfile(src):
+            log.error("Указанный файл субстрата не найден: %s", src)
+            sys.exit(1)
     shutil.copy2(src, substrate_path)
     os.chmod(substrate_path, 0o755)
     log.info("Субстрат скопирован: %s", substrate_path)
