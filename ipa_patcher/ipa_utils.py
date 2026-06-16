@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, sys, zipfile, tempfile, shutil
+import os, sys, zipfile, tempfile, shutil, time
 try:
     import dialogs
     PYTHONISTA = True
@@ -23,16 +23,18 @@ class ProgressBar:
         if percent == 100: sys.stdout.write('\n')
     def close(self): pass
 
-def extract_ipa_with_progress(ipa_path, dest_dir):
+def extract_ipa_with_progress(ipa_path, dest_dir, delay=0):
     with zipfile.ZipFile(ipa_path, 'r') as zf:
         files = zf.infolist()
         pb = ProgressBar(len(files), 'Распаковка')
         for member in files:
             zf.extract(member, dest_dir)
             pb.update()
+            if delay:
+                time.sleep(delay)
         pb.close()
 
-def pack_ipa_with_progress(source_dir, output_path):
+def pack_ipa_with_progress(source_dir, output_path, delay=0):
     file_list = []
     for root, _, files in os.walk(source_dir):
         for f in files:
@@ -49,6 +51,8 @@ def pack_ipa_with_progress(source_dir, output_path):
             with open(full, 'rb') as fh:
                 zf.writestr(info, fh.read())
             pb.update()
+            if delay:
+                time.sleep(delay)
     pb.close()
 
 def make_temp_dir():
