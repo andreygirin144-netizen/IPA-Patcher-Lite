@@ -44,7 +44,7 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
 USE_RPATH = False
-SUBSTRATE_MODE = 'auto'  # 'auto', 'manual', 'none'
+SUBSTRATE_MODE = 'auto'
 SUBSTRATE_SOURCE = None
 
 def get_adaptive_delay(ipa_path):
@@ -131,7 +131,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print(f"   Текущий: {plist_data.get('CFBundleIdentifier', 'не задан')}")
         print("5. Добавить поддержку файлов")
         print("6. Заменить иконку")
-        print("7. Инъекция твиков (.dylib или .zip)")
+        print("7. Инъекция твиков (.dylib, .zip, .deb, .tar, .lzma, .xz)")
         print("8. Просмотреть файлы .app (открыть в редакторе)")
         print("9. Применить изменения и собрать IPA")
         print("10. Тип пути: " + ("@rpath" if USE_RPATH else "@executable_path"))
@@ -199,7 +199,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 color_print("IPA расшифрован. Инъекция разрешена.", 'green')
 
-            color_print("\nВыберите .dylib или .zip с твиками.", 'blue')
+            color_print("\nВыберите .dylib, .zip, .deb, .tar, .lzma или .xz с твиками.", 'blue')
             tweak_path = pick_tweak_file()
             if not tweak_path:
                 color_print("Файл не выбран.", 'red')
@@ -218,7 +218,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 else:
                     color_print("Субстрат не выбран. Инъекция отменена.", 'red')
                     continue
-            else:  # none
+            else:
                 substrate_source = None
                 color_print("Субстрат НЕ будет встроен.", 'yellow')
 
@@ -238,7 +238,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Ошибка: " + msg, 'red')
 
         elif choice == "8":
-            # Создаём временный файл со списком файлов .app
             list_path = os.path.join(temp_dir, "file_list.txt")
             try:
                 with open(list_path, 'w', encoding='utf-8') as f:
@@ -343,7 +342,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print(f"Ошибка парсинга JSON: {e}", 'red')
             except Exception as e:
                 color_print(f"Ошибка: {e}", 'red')
-            # Файл останется до удаления temp_dir
         elif choice == "0":
             color_print("Выход без сохранения.", 'yellow')
             sys.exit(0)
