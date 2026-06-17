@@ -30,7 +30,7 @@ def extract_ipa_with_progress(ipa_path, dest_dir, delay=0):
         for member in files:
             zf.extract(member, dest_dir)
             pb.update()
-            if delay:
+            if delay > 0:
                 time.sleep(delay)
         pb.close()
 
@@ -51,7 +51,7 @@ def pack_ipa_with_progress(source_dir, output_path, delay=0):
             with open(full, 'rb') as fh:
                 zf.writestr(info, fh.read())
             pb.update()
-            if delay:
+            if delay > 0:
                 time.sleep(delay)
     pb.close()
 
@@ -94,12 +94,12 @@ def pick_tweak_file():
             print("Выбор файла отменён.")
             return None
         ext = os.path.splitext(path)[1].lower()
-        if ext not in ('.dylib', '.zip'):
-            print("Ошибка: нужен .dylib или .zip.")
+        if ext not in ('.dylib', '.zip', '.deb', '.tar', '.lzma', '.xz', '.gz', '.tgz'):
+            print("Ошибка: поддерживаются .dylib, .zip, .deb, .tar, .lzma, .xz, .gz, .tgz")
             return pick_tweak_file()
         return path
     else:
-        path = input("Путь к твику (.dylib или .zip): ").strip().strip('"')
+        path = input("Путь к твику/архиву: ").strip().strip('"')
         if path: return os.path.expanduser(path)
         return None
 
