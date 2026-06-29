@@ -407,7 +407,7 @@ def clean_non_standard_dirs(app_dir):
 def main():
     if PYTHONISTA:
         console.clear()
-    color_print("=== IPA Patcher Lite v1.0.3 ===", 'cyan')
+    color_print("=== IPA Patcher Lite v1.0.4 ===", 'cyan')
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
         color_print("Файл не найден", 'red')
@@ -463,12 +463,35 @@ def main():
             color_print("Создана папка Documents для файлового шеринга", 'green')
         
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
+        app_name = updated_plist.get("CFBundleDisplayName") or updated_plist.get("CFBundleName") or app_basename
+        app_version = updated_plist.get("CFBundleShortVersionString", "1.0")
+        bundle_id = updated_plist.get("CFBundleIdentifier", original_bundle_id)
+        
+        filename_parts = []
+        if bundle_id and bundle_id != old_bundle_id:
+            filename_parts.append(bundle_id)
+        else:
+            filename_parts.append(app_name.replace(' ', '_'))
+        
+        filename_parts.append(f"v{app_version}")
+        
+        if tweak_injected:
+            filename_parts.append("tweaked")
+        
+        if icon_replaced:
+            filename_parts.append("icon")
+        
+        if modified:
+            filename_parts.append("patched")
+        
+        output_filename = "_".join(filename_parts) + ".ipa"
+        
         if PYTHONISTA:
             docs = os.path.expanduser("~/Documents")
-            output_path = os.path.join(docs, app_basename + "_patched.ipa")
-            log.info("Сохранение в Documents: %s", os.path.basename(output_path))
+            output_path = os.path.join(docs, output_filename)
+            log.info("Сохранение в Documents: %s", output_filename)
         else:
-            default_out = os.path.splitext(ipa_path)[0] + "_patched.ipa"
+            default_out = os.path.join(os.path.dirname(ipa_path), output_filename)
             output_path = ask_input("Путь для сохранения .ipa", default_out)
             output_path = os.path.expanduser(output_path)
             if not output_path.endswith(".ipa"):
@@ -483,9 +506,6 @@ def main():
         color_print("[SUCCESS] Готово!", 'green')
         
         if ask_yes_no("\nУстановить IPA через SideStore/AltStore?", default=False):
-            bundle_id = updated_plist.get("CFBundleIdentifier", original_bundle_id)
-            color_print("[INFO] Запуск установки через SideStore/AltStore...", 'blue')
-            color_print("[INFO] Сертификаты не требуются — SideStore подпишет сам", 'cyan')
             ok, msg = sign_app_bundle_with_path(output_path, bundle_id)
             if ok:
                 color_print(msg, 'green')
