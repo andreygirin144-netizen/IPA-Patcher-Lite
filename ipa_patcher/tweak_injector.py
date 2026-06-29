@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os, shutil, tempfile, zipfile, logging, ctypes
 from patch_strings import patch_strings_in_binary
-from macho import inject_lc_load_dylib, inject_rpath, is_macho_binary
+from macho import inject_lc_load_dylib, inject_rpath, is_macho_binary, has_rpath
 from substrate import inject_substrate
 from ipa_utils import ask_yes_no
 
@@ -11,7 +11,7 @@ def extract_archive_with_libarchive(archive_path, output_dir):
     try:
         libarchive = ctypes.CDLL('/usr/lib/libarchive.2.dylib')
     except OSError:
-        raise RuntimeError("Не удалось загрузить системную libarchive.2.dylib")
+        raise RuntimeError("Failed to load system libarchive.2.dylib")
 
     libarchive.archive_read_new.restype = ctypes.c_void_p
     libarchive.archive_read_support_filter_all.argtypes = [ctypes.c_void_p]
@@ -31,7 +31,7 @@ def extract_archive_with_libarchive(archive_path, output_dir):
 
     if libarchive.archive_read_open_filename(archive, archive_path.encode('utf-8'), 10240) != 0:
         libarchive.archive_read_free(archive)
-        raise RuntimeError(f"Не удалось открыть архив: {archive_path}")
+        raise RuntimeError(f"Failed to open archive: {archive_path}")
 
     entry = ctypes.c_void_p()
     os.makedirs(output_dir, exist_ok=True)
@@ -47,7 +47,7 @@ def extract_archive_with_libarchive(archive_path, output_dir):
         libarchive.archive_read_free(archive)
         os.chdir(old_cwd)
 
-    log.info("Распаковано: %s", os.path.basename(archive_path))
+    log.info("Extracted: %s", os.path.basename(archive_path))
 
 def extract_deb_recursive(deb_path, output_dir):
     extract_archive_with_libarchive(deb_path, output_dir)
@@ -55,14 +55,14 @@ def extract_deb_recursive(deb_path, output_dir):
         for f in files:
             if f.startswith('data.tar.') and f.endswith(('.lzma', '.xz', '.gz')):
                 data_archive = os.path.join(root, f)
-                log.info("Найден вложенный архив: %s", data_archive)
+                log.info("Found nested archive: %s", data_archive)
                 extract_archive_with_libarchive(data_archive, output_dir)
                 try:
                     if os.path.isfile(data_archive):
                         os.remove(data_archive)
-                        log.info("Вложенный архив удалён: %s", data_archive)
+                        log.info("Removed nested archive: %s", data_archive)
                 except Exception as e:
-                    log.warning("Не удалось удалить вложенный архив: %s", e)
+                    log.warning("Failed to remove nested archive: %s", e)
                 break
 
 def get_main_executable(app_dir, plist_data):
@@ -88,15 +88,29 @@ def patch_all_macho_in_dir(directory, replacements):
             if is_macho_binary(file_path):
                 patch_strings_in_binary(file_path, replacements)
 
+def ensure_frameworks_rpath(main_executable):
+    rpath_path = "@executable_path/Frameworks"
+    if not has_rpath(main_executable, rpath_path):
+        log.info("LC_RPATH %s not found, adding...", rpath_path)
+        if inject_rpath(main_executable, rpath_path):
+            log.info("LC_RPATH %s added successfully", rpath_path)
+            return True
+        else:
+            log.warning("Failed to add LC_RPATH %s", rpath_path)
+            return False
+    else:
+        log.info("LC_RPATH %s already exists", rpath_path)
+        return True
+
 def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, substrate_source=None, enable_substrate=True):
     if not os.path.exists(tweak_path):
-        return False, "Файл не найден"
+        return False, "File not found"
 
     main_executable = get_main_executable(app_dir, plist_data)
     if not main_executable:
-        return False, "Главный исполняемый файл не найден"
+        return False, "Main executable not found"
     if not is_macho_binary(main_executable):
-        return False, "Главный бинарник не Mach-O"
+        return False, "Main binary is not Mach-O"
 
     frameworks_dir = os.path.join(app_dir, "Frameworks")
     os.makedirs(frameworks_dir, exist_ok=True)
@@ -111,7 +125,7 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
 
     if ext == '.dylib':
         direct_dylib = tweak_path
-        log.info("Выбран прямой .dylib файл: %s", os.path.basename(tweak_path))
+        log.info("Selected direct .dylib file: %s", os.path.basename(tweak_path))
     else:
         try:
             if ext == '.deb':
@@ -132,11 +146,11 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
                 else:
                     source_root = temp_extract
             else:
-                return False, f"Неподдерживаемый формат файла: {ext}"
+                return False, f"Unsupported file format: {ext}"
 
             ms_path = os.path.join(source_root, 'Library', 'MobileSubstrate', 'DynamicLibraries')
             if os.path.exists(ms_path) and os.path.isdir(ms_path):
-                log.info("Найдена папка DynamicLibraries: %s", ms_path)
+                log.info("Found DynamicLibraries folder: %s", ms_path)
                 for item in os.listdir(ms_path):
                     item_path = os.path.join(ms_path, item)
                     if item.endswith('.dylib') and not os.path.isdir(item_path):
@@ -149,16 +163,16 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
                                 dst = os.path.join(frameworks_dir, item)
                                 shutil.copy2(real_path, dst)
                                 copied_dylibs.append((item, dst))
-                                log.info("Скопирован .dylib (из симлинка): %s", item)
+                                log.info("Copied .dylib (from symlink): %s", item)
                             else:
-                                log.warning("Симлинк %s ведёт в несуществующий файл: %s", item, real_path)
+                                log.warning("Symlink %s points to non-existent file: %s", item, real_path)
                         else:
                             dst = os.path.join(frameworks_dir, item)
                             shutil.copy2(item_path, dst)
                             copied_dylibs.append((item, dst))
-                            log.info("Скопирован .dylib: %s", item)
+                            log.info("Copied .dylib: %s", item)
             else:
-                log.info("Папка DynamicLibraries не найдена, ищем .dylib везде...")
+                log.info("DynamicLibraries folder not found, searching for .dylib...")
                 for root, _, files in os.walk(source_root):
                     for f in files:
                         if f.endswith('.dylib'):
@@ -166,11 +180,11 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
                             dst = os.path.join(frameworks_dir, f)
                             shutil.copy2(src, dst)
                             copied_dylibs.append((f, dst))
-                            log.info("Скопирован .dylib: %s", f)
+                            log.info("Copied .dylib: %s", f)
 
             fw_path = os.path.join(source_root, 'Library', 'Frameworks')
             if os.path.exists(fw_path) and os.path.isdir(fw_path):
-                log.info("Найдена папка Frameworks: %s", fw_path)
+                log.info("Found Frameworks folder: %s", fw_path)
                 for item in os.listdir(fw_path):
                     if item.endswith('.framework'):
                         src = os.path.join(fw_path, item)
@@ -178,9 +192,9 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
                         if os.path.isdir(src):
                             shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
                             copied_frameworks.append((item, dst))
-                            log.info("Скопирован .framework: %s", item)
+                            log.info("Copied .framework: %s", item)
             else:
-                log.info("Папка Library/Frameworks не найдена, ищем .framework везде...")
+                log.info("Library/Frameworks folder not found, searching for .framework...")
                 for root, dirs, files in os.walk(source_root):
                     for d in dirs:
                         if d.endswith('.framework'):
@@ -189,7 +203,7 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
                             if os.path.isdir(src):
                                 shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
                                 copied_frameworks.append((d, dst))
-                                log.info("Скопирован .framework: %s", d)
+                                log.info("Copied .framework: %s", d)
 
             for root, dirs, files in os.walk(source_root):
                 for d in dirs:
@@ -199,19 +213,19 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
                         if os.path.isdir(src):
                             shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
                             copied_bundles.append((d, dst))
-                            log.info("Скопирован .bundle: %s", d)
+                            log.info("Copied .bundle: %s", d)
 
             for unwanted in ['Applications', 'DEBIAN']:
                 unwanted_path = os.path.join(source_root, unwanted)
                 if os.path.exists(unwanted_path):
                     shutil.rmtree(unwanted_path, ignore_errors=True)
-                    log.info("Удалена ненужная папка: %s", unwanted_path)
+                    log.info("Removed unnecessary folder: %s", unwanted_path)
 
         except Exception as e:
-            log.error("Ошибка обработки: %s", e)
+            log.error("Processing error: %s", e)
             if temp_extract:
                 shutil.rmtree(temp_extract, ignore_errors=True)
-            return False, f"Ошибка: {e}"
+            return False, f"Error: {e}"
         finally:
             if temp_extract and os.path.exists(temp_extract):
                 shutil.rmtree(temp_extract, ignore_errors=True)
@@ -221,17 +235,20 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
         dst = os.path.join(frameworks_dir, dylib_name)
         shutil.copy2(direct_dylib, dst)
         copied_dylibs.append((dylib_name, dst))
-        log.info("Скопирован прямой .dylib: %s", dylib_name)
+        log.info("Copied direct .dylib: %s", dylib_name)
 
-    inject_rpath(main_executable, "@executable_path/Frameworks")
+    if not copied_dylibs and not copied_frameworks and not copied_bundles and not direct_dylib:
+        return False, "No tweaks found to inject"
+
+    ensure_frameworks_rpath(main_executable)
 
     if enable_substrate:
         substrate_path = inject_substrate(app_dir, script_dir, substrate_source)
         install_substrate = "@executable_path/libsubstrate.dylib"
         if not inject_lc_load_dylib(main_executable, install_substrate):
-            log.warning("Не удалось добавить субстрат в LC_LOAD_DYLIB")
+            log.warning("Failed to add substrate to LC_LOAD_DYLIB")
         else:
-            log.info("Субстрат добавлен: %s", install_substrate)
+            log.info("Substrate added: %s", install_substrate)
 
     if use_rpath:
         path_prefix = b"@rpath/Frameworks/"
@@ -263,10 +280,10 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
         install = f"{install_prefix}{os.path.basename(path)}"
         if inject_lc_load_dylib(main_executable, install):
             injected.append(name)
-            log.info("Инжектирован .dylib: %s", name)
+            log.info("Injected .dylib: %s", name)
         else:
             failed.append(name)
-            log.warning("Не удалось инжектировать .dylib: %s", name)
+            log.warning("Failed to inject .dylib: %s", name)
 
     for name, fw_path in copied_frameworks:
         binary_name = name.replace('.framework', '')
@@ -275,24 +292,24 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
             install = f"{install_prefix}{name}/{binary_name}"
             if inject_lc_load_dylib(main_executable, install):
                 injected.append(name)
-                log.info("Инжектирован фреймворк: %s", name)
+                log.info("Injected framework: %s", name)
             else:
                 failed.append(name)
-                log.warning("Не удалось инжектировать фреймворк: %s", name)
+                log.warning("Failed to inject framework: %s", name)
         else:
-            log.warning("Не найден бинарник в framework %s", name)
+            log.warning("Binary not found in framework %s", name)
             failed.append(name)
 
     if injected:
-        log.info("Успешно инжектировано: %s", injected)
+        log.info("Successfully injected: %s", injected)
     if failed:
-        log.warning("Не удалось инжектировать: %s", failed)
+        log.warning("Failed to inject: %s", failed)
 
     if not injected and (copied_dylibs or copied_frameworks):
-        return False, "Инъекция не удалась (не хватило места в заголовке)"
+        return False, "Injection failed (not enough space in header)"
 
     if enable_substrate:
-        msg = f"Субстрат + {len(injected)} твиков. Скопировано .bundle: {len(copied_bundles)}"
+        msg = f"Substrate + {len(injected)} tweaks. Copied .bundle: {len(copied_bundles)}"
     else:
-        msg = f"{len(injected)} твиков (без субстрата). Скопировано .bundle: {len(copied_bundles)}"
+        msg = f"{len(injected)} tweaks (without substrate). Copied .bundle: {len(copied_bundles)}"
     return True, msg
