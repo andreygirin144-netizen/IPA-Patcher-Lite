@@ -2,7 +2,8 @@
 import struct, os, logging
 from constants import (
     MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32,
-    FAT_MAGIC, FAT_CIGAM, LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_RPATH
+    FAT_MAGIC, FAT_CIGAM, LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_RPATH,
+    LC_CODE_SIGNATURE
 )
 log = logging.getLogger(__name__)
 
@@ -205,6 +206,104 @@ def inject_rpath(binary_path, rpath_path):
     with open(binary_path, 'wb') as f:
         f.write(data)
     os.chmod(binary_path, 0o755)
+    return True
+
+def inject_code_signature(binary_path, super_blob):
+    try:
+        with open(binary_path, 'rb') as f:
+            data = bytearray(f.read())
+    except Exception as e:
+        log.error("Не удалось прочитать бинарник: %s", e)
+        return False
+
+    aligned_global_offset = len(data)
+    sig_size = len(super_blob)
+
+    magic = struct.unpack_from('>I', data, 0)[0]
+    if magic == FAT_MAGIC:
+        nfat = struct.unpack_from('>I', data, 4)[0]
+        any_ok = False
+        for i in range(nfat):
+            arch_off = 8 + i * 20
+            cputype = struct.unpack_from('>i', data, arch_off)[0]
+            slice_offset = struct.unpack_from('>I', data, arch_off + 8)[0]
+            if cputype in (0x0100000C, 12):
+                local_sig_offset = aligned_global_offset - slice_offset
+                if _inject_code_signature_into_slice(data, slice_offset, local_sig_offset, sig_size):
+                    any_ok = True
+        success = any_ok
+    else:
+        success = _inject_code_signature_into_slice(data, 0, aligned_global_offset, sig_size)
+
+    if not success:
+        return False
+
+    data.extend(super_blob)
+
+    with open(binary_path, 'wb') as f:
+        f.write(data)
+    os.chmod(binary_path, 0o755)
+    return True
+
+def _inject_code_signature_into_slice(data, offset, local_sig_offset, sig_size):
+    magic = struct.unpack_from('<I', data, offset)[0]
+    endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
+    is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
+    header_size = 32 if is_64 else 28
+
+    ncmds = struct.unpack_from(endian + 'I', data, offset + 16)[0]
+    sizeofcmds = struct.unpack_from(endian + 'I', data, offset + 20)[0]
+
+    cmd_offset = offset + header_size
+    found = False
+
+    for _ in range(ncmds):
+        if cmd_offset + 8 > offset + header_size + sizeofcmds:
+            break
+        cmd, cmdsize = struct.unpack_from(endian + 'II', data, cmd_offset)
+        if cmd == LC_CODE_SIGNATURE:
+            struct.pack_into(endian + 'II', data, cmd_offset + 8, local_sig_offset, sig_size)
+            log.info("LC_CODE_SIGNATURE обновлён (offset=%d, size=%d)", local_sig_offset, sig_size)
+            found = True
+            break
+        if cmdsize < 8:
+            break
+        cmd_offset += cmdsize
+
+    if not found:
+        new_cmd = struct.pack(endian + 'IIII', LC_CODE_SIGNATURE, 16, local_sig_offset, sig_size)
+        insert_at = offset + header_size + sizeofcmds
+
+        min_section_offset = len(data)
+        cmd_offset = offset + header_size
+        for _ in range(ncmds):
+            if cmd_offset + 8 > offset + header_size + sizeofcmds:
+                break
+            cmd, cmdsize_cur = struct.unpack_from(endian + 'II', data, cmd_offset)
+            if cmdsize_cur < 8:
+                break
+            if cmd in (0x19, 0x01):
+                nsects_off = cmd_offset + (48 if cmd == 0x19 else 40) - 4
+                nsects = struct.unpack_from(endian + 'I', data, nsects_off)[0]
+                sect_size = 80 if cmd == 0x19 else 68
+                sect_base = cmd_offset + (72 if cmd == 0x19 else 56)
+                for s in range(nsects):
+                    foff_off = sect_base + s * sect_size + (40 if cmd == 0x19 else 32)
+                    foff = struct.unpack_from(endian + 'I', data, foff_off)[0]
+                    if foff > 0:
+                        min_section_offset = min(min_section_offset, foff)
+            cmd_offset += cmdsize_cur
+
+        available_space = min_section_offset - insert_at
+        if available_space < len(new_cmd):
+            log.error("Нет места для LC_CODE_SIGNATURE (нужно %d байт)", len(new_cmd))
+            return False
+
+        data[insert_at:insert_at + len(new_cmd)] = new_cmd
+        struct.pack_into(endian + 'I', data, offset + 16, ncmds + 1)
+        struct.pack_into(endian + 'I', data, offset + 20, sizeofcmds + len(new_cmd))
+        log.info("LC_CODE_SIGNATURE добавлен (offset=%d, size=%d)", local_sig_offset, sig_size)
+
     return True
 
 def _check_encryption_in_slice(f, offset, big_endian=False):
