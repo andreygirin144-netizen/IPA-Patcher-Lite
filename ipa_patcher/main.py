@@ -465,14 +465,11 @@ def main():
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
         app_name = updated_plist.get("CFBundleDisplayName") or updated_plist.get("CFBundleName") or app_basename
         app_version = updated_plist.get("CFBundleShortVersionString", "1.0")
-        bundle_id = updated_plist.get("CFBundleIdentifier", original_bundle_id)
+        
+        clean_app_name = app_name.replace(' ', '_').replace('/', '_').replace(':', '_')
         
         filename_parts = []
-        if bundle_id and bundle_id != old_bundle_id:
-            filename_parts.append(bundle_id)
-        else:
-            filename_parts.append(app_name.replace(' ', '_'))
-        
+        filename_parts.append(clean_app_name)
         filename_parts.append(f"v{app_version}")
         
         if tweak_injected:
@@ -506,7 +503,7 @@ def main():
         color_print("[SUCCESS] Готово!", 'green')
         
         if ask_yes_no("\nУстановить IPA через SideStore/AltStore?", default=False):
-            ok, msg = sign_app_bundle_with_path(output_path, bundle_id)
+            ok, msg = sign_app_bundle_with_path(output_path, new_bundle_id)
             if ok:
                 color_print(msg, 'green')
             else:
