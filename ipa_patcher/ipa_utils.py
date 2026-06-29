@@ -116,7 +116,8 @@ def pick_icon_file():
         return path
     else:
         path = input("Путь к иконке (PNG/JPEG): ").strip().strip('"')
-        if path: return os.path.expanduser(path)
+        if path:
+            return os.path.expanduser(path)
         return None
 
 def pick_substrate_file():
@@ -133,6 +134,24 @@ def pick_substrate_file():
         path = input("Путь к libsubstrate.dylib: ").strip().strip('"')
         if path: return os.path.expanduser(path)
         return None
+
+def pick_cert_zip():
+    if PYTHONISTA:
+        path = dialogs.pick_document(types=["public.zip"])
+        if path is None:
+            print("Выбор файла отменён.")
+            return None
+        if not path.lower().endswith('.zip'):
+            print("Ошибка: нужен .zip архив.")
+            return pick_cert_zip()
+        return path
+    else:
+        try:
+            path = input("Путь к .zip архиву с сертификатом: ").strip().strip('"')
+        except KeyboardInterrupt:
+            print("\nПрервано.")
+            sys.exit(0)
+        return os.path.expanduser(path)
 
 def ask_input(prompt, default=""):
     try:
