@@ -9,6 +9,7 @@ FAT_CIGAM = 0xBEBAFECA
 LC_LOAD_DYLIB = 0x0C
 LC_LOAD_WEAK_DYLIB = 0x18
 LC_RPATH = 0x1C
+LC_CODE_SIGNATURE = 0x1D
 
 SIGNATURE_DIRS = frozenset({"_CodeSignature", "SC_Info"})
 SIGNATURE_FILES = frozenset({"embedded.mobileprovision", "CodeResources"})
