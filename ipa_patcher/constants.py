@@ -14,3 +14,5 @@ LC_CODE_SIGNATURE = 0x1D
 SIGNATURE_DIRS = frozenset({"_CodeSignature", "SC_Info"})
 SIGNATURE_FILES = frozenset({"embedded.mobileprovision", "CodeResources"})
 UNWANTED_DIRS = ["Library", "Applications", "DEBIAN"]
+
+MIN_HEADER_PADDING = 256
