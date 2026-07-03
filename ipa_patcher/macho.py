@@ -70,7 +70,6 @@ def list_all_archs(binary_path):
                 result.append(parse_arch_name(s['cputype'], s['cpusubtype']))
             return result
         
-        # Если это не FAT, парсим как тонкий бинарник
         if len(data) >= 12:
             magic = struct.unpack_from('<I', data, 0)[0]
             if magic in (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32):
@@ -339,7 +338,7 @@ def _has_rpath_in_slice(data, offset, rpath_path):
 
     return False
 
-def _inject_code_signature_into_slice(data, offset, local_sig_offset, sig_size):
+def _add_code_signature_to_slice(data, offset, sig_offset, sig_size):
     magic = struct.unpack_from('<I', data, offset)[0]
     endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
     is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
@@ -355,8 +354,7 @@ def _inject_code_signature_into_slice(data, offset, local_sig_offset, sig_size):
             break
         cmd, cmdsize = struct.unpack_from(endian + 'II', data, cmd_offset)
         if cmd == LC_CODE_SIGNATURE:
-            struct.pack_into(endian + 'II', data, cmd_offset + 8, local_sig_offset, sig_size)
-            log.info("LC_CODE_SIGNATURE updated (offset=%d, size=%d)", local_sig_offset, sig_size)
+            struct.pack_into(endian + 'II', data, cmd_offset + 8, sig_offset, sig_size)
             found = True
             break
         if cmdsize < 8:
@@ -364,7 +362,7 @@ def _inject_code_signature_into_slice(data, offset, local_sig_offset, sig_size):
         cmd_offset += cmdsize
 
     if not found:
-        new_cmd = struct.pack(endian + 'IIII', LC_CODE_SIGNATURE, 16, local_sig_offset, sig_size)
+        new_cmd = struct.pack(endian + 'IIII', LC_CODE_SIGNATURE, 16, sig_offset, sig_size)
         insert_at = offset + header_size + sizeofcmds
         min_section_offset = get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds)
 
@@ -376,7 +374,6 @@ def _inject_code_signature_into_slice(data, offset, local_sig_offset, sig_size):
         data[insert_at:insert_at + len(new_cmd)] = new_cmd
         struct.pack_into(endian + 'I', data, offset + 16, ncmds + 1)
         struct.pack_into(endian + 'I', data, offset + 20, sizeofcmds + len(new_cmd))
-        log.info("LC_CODE_SIGNATURE added (offset=%d, size=%d)", local_sig_offset, sig_size)
 
     return True
 
@@ -388,28 +385,35 @@ def inject_code_signature(binary_path, super_blob):
         log.error("Failed to read binary: %s", e)
         return False
 
-    aligned_global_offset = len(data)
-    sig_size = len(super_blob)
     magic = struct.unpack_from('>I', data, 0)[0]
-    success = False
 
     if magic in (FAT_MAGIC, FAT_CIGAM):
         slices = get_arch_slices(data)
-        any_ok = False
-        # Предупреждение: использование одного блоба для разных архитектурных срезов FAT некорректно
-        for s in slices:
-            if is_arm64_slice(s['cputype'], s['cpusubtype']):
-                local_sig_offset = aligned_global_offset - s['offset']
-                if _inject_code_signature_into_slice(data, s['offset'], local_sig_offset, sig_size):
-                    any_ok = True
-        success = any_ok
+        target_slices = [s for s in slices if is_arm64_slice(s['cputype'], s['cpusubtype'])]
+        if not target_slices:
+            log.warning("No arm64 slice found in FAT binary")
+            return False
+
+        blob_positions = []
+        current_offset = len(data)
+        for s in target_slices:
+            current_offset = (current_offset + 7) & ~7
+            blob_positions.append((s['offset'], current_offset))
+            current_offset += len(super_blob)
+
+        data.extend(b'\x00' * (current_offset - len(data)))
+
+        for (slice_offset, blob_abs_offset), s in zip(blob_positions, target_slices):
+            data[blob_abs_offset:blob_abs_offset + len(super_blob)] = super_blob
+            local_sig_offset = blob_abs_offset - slice_offset
+            if not _add_code_signature_to_slice(data, s['offset'], local_sig_offset, len(super_blob)):
+                return False
+
     else:
-        success = _inject_code_signature_into_slice(data, 0, aligned_global_offset, sig_size)
-
-    if not success:
-        return False
-
-    data.extend(super_blob)
+        aligned_offset = len(data)
+        if not _add_code_signature_to_slice(data, 0, aligned_offset, len(super_blob)):
+            return False
+        data.extend(super_blob)
 
     with open(binary_path, 'wb') as f:
         f.write(data)
@@ -427,18 +431,15 @@ def _check_encryption_in_slice(f, offset, big_endian=False):
         if magic in (MH_CIGAM_64, MH_CIGAM_32):
             endian = '>'
         
-        # Определяем размер заголовка на основе разрядности архитектуры
         is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
         header_size = 32 if is_64 else 28
         
-        # Читаем количество команд напрямую из структуры mach_header
         f.seek(offset + 16)
         ncmds_bytes = f.read(4)
         if len(ncmds_bytes) < 4:
             return None
         ncmds = struct.unpack(endian + 'I', ncmds_bytes)[0]
         
-        # Перемещаем указатель точно на начало Load Commands (пропускаем весь заголовок)
         f.seek(offset + header_size)
         
         for _ in range(ncmds):
@@ -449,7 +450,7 @@ def _check_encryption_in_slice(f, offset, big_endian=False):
             if cmdsize < 8:
                 break
             
-            if cmd in (0x21, 0x2C):  # LC_ENCRYPTION_INFO или LC_ENCRYPTION_INFO_64
+            if cmd in (0x21, 0x2C):
                 crypt_data = f.read(12)
                 if len(crypt_data) >= 12:
                     _, _, cryptid = struct.unpack(endian + 'III', crypt_data)
