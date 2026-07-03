@@ -17,6 +17,8 @@ from plist_editor import load_plist, save_plist, patch_bundle_id, add_file_suppo
 from signature import clean_signature_files, sign_app_bundle_with_path
 from macho import is_ipa_encrypted, is_macho_binary
 from tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak, get_main_executable
+from entitlements import generate_custom_entitlements
+from advanced_patches import apply_advanced_patches
 
 try:
     import dialogs, console
@@ -161,11 +163,9 @@ def replace_icon(app_dir, icon_path, remove_assets=False):
 
 def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
     from constants import MIN_HEADER_PADDING
-    
     main_executable = get_main_executable(app_dir, plist_data)
     if not main_executable or not is_macho_binary(main_executable):
         return True
-    
     required = estimated_tweaks * 48 + 16 + MIN_HEADER_PADDING
     return check_header_space(main_executable, required)
 
@@ -201,6 +201,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print("10. Тип пути: " + ("@rpath" if USE_RPATH else "@executable_path"))
         print("11. Режим субстрата: " + mode_display)
         print("12. Расширенное редактирование Info.plist (JSON)")
+        print("13. Настроить права (Entitlements)")
+        print("14. Расширенные патчи (понижение iOS, удаление плагинов и ограничений)")
         print("0. Выход без сохранения")
         print("=" * 50)
         choice = ask_input("Ваш выбор", "9")
@@ -264,13 +266,11 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 continue
             else:
                 color_print("IPA расшифрован. Инъекция разрешена.", 'green')
-            
             color_print("\nВыберите .dylib, .zip, .deb, .tar, .lzma или .xz с твиками.", 'blue')
             tweak_path = pick_tweak_file()
             if not tweak_path:
                 color_print("Файл не выбран.", 'red')
                 continue
-            
             substrate_source = None
             if SUBSTRATE_MODE == 'auto':
                 substrate_source = None
@@ -287,10 +287,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 substrate_source = None
                 color_print("Субстрат НЕ будет встроен.", 'yellow')
-            
             module_count = count_modules_in_tweak(tweak_path)
             color_print(f"[INFO] Обнаружено примерно {module_count} модулей в архиве", 'blue')
-            
             color_print("\nПроверка свободного места в заголовке бинарника...", 'blue')
             if not check_binary_header_space(app_dir, plist_data, estimated_tweaks=module_count):
                 color_print("ВНИМАНИЕ: В заголовке бинарника может не хватить места!", 'yellow')
@@ -298,7 +296,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Инъекция возможна, но если не хватит места - бинарник будет поврежден.", 'yellow')
                 if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
                     continue
-            
             if not ask_yes_no("Инъектировать выбранный твик?", default=True):
                 continue
             ok, msg = inject_tweaks(app_dir, tweak_path, plist_data, script_dir,
@@ -345,6 +342,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     print(f"Сборка: {original.get('CFBundleVersion')} -> {changes['build']}")
                 if "bundle_id" in changes:
                     print(f"Bundle ID: {original.get('CFBundleIdentifier')} -> {changes['bundle_id']}")
+                if "min_os" in changes:
+                    print(f"Минимальная iOS: {original.get('MinimumOSVersion', 'не указана')} -> {changes['min_os']}")
                 if "file_support" in changes:
                     color_print("Поддержка файлов: ВКЛЮЧЕНА", 'green')
                 if "icon" in changes:
@@ -358,6 +357,10 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print(f"Твики: ИНЪЕКТИРОВАНЫ (субстрат: {substrate_status})", 'green')
                 if "custom_edit" in changes:
                     color_print("Расширенное редактирование Info.plist: ДА", 'green')
+                if "entitlements" in changes:
+                    color_print("Права (Entitlements): НАСТРОЕНЫ", 'green')
+                if "advanced_patched" in changes:
+                    color_print("Расширенные патчи: ПРИМЕНЕНЫ", 'green')
                 if ask_yes_no("\nПрименить изменения и собрать IPA?", default=True):
                     return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, ("file_support" in changes)
                 else:
@@ -415,6 +418,40 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print(f"Ошибка парсинга JSON: {e}", 'red')
             except Exception as e:
                 color_print(f"Ошибка: {e}", 'red')
+        elif choice == "13":
+            bundle_id = plist_data.get("CFBundleIdentifier")
+            if not bundle_id:
+                color_print("Bundle ID не найден в Info.plist!", 'red')
+                continue
+            color_print("\nНастройка entitlements.plist...", 'blue')
+            if generate_custom_entitlements(app_dir, bundle_id):
+                color_print("Entitlements настроены успешно!", 'green')
+                changes["entitlements"] = True
+            else:
+                color_print("Ошибка при настройке entitlements", 'red')
+        elif choice == "14":
+            color_print("\n--- РАСШИРЕННЫЕ ПАТЧИ ---", 'cyan')
+            target_ios_version = None
+            if ask_yes_no("Понизить требуемую версию iOS?", default=True):
+                current_min = plist_data.get("MinimumOSVersion", "не указана")
+                print(f"Текущая минимальная iOS: {current_min}")
+                target_ios_version = ask_input("Введите целевую версию iOS (например, 10.0, 12.0, 14.0)", "10.0")
+            adv_options = {
+                "lower_ios": target_ios_version,
+                "remove_supported_devices": ask_yes_no("Удалить ограничения по моделям (UISupportedDevices)?", default=True),
+                "remove_plugins": ask_yes_no("Удалить все плагины приложения (для бесплатных аккаунтов)?", default=False),
+                "remove_watch": ask_yes_no("Удалить плагины для Apple Watch?", default=False),
+                "remove_url_schemes": ask_yes_no("Удалить кастомные URL-схемы (полезно для клонов)?", default=False),
+                "fix_white_icon": ask_yes_no("Применить фикс белой иконки?", default=False)
+            }
+            if apply_advanced_patches(app_dir, plist_data, adv_options):
+                modified = True
+                changes["advanced_patched"] = True
+                if adv_options["lower_ios"]:
+                    changes["min_os"] = adv_options["lower_ios"]
+                color_print("[SUCCESS] Расширенные патчи успешно применены!", 'green')
+            else:
+                color_print("Никаких изменений не внесено.", 'yellow')
         elif choice == "0":
             color_print("Выход без сохранения.", 'yellow')
             sys.exit(0)
@@ -431,7 +468,7 @@ def clean_non_standard_dirs(app_dir):
 def main():
     if PYTHONISTA:
         console.clear()
-    color_print("=== IPA Patcher Lite v1.0.4 ===", 'cyan')
+    color_print("=== IPA Patcher Lite v1.0.5 ===", 'cyan')
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
         color_print("Файл не найден", 'red')
@@ -485,28 +522,20 @@ def main():
             docs_dir = os.path.join(app_dir, "Documents")
             os.makedirs(docs_dir, exist_ok=True)
             color_print("Создана папка Documents для файлового шеринга", 'green')
-        
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
         app_name = updated_plist.get("CFBundleDisplayName") or updated_plist.get("CFBundleName") or app_basename
         app_version = updated_plist.get("CFBundleShortVersionString", "1.0")
-        
         clean_app_name = app_name.replace(' ', '_').replace('/', '_').replace(':', '_')
-        
         filename_parts = []
         filename_parts.append(clean_app_name)
         filename_parts.append(f"v{app_version}")
-        
         if tweak_injected:
             filename_parts.append("tweaked")
-        
         if icon_replaced:
             filename_parts.append("icon")
-        
         if modified:
             filename_parts.append("patched")
-        
         output_filename = "_".join(filename_parts) + ".ipa"
-        
         if PYTHONISTA:
             docs = os.path.expanduser("~/Documents")
             output_path = os.path.join(docs, output_filename)
@@ -520,19 +549,16 @@ def main():
         if os.path.abspath(output_path) == os.path.abspath(ipa_path):
             color_print("Путь сохранения совпадает с исходным", 'red')
             sys.exit(1)
-        
         color_print("\n--- Сборка IPA ---", 'cyan')
         pack_ipa_with_progress(temp_dir, output_path, delay=delay)
         color_print(f"[INFO] IPA сохранён в: {output_path}", 'green')
         color_print("[SUCCESS] Готово!", 'green')
-        
         if ask_yes_no("\nУстановить IPA через SideStore/AltStore?", default=False):
             ok, msg = sign_app_bundle_with_path(output_path, new_bundle_id)
             if ok:
                 color_print(msg, 'green')
             else:
                 color_print(msg, 'red')
-        
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
     color_print("\n--- Готово ---", 'green')
