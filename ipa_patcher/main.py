@@ -15,8 +15,8 @@ from ipa_utils import (
 )
 from plist_editor import load_plist, save_plist, patch_bundle_id, add_file_support
 from signature import clean_signature_files, sign_app_bundle_with_path
-from macho import is_ipa_encrypted
-from tweak_injector import inject_tweaks
+from macho import is_ipa_encrypted, is_macho_binary
+from tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak, get_main_executable
 
 try:
     import dialogs, console
@@ -159,6 +159,16 @@ def replace_icon(app_dir, icon_path, remove_assets=False):
         color_print("[ERROR] Не удалось заменить иконку", 'red')
     return replaced
 
+def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
+    from constants import MIN_HEADER_PADDING
+    
+    main_executable = get_main_executable(app_dir, plist_data)
+    if not main_executable or not is_macho_binary(main_executable):
+        return True
+    
+    required = estimated_tweaks * 48 + 16 + MIN_HEADER_PADDING
+    return check_header_space(main_executable, required)
+
 def edit_menu(plist_data, app_dir, script_dir, temp_dir):
     global USE_RPATH, SUBSTRATE_MODE, SUBSTRATE_SOURCE
     original = plist_data.copy()
@@ -254,11 +264,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 continue
             else:
                 color_print("IPA расшифрован. Инъекция разрешена.", 'green')
+            
             color_print("\nВыберите .dylib, .zip, .deb, .tar, .lzma или .xz с твиками.", 'blue')
             tweak_path = pick_tweak_file()
             if not tweak_path:
                 color_print("Файл не выбран.", 'red')
                 continue
+            
             substrate_source = None
             if SUBSTRATE_MODE == 'auto':
                 substrate_source = None
@@ -275,6 +287,18 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 substrate_source = None
                 color_print("Субстрат НЕ будет встроен.", 'yellow')
+            
+            module_count = count_modules_in_tweak(tweak_path)
+            color_print(f"[INFO] Обнаружено примерно {module_count} модулей в архиве", 'blue')
+            
+            color_print("\nПроверка свободного места в заголовке бинарника...", 'blue')
+            if not check_binary_header_space(app_dir, plist_data, estimated_tweaks=module_count):
+                color_print("ВНИМАНИЕ: В заголовке бинарника может не хватить места!", 'yellow')
+                color_print(f"Обнаружено {module_count} модулей, требуется ~{module_count * 48 + 16} байт", 'yellow')
+                color_print("Инъекция возможна, но если не хватит места - бинарник будет поврежден.", 'yellow')
+                if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
+                    continue
+            
             if not ask_yes_no("Инъектировать выбранный твик?", default=True):
                 continue
             ok, msg = inject_tweaks(app_dir, tweak_path, plist_data, script_dir,
