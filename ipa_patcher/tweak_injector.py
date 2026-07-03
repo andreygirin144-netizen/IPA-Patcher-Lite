@@ -1,11 +1,124 @@
 # -*- coding: utf-8 -*-
-import os, shutil, tempfile, zipfile, logging, ctypes
+import os, shutil, tempfile, zipfile, logging, ctypes, struct
 from patch_strings import patch_strings_in_binary
-from macho import inject_lc_load_dylib, inject_rpath, is_macho_binary, has_rpath
+from macho import (
+    inject_lc_load_dylib, inject_rpath, is_macho_binary, has_rpath,
+    get_min_section_offset, get_arch_slices, is_arm64_slice
+)
 from substrate import inject_substrate
 from ipa_utils import ask_yes_no
+from constants import MIN_HEADER_PADDING, MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32, FAT_MAGIC, FAT_CIGAM
 
 log = logging.getLogger(__name__)
+
+def count_modules_in_tweak(tweak_path):
+    
+    if not os.path.exists(tweak_path):
+        return 1
+    
+    ext = os.path.splitext(tweak_path)[1].lower()
+    count = 0
+    
+    try:
+        if ext == '.dylib':
+            return 1
+        
+        elif ext == '.zip':
+            with zipfile.ZipFile(tweak_path, 'r') as zf:
+                for name in zf.namelist():
+                    if name.endswith('.dylib') or '.framework/' in name:
+                        count += 1
+            return max(count, 1)
+        
+        elif ext == '.deb':
+            
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['ar', 't', tweak_path],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.splitlines():
+                        if 'data.tar.' in line:
+                            count += 3  
+                            break
+                else:
+                    count = 3
+            except:
+                count = 3
+            return max(count, 1)
+        
+        elif ext in ('.tar', '.lzma', '.xz', '.gz', '.tgz'):
+            
+            return 2
+        
+        else:
+            return 2  
+    
+    except:
+        return 2  
+
+def check_header_space(main_executable, required_bytes):
+    try:
+        with open(main_executable, 'rb') as f:
+            data = bytearray(f.read())
+        
+        if len(data) < 4:
+            return True
+        
+        magic = struct.unpack_from('>I', data, 0)[0]
+        
+        if magic in (FAT_MAGIC, FAT_CIGAM):
+            slices = get_arch_slices(data)
+            for s in slices:
+                if not is_arm64_slice(s['cputype'], s['cpusubtype']):
+                    continue
+                slice_offset = s['offset']
+                if slice_offset + 4 > len(data):
+                    continue
+                slice_magic = struct.unpack_from('<I', data, slice_offset)[0]
+                endian = '>' if slice_magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
+                is_64 = slice_magic in (MH_MAGIC_64, MH_CIGAM_64)
+                header_size = 32 if is_64 else 28
+                if slice_offset + header_size > len(data):
+                    continue
+                ncmds = struct.unpack_from(endian + 'I', data, slice_offset + 16)[0]
+                sizeofcmds = struct.unpack_from(endian + 'I', data, slice_offset + 20)[0]
+                
+                insert_at = slice_offset + header_size + sizeofcmds
+                if insert_at > len(data):
+                    continue
+                min_section_offset = get_min_section_offset(data, slice_offset, endian, ncmds, header_size, sizeofcmds)
+                if min_section_offset <= insert_at or min_section_offset > len(data):
+                    continue
+                available = min_section_offset - insert_at
+                if available < required_bytes:
+                    log.warning("Not enough header space in slice: %d bytes available, %d needed", available, required_bytes)
+                    return False
+            return True
+        else:
+            endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
+            is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
+            header_size = 32 if is_64 else 28
+            if header_size > len(data):
+                return True
+            ncmds = struct.unpack_from(endian + 'I', data, 16)[0]
+            sizeofcmds = struct.unpack_from(endian + 'I', data, 20)[0]
+            
+            insert_at = header_size + sizeofcmds
+            if insert_at > len(data):
+                return True
+            min_section_offset = get_min_section_offset(data, 0, endian, ncmds, header_size, sizeofcmds)
+            if min_section_offset <= insert_at or min_section_offset > len(data):
+                return True
+            available = min_section_offset - insert_at
+            if available < required_bytes:
+                log.warning("Not enough header space: %d bytes available, %d needed", available, required_bytes)
+                return False
+            return True
+    except Exception:
+        return True
 
 def extract_archive_with_libarchive(archive_path, output_dir):
     try:
@@ -239,6 +352,13 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, use_rpath=False, 
 
     if not copied_dylibs and not copied_frameworks and not copied_bundles and not direct_dylib:
         return False, "No tweaks found to inject"
+
+    estimated_commands = len(copied_dylibs) + len(copied_frameworks)
+    if enable_substrate:
+        estimated_commands += 1
+    required_space = estimated_commands * 48 + 16
+    
+    check_header_space(main_executable, required_space + MIN_HEADER_PADDING)
 
     ensure_frameworks_rpath(main_executable)
 
