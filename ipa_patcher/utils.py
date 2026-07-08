@@ -11,16 +11,11 @@ try:
 except ImportError:
     HAVE_CONSOLE = False
 
-try:
-    import dialogs
-    HAVE_DIALOGS = True
-except ImportError:
-    HAVE_DIALOGS = False
-
 DOCS_DIR = os.path.expanduser('~/Documents')
 LOGS_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Logs')
 LOG_FILE = os.path.join(LOGS_DIR, 'patcher.log')
 PATCHED_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Patched')
+
 
 def ensure_directories():
     for dir_path in [LOGS_DIR, PATCHED_DIR]:
@@ -29,6 +24,7 @@ def ensure_directories():
                 os.makedirs(dir_path)
             except:
                 pass
+
 
 def color_print(text, color='white'):
     if not HAVE_CONSOLE:
@@ -53,6 +49,7 @@ def color_print(text, color='white'):
     except:
         print(text)
 
+
 def log_message(msg, level='INFO'):
     ensure_directories()
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -68,16 +65,8 @@ def log_message(msg, level='INFO'):
                 'yellow' if level == 'WARN' else 
                 'red' if level == 'ERROR' else 'white')
 
+
 def ask_input(prompt, default=""):
-    if HAVE_DIALOGS:
-        try:
-            result = dialogs.input_alert(prompt, default=default)
-            if result is None:
-                print("\nПрервано.")
-                sys.exit(0)
-            return result.strip()
-        except:
-            pass
     try:
         if default:
             result = input(f"{prompt} [{default}]: ").strip()
@@ -90,15 +79,10 @@ def ask_input(prompt, default=""):
         print("\nПрервано.")
         sys.exit(0)
 
+
 def ask_yes_no(prompt, default=False):
-    if HAVE_DIALOGS:
-        try:
-            result = dialogs.alert(prompt, "", "Да", "Нет", hide_cancel_button=True)
-            return result == 1
-        except:
-            pass
     try:
-        default_str = "Y/n" if default else "y/N"
+        default_str = "y/n"
         result = input(f"{prompt} ({default_str}): ").strip().lower()
         if not result:
             return default
@@ -106,6 +90,7 @@ def ask_yes_no(prompt, default=False):
     except KeyboardInterrupt:
         print("\nПрервано.")
         sys.exit(0)
+
 
 def clear_screen():
     if HAVE_CONSOLE:
