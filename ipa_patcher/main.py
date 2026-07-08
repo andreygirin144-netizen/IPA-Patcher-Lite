@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
-import os, sys, shutil, logging, tempfile, json, zipfile, time
+import os
+import sys
+import shutil
+import logging
+import tempfile
+import json
+import zipfile
+import time
 from constants import UNWANTED_DIRS, PatchConfig
 from ipa_utils import (
     pick_ipa_file,
@@ -11,9 +18,9 @@ from ipa_utils import (
     pick_substrate_file,
     pick_tweak_file
 )
-from plist_editor import load_plist, save_plist, patch_bundle_id, add_file_support, update_version_in_extensions
+from plist_editor import load_plist, save_plist, add_file_support, update_version_in_extensions
 from signature import clean_signature_files, sign_app_bundle_with_path
-from macho import is_ipa_encrypted, is_macho_binary, FAT_MAGIC, FAT_CIGAM
+from macho import is_ipa_encrypted, is_macho_binary
 from tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak, get_main_executable
 from entitlements import generate_custom_entitlements
 from advanced_patches import apply_advanced_patches
@@ -37,6 +44,7 @@ log = logging.getLogger(__name__)
 
 config = PatchConfig()
 
+
 def get_adaptive_delay(ipa_path):
     base_delay = 0.0
     try:
@@ -50,6 +58,7 @@ def get_adaptive_delay(ipa_path):
     except:
         pass
     return min(base_delay, 0.01)
+
 
 def get_icon_names_from_plist(app_dir):
     info_plist_path = os.path.join(app_dir, "Info.plist")
@@ -82,6 +91,7 @@ def get_icon_names_from_plist(app_dir):
             result.append(f"{base}@3x.png")
     return result
 
+
 def add_icons_to_plist(app_dir, icon_names):
     info_plist_path = os.path.join(app_dir, "Info.plist")
     if not os.path.isfile(info_plist_path):
@@ -105,85 +115,73 @@ def add_icons_to_plist(app_dir, icon_names):
     save_plist(plist, info_plist_path)
     return True
 
+
 def replace_icon(app_dir, icon_path, remove_assets=False):
     if not os.path.isfile(icon_path):
         color_print(f"[ERROR] Файл иконки не найден: {icon_path}", 'red')
         return False
+    
     color_print(f"[INFO] Замена иконки: {os.path.basename(icon_path)}", 'blue')
-    standard_icons = [
-        "AppIcon60x60@2x.png",
-        "AppIcon60x60@3x.png",
-        "Icon-60@2x.png",
-        "Icon-60@3x.png",
-        "Icon.png",
-        "Icon@2x.png",
-        "iTunesArtwork",
-        "iTunesArtwork@2x"
-    ]
+    
     icon_names = get_icon_names_from_plist(app_dir)
     if not icon_names:
-        color_print("[INFO] В Info.plist не найдены иконки, используются стандартные имена", 'yellow')
-        icon_names = standard_icons
+        color_print("[INFO] Иконки не найдены в Info.plist, используются стандартные имена", 'yellow')
+        icon_names = [
+            "AppIcon60x60@2x.png",
+            "AppIcon60x60@3x.png",
+            "Icon-60@2x.png",
+            "Icon-60@3x.png",
+            "Icon.png",
+            "Icon@2x.png",
+            "iTunesArtwork",
+            "iTunesArtwork@2x"
+        ]
+    
     replaced = False
     for name in icon_names:
         target = os.path.join(app_dir, name)
         try:
             shutil.copy2(icon_path, target)
-            log.info("Иконка создана: %s", name)
+            color_print(f"  Создано: {name}", 'green')
             replaced = True
         except Exception as e:
             log.warning("Не удалось создать %s: %s", name, e)
+    
     add_icons_to_plist(app_dir, icon_names)
+    
     if remove_assets:
         assets_car = os.path.join(app_dir, "Assets.car")
         if os.path.exists(assets_car):
-            color_print("[WARN] Удаление Assets.car может вызвать краш на iOS 15+", 'yellow')
-            if ask_yes_no("Удалить Assets.car (риск краша)?", default=False):
-                try:
-                    os.remove(assets_car)
-                    log.info("Удален Assets.car")
-                    color_print("[INFO] Assets.car удалён", 'green')
-                except Exception as e:
-                    log.warning("Не удалось удалить Assets.car: %s", e)
-                    color_print("[WARN] Не удалось удалить Assets.car", 'yellow')
-            else:
-                color_print("[INFO] Assets.car сохранён", 'blue')
+            try:
+                os.remove(assets_car)
+                color_print("[INFO] Assets.car удален", 'green')
+            except Exception as e:
+                log.warning("Не удалось удалить Assets.car: %s", e)
+                color_print("[WARN] Не удалось удалить Assets.car", 'yellow')
+    
     if replaced:
         color_print("[SUCCESS] Иконка заменена!", 'green')
     else:
         color_print("[ERROR] Не удалось заменить иконку", 'red')
+    
     return replaced
 
-def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
-    from constants import MIN_HEADER_PADDING
-    main_executable = get_main_executable(app_dir, plist_data)
-    if not main_executable or not is_macho_binary(main_executable):
-        return True
-    required = estimated_tweaks * 48 + 16 + MIN_HEADER_PADDING
-    return check_header_space(main_executable, required)
 
-def patch_bundle_id_in_files(app_dir, old_id, new_id):
+def deep_patch_bundle_id(app_dir, old_id, new_id):
     old_bytes = old_id.encode('utf-8')
     new_bytes = new_id.encode('utf-8')
     
     len_old = len(old_bytes)
     len_new = len(new_bytes)
-    is_longer = len_new > len_old
     
-    if is_longer:
-        color_print(f"[WARN] Новый Bundle ID длиннее старого ({len_new} > {len_old} симв.).", 'yellow')
-        color_print("Прямая замена в Mach-O бинарниках будет пропущена во избежание повреждения структуры.", 'yellow')
+    if len_new > len_old:
+        color_print(f"[WARN] Новый ID длиннее старого ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
+        return False
     
-    binary_new_bytes = new_bytes if is_longer else (new_bytes + b'\x00' * (len_old - len_new))
+    padded_new = new_bytes + b'\x00' * (len_old - len_new)
     
-    skip_extensions = (
-        '.png', '.jpg', '.jpeg', '.pvr', '.ktx', '.cae',
-        '.mp3', '.ogg', '.wav', '.m4a', '.mp4', '.mov',
-        '.ttc', '.ttf', '.woff', '.nib', '.storyboardc',
-        '.car', '.bundle'
-    )
-    strict_binary_extensions = ('.dat', '.assets', '.resS', '.dylib')
-    MAX_TEXT_FILE_SIZE = 50 * 1024 * 1024
+    skip_extensions = ('.png', '.jpg', '.jpeg', '.pvr', '.ktx', '.cae', '.mp3', '.ogg', '.wav', 
+                      '.m4a', '.mp4', '.mov', '.ttc', '.ttf', '.woff', '.nib', '.storyboardc', '.car')
     
     found = False
     for root, _, files in os.walk(app_dir):
@@ -192,7 +190,6 @@ def patch_bundle_id_in_files(app_dir, old_id, new_id):
                 continue
             
             file_path = os.path.join(root, f)
-            f_lower = f.lower()
             
             try:
                 f_size = os.path.getsize(file_path)
@@ -202,42 +199,94 @@ def patch_bundle_id_in_files(app_dir, old_id, new_id):
                 continue
             
             is_macho = is_macho_binary(file_path)
-            is_strict_binary = is_macho or f_lower.endswith(strict_binary_extensions) or "globalgamemanagers" in f_lower
             
-            if is_longer and is_strict_binary:
+            if is_macho and f_size < 50 * 1024 * 1024:
+                replacements = [(old_bytes, padded_new)]
+                if patch_strings_in_binary(file_path, replacements):
+                    color_print(f"  Bundle ID заменен в бинарнике: {f}", 'green')
+                    found = True
                 continue
-                
-            target_new_bytes = binary_new_bytes if is_strict_binary else new_bytes
             
-            try:
-                if is_macho or f_lower.endswith('.dylib'):
-                    replacements = [(old_bytes, target_new_bytes)]
-                    if patch_strings_in_binary(file_path, replacements):
-                        color_print(f"  Bundle ID успешно заменён в бинарнике: {f}", 'green')
-                        found = True
-                    continue
-                
-                if not is_strict_binary and f_size <= MAX_TEXT_FILE_SIZE:
+            if not is_macho and f_size <= 50 * 1024 * 1024:
+                try:
                     with open(file_path, 'rb') as fr:
                         content = fr.read()
                     if old_bytes in content:
-                        new_content = content.replace(old_bytes, target_new_bytes)
-                        temp_path = file_path + ".tmp"
-                        with open(temp_path, 'wb') as fw:
+                        new_content = content.replace(old_bytes, padded_new)
+                        with open(file_path, 'wb') as fw:
                             fw.write(new_content)
-                        os.replace(temp_path, file_path)
-                        color_print(f"  Bundle ID заменён в файле конфигурации: {os.path.relpath(file_path, app_dir)}", 'green')
+                        color_print(f"  Bundle ID заменен в файле: {os.path.relpath(file_path, app_dir)}", 'green')
                         found = True
-                    continue
-                
-                if f_size > MAX_TEXT_FILE_SIZE:
-                    log_message(f"Пропуск большого файла {f} (>{MAX_TEXT_FILE_SIZE//1024//1024} MB) из-за риска повреждения", 'WARN')
-                    continue
-                    
-            except Exception as e:
-                log_message(f"Не удалось обработать {f}: {e}", 'WARN')
+                except:
+                    pass
     
     return found
+
+
+def deep_patch_version(app_dir, old_version, new_version):
+    old_bytes = old_version.encode('utf-8')
+    new_bytes = new_version.encode('utf-8')
+    
+    len_old = len(old_bytes)
+    len_new = len(new_bytes)
+    
+    if len_new > len_old:
+        color_print(f"[WARN] Новая версия длиннее старой ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
+        return False
+    
+    padded_new = new_bytes + b'\x00' * (len_old - len_new)
+    
+    skip_extensions = ('.png', '.jpg', '.jpeg', '.pvr', '.ktx', '.cae', '.mp3', '.ogg', '.wav', 
+                      '.m4a', '.mp4', '.mov', '.ttc', '.ttf', '.woff', '.nib', '.storyboardc', '.car')
+    
+    found = False
+    for root, _, files in os.walk(app_dir):
+        for f in files:
+            if f.startswith('._') or f.lower().endswith(skip_extensions):
+                continue
+            
+            file_path = os.path.join(root, f)
+            
+            try:
+                f_size = os.path.getsize(file_path)
+                if f_size == 0:
+                    continue
+            except OSError:
+                continue
+            
+            is_macho = is_macho_binary(file_path)
+            
+            if is_macho and f_size < 50 * 1024 * 1024:
+                replacements = [(old_bytes, padded_new)]
+                if patch_strings_in_binary(file_path, replacements):
+                    color_print(f"  Версия заменена в бинарнике: {f}", 'green')
+                    found = True
+                continue
+            
+            if not is_macho and f_size <= 50 * 1024 * 1024:
+                try:
+                    with open(file_path, 'rb') as fr:
+                        content = fr.read()
+                    if old_bytes in content:
+                        new_content = content.replace(old_bytes, padded_new)
+                        with open(file_path, 'wb') as fw:
+                            fw.write(new_content)
+                        color_print(f"  Версия заменена в файле: {os.path.relpath(file_path, app_dir)}", 'green')
+                        found = True
+                except:
+                    pass
+    
+    return found
+
+
+def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
+    from constants import MIN_HEADER_PADDING
+    main_executable = get_main_executable(app_dir, plist_data)
+    if not main_executable or not is_macho_binary(main_executable):
+        return True
+    required = estimated_tweaks * 48 + 16 + MIN_HEADER_PADDING
+    return check_header_space(main_executable, required)
+
 
 def edit_menu(plist_data, app_dir, script_dir, temp_dir):
     global config
@@ -246,14 +295,18 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
     modified = False
     icon_replaced = False
     tweak_injected = False
+    deep_bundle_mode = False
+    deep_version_mode = False
+    
     while True:
         mode_display = {
             'auto': 'ДА (авто)',
             'manual': 'ВЫБРАТЬ СВОЙ',
             'none': 'НЕТ'
         }[config.substrate_mode]
+        
         color_print("\n" + "=" * 50, 'cyan')
-        color_print("   РЕДАКТИРОВАНИЕ Info.plist и твиков", 'cyan')
+        color_print("   РЕДАКТИРОВАНИЕ Info.plist И ТВИКОВ", 'cyan')
         color_print("=" * 50, 'cyan')
         print("1. Изменить имя приложения")
         print(f"   Текущее: {plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName', 'не задано')}")
@@ -263,7 +316,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print(f"   Текущий: {plist_data.get('CFBundleVersion', '1')}")
         print("4. Изменить Bundle ID")
         print(f"   Текущий: {plist_data.get('CFBundleIdentifier', 'не задан')}")
-        print("5. Добавить поддержку файлов")
+        print("5. Включить файловый шеринг")
         print("6. Заменить иконку")
         print("7. Инъекция твиков (.dylib, .zip, .deb, .tar, .lzma, .xz)")
         print("8. Просмотреть файлы .app (открыть в редакторе)")
@@ -276,6 +329,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print("0. Выход без сохранения")
         print("=" * 50)
         choice = ask_input("Ваш выбор", "9")
+        
         if choice == "1":
             new_name = ask_input("Новое имя", plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName", ""))
             if new_name:
@@ -284,55 +338,83 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 changes["name"] = new_name
                 modified = True
                 color_print("Имя приложения изменено", 'green')
+                
         elif choice == "2":
-            new_ver = ask_input("Новая версия", plist_data.get("CFBundleShortVersionString", "1.0"))
-            if new_ver:
+            old_ver = plist_data.get("CFBundleShortVersionString", "1.0")
+            new_ver = ask_input("Новая версия", old_ver)
+            if new_ver and new_ver != old_ver:
+                color_print("\nВыберите способ замены версии:", 'cyan')
+                print("1. Только Info.plist (безопасно)")
+                print("2. Глубокая замена (во всех файлах)")
+                mode = ask_input("Ваш выбор", "1")
+                
+                if mode == "2":
+                    deep_version_mode = True
+                    color_print("Выбрана глубокая замена версии", 'yellow')
+                else:
+                    deep_version_mode = False
+                    color_print("Выбрана замена только в Info.plist", 'yellow')
+                
                 plist_data["CFBundleShortVersionString"] = new_ver
                 changes["version"] = new_ver
+                changes["version_deep"] = deep_version_mode
                 modified = True
-                color_print("Версия изменена", 'green')
+                color_print("Версия изменена в Info.plist", 'green')
+                
         elif choice == "3":
             new_build = ask_input("Номер сборки", plist_data.get("CFBundleVersion", "1"))
             if new_build:
                 plist_data["CFBundleVersion"] = new_build
                 changes["build"] = new_build
                 modified = True
-                color_print("Номер сборки изменён", 'green')
+                color_print("Номер сборки изменен", 'green')
+                
         elif choice == "4":
             old_id = plist_data.get("CFBundleIdentifier", "")
             new_id = ask_input("Новый Bundle ID", old_id)
-            
             if new_id and new_id != old_id:
-                if len(new_id.encode('utf-8')) > len(old_id.encode('utf-8')):
-                    color_print(f"\n[WARN] Новый ID ({len(new_id)} симв.) длиннее старого ({len(old_id)} симв.).", 'yellow')
-                    color_print("Глубокая замена в Mach-O бинарниках будет пропущена.", 'yellow')
-                    if not ask_yes_no("Продолжить с ограниченным патчем (только Info.plist и текстовые ресурсы)?", default=True):
-                        continue
+                color_print("\nВыберите способ замены Bundle ID:", 'cyan')
+                print("1. Только Info.plist (безопасно)")
+                print("2. Глубокая замена (во всех файлах)")
+                mode = ask_input("Ваш выбор", "1")
+                
+                if mode == "2":
+                    deep_bundle_mode = True
+                    color_print("Выбрана глубокая замена Bundle ID", 'yellow')
+                else:
+                    deep_bundle_mode = False
+                    color_print("Выбрана замена только в Info.plist", 'yellow')
                 
                 plist_data["CFBundleIdentifier"] = new_id
                 changes["bundle_id"] = new_id
+                changes["bundle_deep"] = deep_bundle_mode
                 modified = True
-                color_print("Bundle ID изменён в Info.plist", 'green')
+                color_print("Bundle ID изменен в Info.plist", 'green')
+                
         elif choice == "5":
             if add_file_support(plist_data):
                 changes["file_support"] = True
                 modified = True
-                color_print("Поддержка файлов включена", 'green')
+                color_print("Файловый шеринг включен", 'green')
             else:
-                color_print("Поддержка файлов уже включена", 'yellow')
+                color_print("Файловый шеринг уже включен", 'yellow')
+                
         elif choice == "6":
             color_print("\nВыберите изображение для иконки...", 'blue')
             img_path = pick_icon_file()
             if img_path:
-                if replace_icon(app_dir, img_path, False):
+                remove_assets = ask_yes_no("Удалить Assets.car (риск краша на iOS 15+)?", default=False)
+                if replace_icon(app_dir, img_path, remove_assets):
                     icon_replaced = True
                     changes["icon"] = True
+                    modified = True
                 else:
                     color_print("Иконка не заменена", 'red')
             else:
                 color_print("Иконка не заменена (файл не выбран)", 'red')
+                
         elif choice == "7":
-            color_print("\nПроверка дешифровки IPA...", 'blue')
+            color_print("\nПроверка расшифровки IPA...", 'blue')
             encrypted = is_ipa_encrypted(app_dir, plist_data)
             if encrypted is None:
                 color_print("Не удалось проверить, продолжаем на свой страх и риск.", 'yellow')
@@ -343,6 +425,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 continue
             else:
                 color_print("IPA расшифрован. Инъекция разрешена.", 'green')
+                
             color_print("\nВыберите .dylib, .zip, .deb, .tar, .lzma или .xz с твиками.", 'blue')
             tweak_path = pick_tweak_file()
             if not tweak_path:
@@ -382,8 +465,10 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 substrate_source = None
                 color_print("Субстрат НЕ будет встроен.", 'yellow')
+                
             module_count = count_modules_in_tweak(tweak_path)
             color_print(f"[INFO] Обнаружено примерно {module_count} модулей в архиве", 'blue')
+            
             color_print("\nПроверка свободного места в заголовке бинарника...", 'blue')
             if not check_binary_header_space(app_dir, plist_data, estimated_tweaks=module_count):
                 color_print("ВНИМАНИЕ: В заголовке бинарника может не хватить места!", 'yellow')
@@ -391,16 +476,20 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Инъекция возможна, но если не хватит места - бинарник будет поврежден.", 'yellow')
                 if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
                     continue
+                    
             if not ask_yes_no("Инъектировать выбранный твик?", default=True):
                 continue
+                
             ok, msg = inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config)
             if ok:
                 tweak_injected = True
                 changes["tweak"] = True
                 changes["substrate_mode"] = config.substrate_mode
+                modified = True
                 color_print(msg, 'green')
             else:
                 color_print("Ошибка: " + msg, 'red')
+                
         elif choice == "8":
             list_path = os.path.join(temp_dir, "file_list.txt")
             try:
@@ -414,30 +503,33 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                             rel_root += '/'
                         for file in files:
                             f.write(f"{rel_root}{file}\n")
-                color_print(f"Файл со списком создан: {list_path}", 'blue')
+                color_print(f"Список файлов создан: {list_path}", 'blue')
                 if HAVE_EDITOR:
                     editor.open_file(list_path)
-                    color_print("Редактор открыт. Закройте вкладку и нажмите Enter.", 'blue')
+                    color_print("Редактор открыт. Закройте вкладку и нажмите Enter в консоли.", 'blue')
                 else:
                     color_print("Откройте файл в текстовом редакторе.", 'yellow')
                 input("Нажмите Enter после просмотра...")
             except Exception as e:
-                color_print(f"Ошибка при создании списка: {e}", 'red')
+                color_print(f"Ошибка создания списка: {e}", 'red')
+                
         elif choice == "9":
-            if modified or icon_replaced or tweak_injected or ("custom_edit" in changes):
+            if modified or icon_replaced or tweak_injected or ("custom_edit" in changes) or ("entitlements" in changes) or ("advanced_patched" in changes):
                 color_print("\n--- Сводка изменений ---", 'cyan')
                 if "name" in changes:
                     print(f"Имя: {original.get('CFBundleName')} -> {changes['name']}")
                 if "version" in changes:
                     print(f"Версия: {original.get('CFBundleShortVersionString')} -> {changes['version']}")
+                    print(f"Глубокая замена: {'ДА' if changes.get('version_deep', False) else 'НЕТ'}")
                 if "build" in changes:
                     print(f"Сборка: {original.get('CFBundleVersion')} -> {changes['build']}")
                 if "bundle_id" in changes:
                     print(f"Bundle ID: {original.get('CFBundleIdentifier')} -> {changes['bundle_id']}")
+                    print(f"Глубокая замена: {'ДА' if changes.get('bundle_deep', False) else 'НЕТ'}")
                 if "min_os" in changes:
                     print(f"Минимальная iOS: {original.get('MinimumOSVersion', 'не указана')} -> {changes['min_os']}")
                 if "file_support" in changes:
-                    color_print("Поддержка файлов: ВКЛЮЧЕНА", 'green')
+                    color_print("Файловый шеринг: ВКЛЮЧЕН", 'green')
                 if "icon" in changes:
                     color_print("Иконка приложения: ЗАМЕНЕНА", 'green')
                 if "tweak" in changes:
@@ -454,15 +546,17 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 if "advanced_patched" in changes:
                     color_print("Расширенные патчи: ПРИМЕНЕНЫ", 'green')
                 if ask_yes_no("\nПрименить изменения и собрать IPA?", default=True):
-                    return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, ("file_support" in changes), changes
+                    return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, ("file_support" in changes), changes, deep_bundle_mode, deep_version_mode
                 else:
                     continue
             else:
                 color_print("Изменений нет. Сборка без изменений.", 'yellow')
-                return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, False, changes
+                return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, False, changes, deep_bundle_mode, deep_version_mode
+                
         elif choice == "10":
             config.use_rpath = not config.use_rpath
-            color_print(f"Тип пути изменён на: {'@rpath' if config.use_rpath else '@executable_path'}", 'blue')
+            color_print(f"Тип пути изменен на: {'@rpath' if config.use_rpath else '@executable_path'}", 'blue')
+            
         elif choice == "11":
             if config.substrate_mode == 'auto':
                 config.substrate_mode = 'manual'
@@ -473,6 +567,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 config.substrate_mode = 'auto'
                 color_print("Режим субстрата: АВТО (стандартный из папки скрипта)", 'blue')
+                
         elif choice == "12":
             json_path = os.path.join(temp_dir, "info_plist_edit.json")
             current_json = json.dumps(plist_data, indent=2, ensure_ascii=False, sort_keys=True)
@@ -512,17 +607,17 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         
                         new_bundle_id = plist_data.get("CFBundleIdentifier")
                         if new_bundle_id and new_bundle_id != old_bundle_id:
-                            if len(new_bundle_id.encode('utf-8')) > len(old_bundle_id.encode('utf-8')):
-                                color_print("[WARN] Новый Bundle ID длиннее старого. Глубокая замена будет пропущена.", 'yellow')
                             changes["bundle_id"] = new_bundle_id
-                        
-                        new_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
-                        if new_name and new_name != old_name:
-                            changes["name"] = new_name
+                            changes["bundle_deep"] = deep_bundle_mode
                         
                         new_version = plist_data.get("CFBundleShortVersionString")
                         if new_version and new_version != old_version:
                             changes["version"] = new_version
+                            changes["version_deep"] = deep_version_mode
+                        
+                        new_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
+                        if new_name and new_name != old_name:
+                            changes["name"] = new_name
                         
                         new_build_val = plist_data.get("CFBundleVersion")
                         if new_build_val and new_build_val != old_build:
@@ -532,13 +627,14 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         if new_min_os and new_min_os != old_min_os:
                             changes["min_os"] = new_min_os
                         
-                        color_print("Info.plist обновлён из JSON.", 'green')
+                        color_print("Info.plist обновлен из JSON.", 'green')
                     else:
-                        color_print("Ошибка: JSON должен быть объектом (словарём).", 'red')
+                        color_print("Ошибка: JSON должен быть объектом (словарем).", 'red')
             except json.JSONDecodeError as e:
                 color_print(f"Ошибка парсинга JSON: {e}", 'red')
             except Exception as e:
                 color_print(f"Ошибка: {e}", 'red')
+                
         elif choice == "13":
             bundle_id = plist_data.get("CFBundleIdentifier")
             if not bundle_id:
@@ -548,8 +644,10 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             if generate_custom_entitlements(app_dir, bundle_id):
                 color_print("Entitlements настроены успешно!", 'green')
                 changes["entitlements"] = True
+                modified = True
             else:
-                color_print("Ошибка при настройке entitlements", 'red')
+                color_print("Ошибка настройки entitlements", 'red')
+                
         elif choice == "14":
             color_print("\n--- РАСШИРЕННЫЕ ПАТЧИ ---", 'cyan')
             target_ios_version = None
@@ -573,11 +671,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("[SUCCESS] Расширенные патчи успешно применены!", 'green')
             else:
                 color_print("Никаких изменений не внесено.", 'yellow')
+                
         elif choice == "0":
             color_print("Выход без сохранения.", 'yellow')
             sys.exit(0)
         else:
             color_print("Неверный ввод.", 'red')
+
 
 def clean_non_standard_dirs(app_dir):
     for unwanted in UNWANTED_DIRS:
@@ -585,6 +685,7 @@ def clean_non_standard_dirs(app_dir):
         if os.path.exists(path):
             shutil.rmtree(path, ignore_errors=True)
             color_print(f"Удалена ненужная папка: {path}", 'red')
+
 
 def main():
     ensure_directories()
@@ -620,18 +721,33 @@ def main():
         old_bundle_id = plist.get("CFBundleIdentifier", "")
         if old_bundle_id:
             log.info("Текущий Bundle ID: %s", old_bundle_id)
+        old_version = plist.get("CFBundleShortVersionString", "1.0")
+        if old_version:
+            log.info("Текущая версия: %s", old_version)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        updated_plist, modified, original_bundle_id, icon_replaced, tweak_injected, file_support_enabled, changes = edit_menu(
+        updated_plist, modified, original_bundle_id, icon_replaced, tweak_injected, file_support_enabled, changes, deep_bundle_mode, deep_version_mode = edit_menu(
             plist, app_dir, script_dir, temp_dir
         )
         if modified:
             save_plist(updated_plist, info_plist_path)
-            color_print("Info.plist обновлён", 'green')
+            color_print("Info.plist обновлен", 'green')
+            
+            new_version = updated_plist.get("CFBundleShortVersionString", "1.0")
+            new_build = updated_plist.get("CFBundleVersion", "1")
+            
             if "version" in changes or "build" in changes:
-                new_version = updated_plist.get("CFBundleShortVersionString", "1.0")
-                new_build = updated_plist.get("CFBundleVersion", "1")
                 update_version_in_extensions(app_dir, new_version, new_build)
+            
+            if "version" in changes and deep_version_mode:
+                if len(new_version.encode('utf-8')) <= len(old_version.encode('utf-8')):
+                    color_print("Глубокая замена версии в бинарниках и файлах...", 'blue')
+                    if not deep_patch_version(app_dir, old_version, new_version):
+                        color_print("[WARN] Не удалось выполнить глубокую замену версии", 'yellow')
+                else:
+                    color_print("[WARN] Новая версия длиннее старой. Глубокая замена пропущена.", 'yellow')
+        
         new_bundle_id = updated_plist.get("CFBundleIdentifier", original_bundle_id)
+        
         if new_bundle_id != original_bundle_id:
             color_print("Обновление Bundle ID в расширениях (.appex)...", 'blue')
             
@@ -645,7 +761,7 @@ def main():
                         new_id = current.replace(old_parent, new_parent, 1)
                         ext_plist["CFBundleIdentifier"] = new_id
                         save_plist(ext_plist, plist_path)
-                        log_message(f"Bundle ID расширения обновлён: {current} -> {new_id}", 'INFO')
+                        log_message(f"Bundle ID расширения обновлен: {current} -> {new_id}", 'INFO')
                 except Exception as e:
                     log_message(f"Ошибка обновления Bundle ID для {plist_path}: {e}", 'WARN')
 
@@ -671,17 +787,20 @@ def main():
                         ext_plist = os.path.join(root, d, "Info.plist")
                         update_ext_bundle_id(ext_plist, original_bundle_id, new_bundle_id)
             
-            if len(new_bundle_id.encode('utf-8')) <= len(original_bundle_id.encode('utf-8')):
-                color_print("Глубокая замена Bundle ID в бинарниках и ресурсах...", 'blue')
-                if not patch_bundle_id_in_files(app_dir, original_bundle_id, new_bundle_id):
-                    color_print("[ERROR] Критическая ошибка при патчинге ресурсов. Сборка остановлена.", 'red')
-                    sys.exit(1)
-            else:
-                color_print("[WARN] Пропуск глубокой замены: новый ID длиннее старого.", 'yellow')
+            if deep_bundle_mode:
+                if len(new_bundle_id.encode('utf-8')) <= len(original_bundle_id.encode('utf-8')):
+                    color_print("Глубокая замена Bundle ID в бинарниках и файлах...", 'blue')
+                    if not deep_patch_bundle_id(app_dir, original_bundle_id, new_bundle_id):
+                        color_print("[WARN] Не удалось выполнить глубокую замену Bundle ID", 'yellow')
+                else:
+                    color_print("[WARN] Новый Bundle ID длиннее старого. Глубокая замена пропущена.", 'yellow')
+        
         color_print("\n--- Очистка подписи ---", 'red')
         clean_signature_files(app_dir)
+        
         color_print("\n--- Удаление лишних папок ---", 'red')
         clean_non_standard_dirs(app_dir)
+        
         if file_support_enabled:
             docs_dir = os.path.join(app_dir, "Documents")
             try:
@@ -691,6 +810,7 @@ def main():
             except Exception as e:
                 log_message(f"Не удалось создать папку Documents: {e}", 'WARN')
             color_print("Создана папка Documents для файлового шеринга", 'green')
+            
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
         app_name = updated_plist.get("CFBundleDisplayName") or updated_plist.get("CFBundleName") or app_basename
         app_version = updated_plist.get("CFBundleShortVersionString", "1.0")
@@ -711,7 +831,7 @@ def main():
         
         color_print("\n--- Сборка IPA ---", 'cyan')
         pack_ipa_with_progress(temp_dir, output_path, delay=delay)
-        color_print(f"[SUCCESS] IPA сохранён в: {output_path}", 'green')
+        color_print(f"[SUCCESS] IPA сохранен в: {output_path}", 'green')
         
         if ask_yes_no("\nУстановить IPA через SideStore/AltStore?", default=False):
             ok, msg = sign_app_bundle_with_path(output_path, new_bundle_id)
@@ -726,6 +846,7 @@ def main():
     color_print("\nГотово!", 'green')
     color_print(f"Файл: {os.path.basename(output_path)}", 'blue')
     color_print(f"Папка: {PATCHED_DIR}", 'blue')
+
 
 if __name__ == '__main__':
     main()
