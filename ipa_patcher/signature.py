@@ -1,95 +1,55 @@
 # -*- coding: utf-8 -*-
-import os, console
+import os
+import shutil
 from constants import SIGNATURE_DIRS, SIGNATURE_FILES
-
-def color_print(text, color='white'):
-    try:
-        colors = {
-            'white': (1.0, 1.0, 1.0),
-            'red': (1.0, 0.0, 0.0),
-            'green': (0.0, 1.0, 0.0),
-            'yellow': (1.0, 1.0, 0.0),
-            'blue': (0.0, 0.5, 1.0),
-            'cyan': (0.0, 1.0, 1.0),
-        }
-        r, g, b = colors.get(color, (1.0, 1.0, 1.0))
-        try:
-            import console as py_console
-            py_console.set_color(r, g, b)
-            print(text)
-            py_console.set_color(1.0, 1.0, 1.0)
-        except:
-            print(text)
-    except:
-        print(text)
+from utils import color_print, log_message
 
 def clean_signature_files(app_path):
-    import shutil
     for root, dirs, files in os.walk(app_path, topdown=True):
         to_delete = [d for d in dirs if d in SIGNATURE_DIRS]
         for d in to_delete:
             full = os.path.join(root, d)
             try:
                 shutil.rmtree(full)
+                log_message(f"Удалена папка подписи: {full}", 'INFO')
                 color_print(f"[INFO] Удалена папка подписи: {full}", 'red')
-            except:
-                pass
+            except Exception as e:
+                log_message(f"Ошибка удаления папки {full}: {e}", 'WARN')
+                
         dirs[:] = [d for d in dirs if d not in SIGNATURE_DIRS]
         for f in files:
             if f in SIGNATURE_FILES:
                 full = os.path.join(root, f)
                 try:
                     os.remove(full)
+                    log_message(f"Удален файл старой подписи: {full}", 'INFO')
                     color_print(f"[INFO] Удален файл подписи: {full}", 'red')
-                except:
-                    pass
-
-def sign_app_bundle(app_dir, p12_path, password, provision_path, bundle_id):
-    color_print("\n" + "=" * 50, 'cyan')
-    color_print("ОТПРАВКА IPA В SIDESTORE / ALTSTORE", 'cyan')
-    color_print("=" * 50, 'cyan')
-
-    parent_dir = os.path.dirname(os.path.dirname(app_dir))
-    ipa_path = None
-    
-    for file in os.listdir(parent_dir):
-        if file.endswith('.ipa'):
-            ipa_path = os.path.join(parent_dir, file)
-            break
-
-    if not ipa_path or not os.path.exists(ipa_path):
-        ipa_path = os.path.splitext(app_dir)[0] + '.ipa'
-        if not os.path.exists(ipa_path):
-            color_print("[ERROR] IPA файл не найден!", 'red')
-            return False, "IPA не найден"
-
-    color_print(f"[INFO] Файл готов: {os.path.basename(ipa_path)}", 'green')
-    color_print("[INFO] Открываю системное меню iOS Share Sheet...", 'blue')
-    color_print("[INFO] Выберите 'SideStore' или 'AltStore' в появившемся списке.", 'yellow')
-    
-    try:
-        console.open_in(ipa_path)
-        return True, "Экспорт через Share Sheet запущен"
-    except Exception as e:
-        color_print(f"[ERROR] Ошибка вызова Share Sheet: {e}", 'red')
-        return False, str(e)
+                except Exception as e:
+                    log_message(f"Ошибка удаления файла {full}: {e}", 'WARN')
 
 def sign_app_bundle_with_path(ipa_path, bundle_id):
     color_print("\n" + "=" * 50, 'cyan')
-    color_print("ОТПРАВКА IPA В SIDESTORE / ALTSTORE", 'cyan')
+    color_print("ЭКСПОРТ IPA В СЛУЖБЫ ПЕРЕПОДПИСИ", 'cyan')
     color_print("=" * 50, 'cyan')
 
     if not os.path.exists(ipa_path):
-        color_print("[ERROR] IPA файл не найден!", 'red')
+        log_message(f"IPA not found: {ipa_path}", 'ERROR')
+        color_print("[ERROR] Итоговый файл IPA не найден!", 'red')
         return False, "IPA не найден"
 
-    color_print(f"[INFO] Файл готов: {os.path.basename(ipa_path)}", 'green')
-    color_print("[INFO] Открываю системное меню iOS Share Sheet...", 'blue')
-    color_print("[INFO] Выберите 'SideStore' или 'AltStore' в появившемся списке.", 'yellow')
+    color_print(f"[INFO] Сборка подготовлена: {os.path.basename(ipa_path)}", 'green')
+    color_print("[INFO] Вызываю системное меню iOS Share Sheet...", 'blue')
+    color_print("[INFO] Выберите 'SideStore' или 'AltStore' в появившемся списке приложений.", 'yellow')
     
     try:
+        import console
         console.open_in(ipa_path)
-        return True, "Экспорт через Share Sheet запущен"
+        log_message("Системное меню Share Sheet успешно запущено", 'INFO')
+        return True, "Share Sheet открыт"
+    except ImportError:
+        color_print("[WARN] Скрипт запущен вне Pythonista iOS. Прямой импорт невозможен.", 'yellow')
+        return True, "Консольный режим: файл сохранен на диск"
     except Exception as e:
+        log_message(f"Share Sheet error: {e}", 'ERROR')
         color_print(f"[ERROR] Ошибка вызова Share Sheet: {e}", 'red')
         return False, str(e)
