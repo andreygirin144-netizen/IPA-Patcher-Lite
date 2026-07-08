@@ -1,60 +1,36 @@
 # -*- coding: utf-8 -*-
 import plistlib
 import os
-import logging
-
-log = logging.getLogger(__name__)
+from utils import log_message
 
 def load_plist(path):
-    with open(path, "rb") as f:
-        return plistlib.load(f)
+    try:
+        with open(path, "rb") as f:
+            return plistlib.load(f)
+    except Exception as e:
+        log_message(f"Ошибка загрузки plist {path}: {e}", 'ERROR')
+        raise
 
 def save_plist(data, path):
-    with open(path, "wb") as f:
-        plistlib.dump(data, f)
+    try:
+        with open(path, "wb") as f:
+            plistlib.dump(data, f)
+    except Exception as e:
+        log_message(f"Ошибка сохранения plist {path}: {e}", 'ERROR')
+        raise
 
 def patch_bundle_id(plist_path, old_id, new_id):
     if not os.path.isfile(plist_path):
         return
     try:
         plist = load_plist(plist_path)
-    except Exception as e:
-        log.error("Не удалось прочитать plist для патча ID: %s", e)
-        return
-    changed = False
-    current_id = plist.get("CFBundleIdentifier", "")
-    if current_id == old_id:
-        plist["CFBundleIdentifier"] = new_id
-        changed = True
-    elif old_id in current_id:
-        plist["CFBundleIdentifier"] = current_id.replace(old_id, new_id)
-        changed = True
-    for url_type in plist.get("CFBundleURLTypes", []):
-        if old_id in url_type.get("CFBundleURLName", ""):
-            url_type["CFBundleURLName"] = url_type["CFBundleURLName"].replace(old_id, new_id)
-            changed = True
-        schemes = url_type.get("CFBundleURLSchemes", [])
-        for i, scheme in enumerate(schemes):
-            if old_id in scheme:
-                schemes[i] = scheme.replace(old_id, new_id)
-                changed = True
-    for key in ("WKAppBundleIdentifier", "WKCompanionAppBundleIdentifier"):
-        if old_id in plist.get(key, ""):
-            plist[key] = plist[key].replace(old_id, new_id)
-            changed = True
-    if "NSExtension" in plist and isinstance(plist["NSExtension"], dict):
-        ns_ext = plist["NSExtension"]
-        if "NSExtensionAttributes" in ns_ext and isinstance(ns_ext["NSExtensionAttributes"], dict):
-            ns_attrs = ns_ext["NSExtensionAttributes"]
-            if old_id in ns_attrs.get("WKAppBundleIdentifier", ""):
-                ns_attrs["WKAppBundleIdentifier"] = ns_attrs["WKAppBundleIdentifier"].replace(old_id, new_id)
-                changed = True
-    if changed:
-        try:
+        current_id = plist.get("CFBundleIdentifier", "")
+        if current_id == old_id or old_id in current_id:
+            plist["CFBundleIdentifier"] = current_id.replace(old_id, new_id)
             save_plist(plist, plist_path)
-            log.info("[+] Bundle ID успешно обновлён в: %s", os.path.basename(plist_path))
-        except Exception as e:
-            log.error("Не удалось сохранить обновлённый plist: %s", e)
+            log_message(f"Bundle ID обновлен в: {os.path.basename(plist_path)}", 'INFO')
+    except Exception as e:
+        log_message(f"Не удалось обновить Bundle ID в {plist_path}: {e}", 'ERROR')
 
 def add_file_support(plist_data):
     modified = False
@@ -65,3 +41,21 @@ def add_file_support(plist_data):
         plist_data["LSSupportsOpeningDocumentsInPlace"] = True
         modified = True
     return modified
+
+def update_version_in_extensions(app_dir, version, build):
+    plugins_path = os.path.join(app_dir, "PlugIns")
+    if os.path.isdir(plugins_path):
+        for ext in os.listdir(plugins_path):
+            if ext.endswith(".appex"):
+                ext_plist_path = os.path.join(plugins_path, ext, "Info.plist")
+                if os.path.isfile(ext_plist_path):
+                    try:
+                        ext_plist = load_plist(ext_plist_path)
+                        if version:
+                            ext_plist["CFBundleShortVersionString"] = version
+                        if build:
+                            ext_plist["CFBundleVersion"] = build
+                        save_plist(ext_plist, ext_plist_path)
+                        log_message(f"Версия расширения {ext} синхронизирована", 'INFO')
+                    except Exception as e:
+                        log_message(f"Не удалось обновить версию в расширении {ext}: {e}", 'WARN')
