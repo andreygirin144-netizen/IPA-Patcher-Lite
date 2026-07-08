@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-import os, shutil, tempfile, zipfile, logging, ctypes, struct, re
+import os
+import shutil
+import tempfile
+import zipfile
+import struct
+import re
+import ctypes
 from patch_strings import patch_strings_in_binary
 from macho import (
     inject_lc_load_dylib, inject_rpath, is_macho_binary, has_rpath,
@@ -7,7 +13,8 @@ from macho import (
 )
 from substrate import inject_substrate, patch_tweak_substrate_dependencies
 from constants import MIN_HEADER_PADDING, MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32, FAT_MAGIC, FAT_CIGAM
-from utils import color_print
+from utils import color_print, log_message
+
 
 def count_modules_in_tweak(tweak_path):
     if not os.path.exists(tweak_path):
@@ -47,6 +54,7 @@ def count_modules_in_tweak(tweak_path):
     except:
         return 2
 
+
 def parse_dependencies(control_path):
     deps = []
     if not os.path.isfile(control_path):
@@ -64,6 +72,7 @@ def parse_dependencies(control_path):
     except:
         pass
     return deps
+
 
 def resolve_dependencies(dep_name, source_root, frameworks_dir, copied_dylibs, copied_frameworks):
     clean_name = dep_name
@@ -96,6 +105,7 @@ def resolve_dependencies(dep_name, source_root, frameworks_dir, copied_dylibs, c
                     color_print(f"Resolved framework dependency: {f}", 'hotpink')
                     found = True
     return found
+
 
 def check_header_space(main_executable, required_bytes):
     try:
@@ -153,6 +163,7 @@ def check_header_space(main_executable, required_bytes):
     except Exception:
         return True
 
+
 def extract_archive_with_libarchive(archive_path, output_dir):
     try:
         libarchive = ctypes.CDLL('/usr/lib/libarchive.2.dylib')
@@ -188,6 +199,7 @@ def extract_archive_with_libarchive(archive_path, output_dir):
         os.chdir(old_cwd)
     color_print(f"Extracted: {os.path.basename(archive_path)}", 'hotpink')
 
+
 def extract_deb_recursive(deb_path, output_dir):
     extract_archive_with_libarchive(deb_path, output_dir)
     for root, _, files in os.walk(output_dir):
@@ -204,6 +216,7 @@ def extract_deb_recursive(deb_path, output_dir):
                     color_print(f"Failed to remove nested archive: {e}", 'yellow')
                 break
 
+
 def get_main_executable(app_dir, plist_data):
     executable_name = plist_data.get("CFBundleExecutable")
     if not executable_name:
@@ -216,6 +229,7 @@ def get_main_executable(app_dir, plist_data):
             return os.path.join(root, executable_name)
     return None
 
+
 def patch_all_macho_in_dir(directory, replacements):
     if not os.path.isdir(directory):
         return
@@ -226,6 +240,7 @@ def patch_all_macho_in_dir(directory, replacements):
                 continue
             if is_macho_binary(file_path):
                 patch_strings_in_binary(file_path, replacements)
+
 
 def ensure_frameworks_rpath(main_executable):
     rpath_path = "@executable_path/Frameworks"
@@ -241,6 +256,22 @@ def ensure_frameworks_rpath(main_executable):
         color_print(f"LC_RPATH {rpath_path} already exists", 'hotpink')
         return True
 
+
+def ensure_executable_rpath(main_executable):
+    rpath_path = "@executable_path/"
+    if not has_rpath(main_executable, rpath_path):
+        color_print(f"LC_RPATH {rpath_path} not found, adding...", 'hotpink')
+        if inject_rpath(main_executable, rpath_path):
+            color_print(f"LC_RPATH {rpath_path} added successfully", 'hotpink')
+            return True
+        else:
+            color_print(f"Failed to add LC_RPATH {rpath_path}", 'yellow')
+            return False
+    else:
+        color_print(f"LC_RPATH {rpath_path} already exists", 'hotpink')
+        return True
+
+
 def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
     if config is None:
         from constants import PatchConfig
@@ -252,19 +283,24 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
     
     if not os.path.exists(tweak_path):
         return False, "File not found"
+    
     main_executable = get_main_executable(app_dir, plist_data)
     if not main_executable:
         return False, "Main executable not found"
     if not is_macho_binary(main_executable):
         return False, "Main binary is not Mach-O"
+    
     frameworks_dir = os.path.join(app_dir, "Frameworks")
     os.makedirs(frameworks_dir, exist_ok=True)
+    
     temp_extract = None
     copied_dylibs = []
     copied_frameworks = []
     copied_bundles = []
     direct_dylib = None
+    
     ext = os.path.splitext(tweak_path)[1].lower()
+    
     if ext == '.dylib':
         direct_dylib = tweak_path
         color_print(f"Selected direct .dylib file: {os.path.basename(tweak_path)}", 'hotpink')
@@ -295,6 +331,7 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
                     source_root = temp_extract
             else:
                 return False, f"Unsupported file format: {ext}"
+            
             ms_path = os.path.join(source_root, 'Library', 'MobileSubstrate', 'DynamicLibraries')
             if os.path.exists(ms_path) and os.path.isdir(ms_path):
                 color_print(f"Found DynamicLibraries folder: {ms_path}", 'hotpink')
@@ -333,6 +370,7 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
                                 patch_tweak_substrate_dependencies(dst)
                                 copied_dylibs.append((f, dst))
                                 color_print(f"Copied .dylib: {f}", 'hotpink')
+            
             fw_path = os.path.join(source_root, 'Library', 'Frameworks')
             if os.path.exists(fw_path) and os.path.isdir(fw_path):
                 color_print(f"Found Frameworks folder: {fw_path}", 'hotpink')
@@ -367,6 +405,7 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
                                                 patch_tweak_substrate_dependencies(fw_bin)
                                 copied_frameworks.append((d, dst))
                                 color_print(f"Copied .framework: {d}", 'hotpink')
+            
             for root, dirs, files in os.walk(source_root):
                 for d in dirs:
                     if d.endswith('.bundle'):
@@ -376,6 +415,7 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
                             shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
                             copied_bundles.append((d, dst))
                             color_print(f"Copied .bundle: {d}", 'hotpink')
+            
             for unwanted in ['Applications', 'DEBIAN']:
                 unwanted_path = os.path.join(source_root, unwanted)
                 if os.path.exists(unwanted_path):
@@ -389,6 +429,7 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
         finally:
             if temp_extract and os.path.exists(temp_extract):
                 shutil.rmtree(temp_extract, ignore_errors=True)
+    
     if direct_dylib:
         dylib_name = os.path.basename(direct_dylib)
         dst = os.path.join(frameworks_dir, dylib_name)
@@ -397,8 +438,10 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
             patch_tweak_substrate_dependencies(dst)
             copied_dylibs.append((dylib_name, dst))
             color_print(f"Copied direct .dylib: {dylib_name}", 'hotpink')
+    
     if not copied_dylibs and not copied_frameworks and not copied_bundles and not direct_dylib:
         return False, "No tweaks found to inject"
+    
     estimated_commands = len(copied_dylibs) + len(copied_frameworks)
     if enable_substrate:
         estimated_commands += 1
@@ -410,39 +453,47 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
             f"load command(s) (~{required_space} bytes needed). "
             f"Injection aborted to avoid corrupting the binary."
         )
+    
+    ensure_executable_rpath(main_executable)
     ensure_frameworks_rpath(main_executable)
+    
     if enable_substrate:
         substrate_path = inject_substrate(app_dir, script_dir, substrate_source)
         if substrate_path is None:
-            color_print("Ошибка: не удалось скопировать субстрат", 'red')
+            color_print("Error: failed to copy substrate", 'red')
             return False, "Substrate injection failed"
-        install_substrate = "@executable_path/libsubstrate.dylib"
+        install_substrate = "@executable_path/Frameworks/libsub.dylib"
         if not inject_lc_load_dylib(main_executable, install_substrate):
             color_print("Failed to add substrate to LC_LOAD_DYLIB", 'yellow')
         else:
             color_print(f"Substrate added: {install_substrate}", 'hotpink')
+    
     if use_rpath:
         path_prefix = b"@rpath/Frameworks/"
     else:
         path_prefix = b"@executable_path/Frameworks/"
+    
     replacement_pairs = [
         (b"/Library/MobileSubstrate/DynamicLibraries/", path_prefix),
-        (b"/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", b"@executable_path/libsubstrate.dylib"),
-        (b"@rpath/CydiaSubstrate.framework/CydiaSubstrate", b"@executable_path/libsubstrate.dylib"),
+        (b"/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", b"@executable_path/Frameworks/libsub.dylib"),
+        (b"@rpath/CydiaSubstrate.framework/CydiaSubstrate", b"@executable_path/Frameworks/libsub.dylib"),
     ]
+    
     fw_path_prefix = "@rpath/"
     for fw_name, _ in copied_frameworks:
         binary_name = fw_name.replace('.framework', '')
         old_fw_path = f"/Library/Frameworks/{fw_name}/{binary_name}".encode('utf-8')
         new_fw_path = f"{fw_path_prefix}{fw_name}/{binary_name}".encode('utf-8')
         replacement_pairs.append((old_fw_path, new_fw_path))
+    
     patch_all_macho_in_dir(frameworks_dir, replacement_pairs)
+    
     print("\n--- LC_LOAD_DYLIB ---")
     injected = []
     failed = []
-
+    
     dylib_prefix = "@rpath/" if use_rpath else "@executable_path/Frameworks/"
-
+    
     for name, path in copied_dylibs:
         install = f"{dylib_prefix}{os.path.basename(path)}"
         if inject_lc_load_dylib(main_executable, install):
@@ -451,6 +502,7 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
         else:
             failed.append(name)
             color_print(f"Failed to inject .dylib: {name}", 'yellow')
+    
     for name, fw_path in copied_frameworks:
         binary_name = name.replace('.framework', '')
         binary_path = os.path.join(fw_path, binary_name)
@@ -465,14 +517,18 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
         else:
             color_print(f"Binary not found in framework {name}", 'yellow')
             failed.append(name)
+    
     if injected:
         color_print(f"Successfully injected: {injected}", 'hotpink')
     if failed:
         color_print(f"Failed to inject: {failed}", 'yellow')
+    
     if not injected and (copied_dylibs or copied_frameworks):
         return False, "Injection failed (not enough space in header)"
+    
     if enable_substrate:
         msg = f"Substrate + {len(injected)} tweaks. Copied .bundle: {len(copied_bundles)}"
     else:
         msg = f"{len(injected)} tweaks (without substrate). Copied .bundle: {len(copied_bundles)}"
+    
     return True, msg
