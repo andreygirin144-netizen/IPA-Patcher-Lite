@@ -2,7 +2,31 @@
 import os
 import shutil
 from plist_editor import load_plist, save_plist
-from utils import log_message
+from utils import log_message, color_print, ask_yes_no
+
+
+def check_patch_availability(app_dir, plist_data):
+    available = {}
+    
+    available["lower_ios"] = "MinimumOSVersion" in plist_data
+    
+    available["remove_supported_devices"] = "UISupportedDevices" in plist_data
+    
+    plugins_path = os.path.join(app_dir, "PlugIns")
+    available["remove_plugins"] = os.path.exists(plugins_path) and os.path.isdir(plugins_path)
+    
+    available["remove_watch"] = False
+    for watch_dir in ["Watch", "WatchPlugIns"]:
+        w_path = os.path.join(app_dir, watch_dir)
+        if os.path.exists(w_path) and os.path.isdir(w_path):
+            available["remove_watch"] = True
+            break
+    
+    available["remove_url_schemes"] = "CFBundleURLTypes" in plist_data
+    
+    available["fix_white_icon"] = any(key in plist_data for key in ["CFBundleIcons", "CFBundleIcons~ipad", "CFBundleIconName"])
+    
+    return available
 
 
 def apply_advanced_patches(app_dir, plist_data, options):
@@ -35,8 +59,6 @@ def apply_advanced_patches(app_dir, plist_data, options):
             plist_data.pop("UISupportedDevices")
             log_message("Ограничения поддерживаемых устройств удалены", 'INFO')
             modified = True
-        else:
-            log_message("UISupportedDevices не найден в Info.plist", 'WARN')
             
     if options.get("remove_plugins"):
         plugins_path = os.path.join(app_dir, "PlugIns")
@@ -44,8 +66,6 @@ def apply_advanced_patches(app_dir, plist_data, options):
             shutil.rmtree(plugins_path, ignore_errors=True)
             log_message("Папка PlugIns полностью удалена из пакета", 'INFO')
             modified = True
-        else:
-            log_message("Папка PlugIns не найдена", 'WARN')
             
     if options.get("remove_watch"):
         for watch_dir in ["Watch", "WatchPlugIns"]:
@@ -54,16 +74,12 @@ def apply_advanced_patches(app_dir, plist_data, options):
                 shutil.rmtree(w_path, ignore_errors=True)
                 log_message(f"Компоненты {watch_dir} удалены", 'INFO')
                 modified = True
-            else:
-                log_message(f"Папка {watch_dir} не найдена", 'WARN')
                 
     if options.get("remove_url_schemes"):
         if "CFBundleURLTypes" in plist_data:
             plist_data.pop("CFBundleURLTypes")
             log_message("Кастомные URL-схемы удалены", 'INFO')
             modified = True
-        else:
-            log_message("CFBundleURLTypes не найден в Info.plist", 'WARN')
             
     if options.get("fix_white_icon"):
         try:
@@ -75,8 +91,6 @@ def apply_advanced_patches(app_dir, plist_data, options):
             if removed:
                 log_message("Фикс белых иконок успешно применен", 'INFO')
                 modified = True
-            else:
-                log_message("Ключи для фикса белых иконок не найдены", 'WARN')
         except Exception as e:
             log_message(f"Ошибка применения фикса иконок: {e}", 'WARN')
             
