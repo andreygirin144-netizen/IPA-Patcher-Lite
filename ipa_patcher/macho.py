@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-import struct, os
+import struct
+import os
 from constants import (
     MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32,
     FAT_MAGIC, FAT_CIGAM, LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_RPATH,
@@ -12,12 +13,14 @@ ARM64_SUBTYPE = 0
 ARM64E_SUBTYPE = 2
 X86_64_CPUTYPE = 0x01000007
 
+
 def is_arm64_slice(cputype, cpusubtype):
     clean_subtype = cpusubtype & 0x0FFFFFFF
     if cputype == ARM64_CPUTYPE:
         if clean_subtype in (ARM64_SUBTYPE, ARM64E_SUBTYPE):
             return True
     return False
+
 
 def get_arch_slices(data, offset=0):
     slices = []
@@ -45,6 +48,7 @@ def get_arch_slices(data, offset=0):
             })
     return slices
 
+
 def parse_arch_name(cputype, cpusubtype):
     if cputype == ARM64_CPUTYPE:
         clean_subtype = cpusubtype & 0x0FFFFFFF
@@ -58,6 +62,7 @@ def parse_arch_name(cputype, cpusubtype):
         return "x86_64"
     else:
         return f"cputype_{cputype}"
+
 
 def list_all_archs(binary_path):
     try:
@@ -81,6 +86,7 @@ def list_all_archs(binary_path):
         log_message(f"Failed to list architectures for {binary_path}: {e}", 'ERROR')
         return ["unknown"]
 
+
 def is_macho_binary(file_path):
     try:
         with open(file_path, 'rb') as f:
@@ -94,8 +100,66 @@ def is_macho_binary(file_path):
         log_message(f"Failed to check Mach-O binary {file_path}: {e}", 'ERROR')
         return False
 
+
+def is_fat_binary(binary_path):
+    try:
+        with open(binary_path, 'rb') as f:
+            magic = struct.unpack_from('>I', f.read(4))[0]
+            return magic in (FAT_MAGIC, FAT_CIGAM)
+    except:
+        return False
+
+
+def thin_binary_to_arm64(binary_path):
+    try:
+        with open(binary_path, 'rb') as f:
+            data = bytearray(f.read())
+        
+        if len(data) < 8:
+            return False
+        
+        magic = struct.unpack_from('>I', data, 0)[0]
+        if magic not in (FAT_MAGIC, FAT_CIGAM):
+            return True
+        
+        endian = '>' if magic == FAT_MAGIC else '<'
+        nfat = struct.unpack_from(endian + 'I', data, 4)[0]
+        
+        arm64_slice = None
+        
+        for i in range(nfat):
+            offset = 8 + i * 20
+            if offset + 20 > len(data):
+                break
+            
+            cputype = struct.unpack_from(endian + 'i', data, offset)[0]
+            cpusubtype = struct.unpack_from(endian + 'i', data, offset + 4)[0]
+            slice_offset = struct.unpack_from(endian + 'I', data, offset + 8)[0]
+            slice_size = struct.unpack_from(endian + 'I', data, offset + 12)[0]
+            
+            arm64_cputype = 0x0100000C
+            clean_subtype = cpusubtype & 0x0FFFFFFF
+            if cputype == arm64_cputype and clean_subtype in (0, 2):
+                arm64_slice = data[slice_offset:slice_offset + slice_size]
+                break
+        
+        if arm64_slice is None:
+            log_message("No arm64 slice found in FAT binary", 'WARN')
+            return False
+        
+        with open(binary_path, 'wb') as f:
+            f.write(arm64_slice)
+        
+        log_message(f"Binary thinned to arm64 only: {os.path.basename(binary_path)}", 'INFO')
+        return True
+    except Exception as e:
+        log_message(f"Failed to thin binary: {e}", 'ERROR')
+        return False
+
+
 def _align(value, alignment):
     return (value + alignment - 1) & ~(alignment - 1)
+
 
 def get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds):
     min_section_offset = len(data)
@@ -127,6 +191,7 @@ def get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds)
         cmd_offset += cmdsize_cur
     return min_section_offset
 
+
 def get_main_executable(app_dir, plist_data):
     executable_name = plist_data.get("CFBundleExecutable")
     if not executable_name:
@@ -138,6 +203,7 @@ def get_main_executable(app_dir, plist_data):
         if executable_name in files:
             return os.path.join(root, executable_name)
     return None
+
 
 def _inject_load_dylib_into_slice(data, offset, dylib_install_name):
     try:
@@ -191,6 +257,7 @@ def _inject_load_dylib_into_slice(data, offset, dylib_install_name):
         log_message(f"Failed to inject LC_LOAD_DYLIB: {e}", 'ERROR')
         return False
 
+
 def inject_lc_load_dylib(binary_path, dylib_install_name):
     try:
         with open(binary_path, 'rb') as f:
@@ -222,6 +289,7 @@ def inject_lc_load_dylib(binary_path, dylib_install_name):
     except Exception as e:
         log_message(f"Failed to write binary: {e}", 'ERROR')
         return False
+
 
 def _inject_rpath_into_slice(data, offset, rpath_path):
     try:
@@ -273,6 +341,7 @@ def _inject_rpath_into_slice(data, offset, rpath_path):
         log_message(f"Failed to inject LC_RPATH: {e}", 'ERROR')
         return False
 
+
 def inject_rpath(binary_path, rpath_path):
     try:
         with open(binary_path, 'rb') as f:
@@ -305,6 +374,7 @@ def inject_rpath(binary_path, rpath_path):
         log_message(f"Failed to write binary: {e}", 'ERROR')
         return False
 
+
 def has_rpath(binary_path, rpath_path):
     try:
         with open(binary_path, 'rb') as f:
@@ -322,6 +392,7 @@ def has_rpath(binary_path, rpath_path):
     except Exception as e:
         log_message(f"Failed to check RPATH: {e}", 'ERROR')
         return False
+
 
 def _has_rpath_in_slice(data, offset, rpath_path):
     try:
@@ -353,6 +424,7 @@ def _has_rpath_in_slice(data, offset, rpath_path):
     except Exception as e:
         log_message(f"Failed to check RPATH in slice: {e}", 'ERROR')
         return False
+
 
 def _add_code_signature_to_slice(data, offset, sig_offset, sig_size):
     try:
@@ -392,6 +464,7 @@ def _add_code_signature_to_slice(data, offset, sig_offset, sig_size):
     except Exception as e:
         log_message(f"Failed to add code signature: {e}", 'ERROR')
         return False
+
 
 def inject_code_signature(binary_path, super_blob):
     try:
@@ -441,6 +514,7 @@ def inject_code_signature(binary_path, super_blob):
         log_message(f"Failed to write binary: {e}", 'ERROR')
         return False
 
+
 def _check_encryption_in_slice(f, offset):
     try:
         f.seek(offset)
@@ -482,6 +556,7 @@ def _check_encryption_in_slice(f, offset):
     except Exception as e:
         log_message(f"Failed to check encryption: {e}", 'ERROR')
         return None
+
 
 def is_ipa_encrypted(app_dir, plist_data):
     executable_name = plist_data.get("CFBundleExecutable")
