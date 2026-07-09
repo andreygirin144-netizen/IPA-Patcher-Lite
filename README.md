@@ -11,7 +11,6 @@
 [![Version](https://img.shields.io/badge/Версия-1.0.5-blue?style=flat-square)]()
 [![License MIT](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](LICENSE)
 
-**Распаковка → редактирование → инъекция твиков → расширенные патчи → пересборка `.ipa` — всё в одном скрипте**
 
 </div>
 
