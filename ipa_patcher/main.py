@@ -23,7 +23,7 @@ from signature import clean_signature_files, sign_app_bundle_with_path
 from macho import is_ipa_encrypted, is_macho_binary, is_fat_binary, thin_binary_to_arm64
 from tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak, get_main_executable
 from entitlements import generate_custom_entitlements
-from advanced_patches import apply_advanced_patches
+from advanced_patches import apply_advanced_patches, check_patch_availability
 from patch_strings import patch_strings_in_binary
 from utils import color_print, log_message, clear_screen, ensure_directories, PATCHED_DIR, ask_input, ask_yes_no
 
@@ -656,19 +656,39 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 
         elif choice == "14":
             color_print("\n--- РАСШИРЕННЫЕ ПАТЧИ ---", 'cyan')
+            
+            available = check_patch_availability(app_dir, plist_data)
+            
+            color_print("\nДоступные патчи:", 'yellow')
+            names = {
+                "lower_ios": "Понижение iOS",
+                "remove_supported_devices": "Удаление ограничений по моделям",
+                "remove_plugins": "Удаление плагинов",
+                "remove_watch": "Удаление Apple Watch",
+                "remove_url_schemes": "Удаление URL-схем",
+                "fix_white_icon": "Фикс белой иконки"
+            }
+            for key, value in available.items():
+                status = "Доступно" if value else "Нет данных"
+                color_print(f"  {names.get(key, key)}: {status}", 'white' if value else 'yellow')
+            
+            print()
+            
             target_ios_version = None
-            if ask_yes_no("Понизить требуемую версию iOS?", default=True):
+            if available["lower_ios"] and ask_yes_no("Понизить требуемую версию iOS?", default=True):
                 current_min = plist_data.get("MinimumOSVersion", "не указана")
                 print(f"Текущая минимальная iOS: {current_min}")
                 target_ios_version = ask_input("Введите целевую версию iOS (например, 10.0, 12.0, 14.0)", "10.0")
+            
             adv_options = {
                 "lower_ios": target_ios_version,
-                "remove_supported_devices": ask_yes_no("Удалить ограничения по моделям (UISupportedDevices)?", default=True),
-                "remove_plugins": ask_yes_no("Удалить все плагины приложения (для бесплатных аккаунтов)?", default=False),
-                "remove_watch": ask_yes_no("Удалить плагины для Apple Watch?", default=False),
-                "remove_url_schemes": ask_yes_no("Удалить кастомные URL-схемы (полезно для клонов)?", default=False),
-                "fix_white_icon": ask_yes_no("Применить фикс белой иконки?", default=False)
+                "remove_supported_devices": available["remove_supported_devices"] and ask_yes_no("Удалить ограничения по моделям (UISupportedDevices)?", default=True),
+                "remove_plugins": available["remove_plugins"] and ask_yes_no("Удалить все плагины приложения (для бесплатных аккаунтов)?", default=False),
+                "remove_watch": available["remove_watch"] and ask_yes_no("Удалить плагины для Apple Watch?", default=False),
+                "remove_url_schemes": available["remove_url_schemes"] and ask_yes_no("Удалить кастомные URL-схемы (полезно для клонов)?", default=False),
+                "fix_white_icon": available["fix_white_icon"] and ask_yes_no("Применить фикс белой иконки?", default=False)
             }
+            
             if apply_advanced_patches(app_dir, plist_data, adv_options):
                 modified = True
                 changes["advanced_patched"] = True
