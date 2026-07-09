@@ -9,11 +9,79 @@ import ctypes
 from patch_strings import patch_strings_in_binary
 from macho import (
     inject_lc_load_dylib, inject_rpath, is_macho_binary, has_rpath,
-    get_min_section_offset, get_arch_slices, is_arm64_slice
+    get_min_section_offset, get_arch_slices, is_arm64_slice,
+    is_fat_binary, thin_binary_to_arm64
 )
 from substrate import inject_substrate, patch_tweak_substrate_dependencies
 from constants import MIN_HEADER_PADDING, MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32, FAT_MAGIC, FAT_CIGAM
 from utils import color_print, log_message
+
+
+def verify_binary_architecture(binary_path):
+    if not os.path.isfile(binary_path):
+        return False, "Файл не найден"
+    
+    try:
+        with open(binary_path, 'rb') as f:
+            magic_bytes = f.read(4)
+            
+        if len(magic_bytes) < 4:
+            return False, "Бинарник поврежден или пуст"
+            
+        if magic_bytes in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf'):
+            return True, "Чистый ARM64 / ARM64e бинарник. Отлично."
+            
+        if magic_bytes in (b'\xce\xfa\xed\xfe', b'\xfe\xed\xfa\xce'):
+            return False, "Критическая ошибка: Это 32-битный бинарник (ARMv7/v7s)."
+            
+        if magic_bytes in (b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'):
+            endian = '>' if magic_bytes == b'\xca\xfe\xba\xbe' else '<'
+            
+            with open(binary_path, 'rb') as f:
+                header_data = f.read(4096)
+                
+            nfat = struct.unpack_from(endian + 'I', header_data, 4)[0]
+            
+            if nfat > 20:
+                return False, f"Ошибка структуры FAT заголовка: считано нереальное количество архитектур ({nfat})"
+            
+            has_modern_arch = False
+            detected_archs = []
+            
+            for i in range(nfat):
+                offset = 8 + i * 20
+                if offset + 20 > len(header_data):
+                    break
+                    
+                cputype = struct.unpack_from(endian + 'i', header_data, offset)[0]
+                cpusubtype = struct.unpack_from(endian + 'i', header_data, offset + 4)[0]
+                
+                ARM_CPUTYPE = 12
+                ARM64_CPUTYPE = 0x0100000C
+                
+                if cputype == ARM_CPUTYPE:
+                    detected_archs.append("ARMv7/v7s (32-bit)")
+                elif cputype == ARM64_CPUTYPE:
+                    clean_subtype = cpusubtype & 0x0FFFFFFF
+                    if clean_subtype == 2:
+                        detected_archs.append("ARM64e (64-bit)")
+                        has_modern_arch = True
+                    else:
+                        detected_archs.append("ARM64 (64-bit)")
+                        has_modern_arch = True
+                else:
+                    detected_archs.append(f"Unknown ({hex(cputype)})")
+            
+            arch_list_str = ", ".join(detected_archs)
+            if has_modern_arch:
+                return True, f"FAT бинарник. Найдены архитектуры: [{arch_list_str}]. Разрешено прореживание."
+            else:
+                return False, f"Критическая ошибка: В FAT бинарнике нет 64-битного среза! Найдены только: [{arch_list_str}]."
+                
+        return False, f"Неизвестный формат файла (Magic: {magic_bytes.hex()}). Это не Mach-O бинарник."
+        
+    except Exception as e:
+        return False, f"Ошибка при анализе структуры бинарника: {e}"
 
 
 def count_modules_in_tweak(tweak_path):
@@ -218,6 +286,8 @@ def extract_deb_recursive(deb_path, output_dir):
 
 
 def get_main_executable(app_dir, plist_data):
+    if plist_data is None:
+        return None
     executable_name = plist_data.get("CFBundleExecutable")
     if not executable_name:
         return None
@@ -289,6 +359,24 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
         return False, "Main executable not found"
     if not is_macho_binary(main_executable):
         return False, "Main binary is not Mach-O"
+    
+    color_print(f"[*] Анализ архитектуры исполняемого файла: {os.path.basename(main_executable)}", 'cyan')
+    is_supported, status_message = verify_binary_architecture(main_executable)
+    
+    if not is_supported:
+        color_print(f"[ERROR] {status_message}", 'red')
+        log_message(f"Architecture check failed: {status_message}", 'ERROR')
+        return False, "Unsupported architecture"
+    
+    color_print(f"[SUCCESS] {status_message}", 'green')
+    log_message(f"Architecture check passed: {status_message}", 'INFO')
+    
+    if is_fat_binary(main_executable):
+        color_print("[INFO] FAT binary detected, thinning to arm64 only...", 'cyan')
+        if thin_binary_to_arm64(main_executable):
+            color_print("[INFO] Binary thinned to arm64 successfully", 'green')
+        else:
+            color_print("[WARN] Failed to thin binary, continuing with FAT (may cause issues)", 'yellow')
     
     frameworks_dir = os.path.join(app_dir, "Frameworks")
     os.makedirs(frameworks_dir, exist_ok=True)
@@ -462,11 +550,13 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
         if substrate_path is None:
             color_print("Error: failed to copy substrate", 'red')
             return False, "Substrate injection failed"
-        install_substrate = "@executable_path/Frameworks/libsub.dylib"
+        
+        install_substrate = "@executable_path/sb.dylib"
+        
         if not inject_lc_load_dylib(main_executable, install_substrate):
             color_print("Failed to add substrate to LC_LOAD_DYLIB", 'yellow')
         else:
-            color_print(f"Substrate added: {install_substrate}", 'hotpink')
+            color_print(f"Substrate universally added: {install_substrate}", 'hotpink')
     
     if use_rpath:
         path_prefix = b"@rpath/Frameworks/"
@@ -475,8 +565,6 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
     
     replacement_pairs = [
         (b"/Library/MobileSubstrate/DynamicLibraries/", path_prefix),
-        (b"/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", b"@executable_path/Frameworks/libsub.dylib"),
-        (b"@rpath/CydiaSubstrate.framework/CydiaSubstrate", b"@executable_path/Frameworks/libsub.dylib"),
     ]
     
     fw_path_prefix = "@rpath/"
