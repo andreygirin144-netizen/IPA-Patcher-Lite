@@ -103,7 +103,7 @@
         └──────────────────────────────────────────────────────┘
                                │
         ┌───────────────┬──────────────┬───────────────┬────────────────┐
-        ▼                ▼              ▼               ▼                ▼
+        ▼               ▼              ▼               ▼                ▼
   Bundle ID /      Инъекция твика   Замена иконки   Entitlements   Расширенные патчи
   версия            · libsubstrate   · по CFBundleIcons  · Team ID из     · lower iOS
   · Info.plist       · .dylib/.deb/  · опц. удаление    provision      · remove PlugIns
@@ -135,14 +135,14 @@ ipa_patcher/
 ├── advanced_patches.py    # Понижение iOS, удаление плагинов/Watch/URL-схем, фикс белой иконки
 ├── ipa_utils.py           # Распаковка/упаковка ZIP с прогресс-баром, файловые диалоги, ввод данных
 ├── tweak_injector.py      # Распаковка .deb/.zip/.tar.*, поиск .dylib/.framework/.bundle, инъекция
-├── macho.py                # Низкоуровневый парсер Mach-O: LC_LOAD_DYLIB, LC_RPATH, LC_CODE_SIGNATURE, детект шифрования, thinning
-├── substrate.py            # Копирование libsubstrate.dylib (встроенного или пользовательского), патч путей зависимостей
-├── patch_strings.py        # Побайтовая замена путей/строк в бинарниках без изменения длины файла (через mmap)
-├── signature.py             # Удаление файлов/папок подписи, отправка готового IPA в Share Sheet
-├── web_transfer.py          # Локальный HTTP-сервер с ПИН-кодом для загрузки файлов на устройство по Wi-Fi
-├── constants.py              # Магические числа Mach-O, load-команды, списки файлов подписи, PatchConfig
-├── libsubstrate.dylib       # Стандартный субстрат для твиков (кладётся рядом со скриптом, опционально)
-└── README.md
+├── macho.py               # Низкоуровневый парсер Mach-O: LC_LOAD_DYLIB, LC_RPATH, LC_CODE_SIGNATURE, детект шифрования, thinning
+├── substrate.py           # Копирование libsubstrate.dylib (встроенного или пользовательского), патч путей зависимостей
+├── patch_strings.py       # Побайтовая замена путей/строк в бинарниках без изменения длины файла (через mmap)
+├── signature.py           # Удаление файлов/папок подписи, отправка готового IPA в Share Sheet
+├── web_transfer.py        # Локальный HTTP-сервер с ПИН-кодом для загрузки файлов на устройство по Wi-Fi
+├── constants.py           # Магические числа Mach-O, load-команды, списки файлов подписи, PatchConfig
+├── libsubstrate.dylib     # Стандартный субстрат для твиков (кладётся рядом со скриптом, опционально)
+└── utils.py.              # Логирование, цветной вывод в консоль, ввод пользователя (input-обёртки), пути к Logs/Patched
 ```
 
 -----
