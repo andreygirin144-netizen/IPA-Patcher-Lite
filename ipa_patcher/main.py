@@ -20,7 +20,7 @@ from ipa_utils import (
 )
 from plist_editor import load_plist, save_plist, add_file_support, update_version_in_extensions
 from signature import clean_signature_files, sign_app_bundle_with_path
-from macho import is_ipa_encrypted, is_macho_binary
+from macho import is_ipa_encrypted, is_macho_binary, is_fat_binary, thin_binary_to_arm64
 from tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak, get_main_executable
 from entitlements import generate_custom_entitlements
 from advanced_patches import apply_advanced_patches
@@ -200,7 +200,7 @@ def deep_patch_bundle_id(app_dir, old_id, new_id):
             
             is_macho = is_macho_binary(file_path)
             
-            if is_macho and f_size < 50 * 1024 * 1024:
+            if is_macho and f_size < 200 * 1024 * 1024:
                 replacements = [(old_bytes, padded_new)]
                 if patch_strings_in_binary(file_path, replacements):
                     color_print(f"  Bundle ID заменен в бинарнике: {f}", 'green')
@@ -219,6 +219,9 @@ def deep_patch_bundle_id(app_dir, old_id, new_id):
                         found = True
                 except:
                     pass
+    
+    if not found:
+        color_print("[WARN] Bundle ID не найден для глубокой замены", 'yellow')
     
     return found
 
@@ -256,7 +259,7 @@ def deep_patch_version(app_dir, old_version, new_version):
             
             is_macho = is_macho_binary(file_path)
             
-            if is_macho and f_size < 50 * 1024 * 1024:
+            if is_macho and f_size < 200 * 1024 * 1024:
                 replacements = [(old_bytes, padded_new)]
                 if patch_strings_in_binary(file_path, replacements):
                     color_print(f"  Версия заменена в бинарнике: {f}", 'green')
@@ -275,6 +278,9 @@ def deep_patch_version(app_dir, old_version, new_version):
                         found = True
                 except:
                     pass
+    
+    if not found:
+        color_print("[WARN] Версия не найдена для глубокой замены", 'yellow')
     
     return found
 
