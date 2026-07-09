@@ -2,7 +2,6 @@
 import os
 import shutil
 import struct
-import ctypes
 from utils import log_message, color_print
 
 
@@ -146,8 +145,9 @@ def patch_tweak_substrate_dependencies(tweak_binary_path):
         log_message(f"Failed to chmod {tweak_binary_path}: {e}", 'WARN')
     
     replacements = [
-        ("/usr/lib/libsubstrate.dylib", "@rpath/libsub.dylib"),
-        ("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "@rpath/libsub.dylib")
+        ("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "@executable_path/sb.dylib"),
+        ("@rpath/CydiaSubstrate.framework/CydiaSubstrate", "@executable_path/sb.dylib"),
+        ("/usr/lib/libsubstrate.dylib", "@executable_path/sb.dylib")
     ]
     
     modified = False
@@ -156,16 +156,13 @@ def patch_tweak_substrate_dependencies(tweak_binary_path):
             modified = True
     
     if modified:
-        log_message(f"Substrate dependencies adapted in: {os.path.basename(tweak_binary_path)}", 'INFO')
+        log_message(f"Substrate dependencies adapted to sb.dylib in: {os.path.basename(tweak_binary_path)}", 'INFO')
     
     return modified
 
 
 def inject_substrate(app_dir, script_dir, substrate_source=None):
-    frameworks_dir = os.path.join(app_dir, "Frameworks")
-    os.makedirs(frameworks_dir, exist_ok=True)
-    
-    substrate_path = os.path.join(frameworks_dir, "libsub.dylib")
+    substrate_path = os.path.join(app_dir, "sb.dylib")
     
     if substrate_source is None:
         src = os.path.join(script_dir, "libsubstrate.dylib")
@@ -183,7 +180,7 @@ def inject_substrate(app_dir, script_dir, substrate_source=None):
     try:
         shutil.copy2(src, substrate_path)
         os.chmod(substrate_path, 0o755)
-        log_message(f"Substrate copied to: {substrate_path}", 'INFO')
+        log_message(f"Substrate universally copied to root: {substrate_path}", 'INFO')
         return substrate_path
     except Exception as e:
         log_message(f"Error copying Substrate: {e}", 'ERROR')
