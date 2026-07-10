@@ -6,12 +6,22 @@ from utils import log_message
 def load_plist(path):
     try:
         with open(path, "rb") as f:
-            return plistlib.load(f)
+            data = f.read()
+        try:
+            return plistlib.loads(data, fmt=plistlib.FMT_BINARY)
+        except:
+            try:
+                return plistlib.loads(data)
+            except:
+                return plistlib.load(data)
     except Exception as e:
         log_message(f"Ошибка загрузки plist {path}: {e}", 'ERROR')
         raise
 
 def save_plist(data, path):
+    if data is None:
+        log_message(f"Попытка сохранить None в {path}", 'ERROR')
+        raise ValueError("Cannot save None as plist")
     try:
         with open(path, "wb") as f:
             plistlib.dump(data, f)
