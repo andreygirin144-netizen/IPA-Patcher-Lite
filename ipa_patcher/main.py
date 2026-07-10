@@ -44,7 +44,6 @@ log = logging.getLogger(__name__)
 
 config = PatchConfig()
 
-
 def get_adaptive_delay(ipa_path):
     base_delay = 0.0
     try:
@@ -58,7 +57,6 @@ def get_adaptive_delay(ipa_path):
     except:
         pass
     return min(base_delay, 0.01)
-
 
 def get_icon_names_from_plist(app_dir):
     info_plist_path = os.path.join(app_dir, "Info.plist")
@@ -91,7 +89,6 @@ def get_icon_names_from_plist(app_dir):
             result.append(f"{base}@3x.png")
     return result
 
-
 def add_icons_to_plist(app_dir, icon_names):
     info_plist_path = os.path.join(app_dir, "Info.plist")
     if not os.path.isfile(info_plist_path):
@@ -114,7 +111,6 @@ def add_icons_to_plist(app_dir, icon_names):
         plist["CFBundleIconFiles"] = clean_names
     save_plist(plist, info_plist_path)
     return True
-
 
 def replace_icon(app_dir, icon_path, remove_assets=False):
     if not os.path.isfile(icon_path):
@@ -165,7 +161,6 @@ def replace_icon(app_dir, icon_path, remove_assets=False):
         color_print("[ERROR] Не удалось заменить иконку", 'red')
     
     return replaced
-
 
 def deep_patch_bundle_id(app_dir, old_id, new_id):
     old_bytes = old_id.encode('utf-8')
@@ -225,7 +220,6 @@ def deep_patch_bundle_id(app_dir, old_id, new_id):
     
     return found
 
-
 def deep_patch_version(app_dir, old_version, new_version):
     old_bytes = old_version.encode('utf-8')
     new_bytes = new_version.encode('utf-8')
@@ -284,7 +278,6 @@ def deep_patch_version(app_dir, old_version, new_version):
     
     return found
 
-
 def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
     from constants import MIN_HEADER_PADDING
     main_executable = get_main_executable(app_dir, plist_data)
@@ -292,7 +285,6 @@ def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
         return True
     required = estimated_tweaks * 48 + 16 + MIN_HEADER_PADDING
     return check_header_space(main_executable, required)
-
 
 def edit_menu(plist_data, app_dir, script_dir, temp_dir):
     global config
@@ -591,12 +583,18 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     content = f.read()
+                if not content or not content.strip():
+                    color_print("Файл пуст. Изменений не внесено.", 'yellow')
+                    continue
                 lines = content.splitlines()
                 json_lines = []
                 for line in lines:
                     if not line.strip().startswith('---'):
                         json_lines.append(line)
                 new_json = '\n'.join(json_lines)
+                if not new_json or not new_json.strip():
+                    color_print("Файл не содержит JSON данных. Изменений не внесено.", 'yellow')
+                    continue
                 if new_json.strip() != current_json.strip():
                     new_data = json.loads(new_json)
                     if isinstance(new_data, dict):
@@ -636,6 +634,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         color_print("Info.plist обновлен из JSON.", 'green')
                     else:
                         color_print("Ошибка: JSON должен быть объектом (словарем).", 'red')
+                else:
+                    color_print("Изменений в JSON не обнаружено.", 'yellow')
             except json.JSONDecodeError as e:
                 color_print(f"Ошибка парсинга JSON: {e}", 'red')
             except Exception as e:
@@ -704,14 +704,12 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         else:
             color_print("Неверный ввод.", 'red')
 
-
 def clean_non_standard_dirs(app_dir):
     for unwanted in UNWANTED_DIRS:
         path = os.path.join(app_dir, unwanted)
         if os.path.exists(path):
             shutil.rmtree(path, ignore_errors=True)
             color_print(f"Удалена ненужная папка: {path}", 'red')
-
 
 def main():
     ensure_directories()
@@ -872,7 +870,6 @@ def main():
     color_print("\nГотово!", 'green')
     color_print(f"Файл: {os.path.basename(output_path)}", 'blue')
     color_print(f"Папка: {PATCHED_DIR}", 'blue')
-
 
 if __name__ == '__main__':
     main()
