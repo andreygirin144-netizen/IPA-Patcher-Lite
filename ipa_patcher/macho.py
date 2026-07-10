@@ -13,14 +13,12 @@ ARM64_SUBTYPE = 0
 ARM64E_SUBTYPE = 2
 X86_64_CPUTYPE = 0x01000007
 
-
 def is_arm64_slice(cputype, cpusubtype):
     clean_subtype = cpusubtype & 0x0FFFFFFF
     if cputype == ARM64_CPUTYPE:
         if clean_subtype in (ARM64_SUBTYPE, ARM64E_SUBTYPE):
             return True
     return False
-
 
 def get_arch_slices(data, offset=0):
     slices = []
@@ -30,6 +28,8 @@ def get_arch_slices(data, offset=0):
     if magic in (FAT_MAGIC, FAT_CIGAM):
         endian = '>' if magic == FAT_MAGIC else '<'
         nfat = struct.unpack_from(endian + 'I', data, offset + 4)[0]
+        if nfat > 20 or nfat < 1:
+            return slices
         for i in range(nfat):
             arch_off = offset + 8 + i * 20
             if arch_off + 20 > len(data):
@@ -39,15 +39,15 @@ def get_arch_slices(data, offset=0):
             slice_offset = struct.unpack_from(endian + 'I', data, arch_off + 8)[0]
             slice_size = struct.unpack_from(endian + 'I', data, arch_off + 12)[0]
             align = struct.unpack_from(endian + 'I', data, arch_off + 16)[0]
-            slices.append({
-                'cputype': cputype,
-                'cpusubtype': cpusubtype,
-                'offset': slice_offset,
-                'size': slice_size,
-                'align': align
-            })
+            if slice_offset + slice_size <= len(data):
+                slices.append({
+                    'cputype': cputype,
+                    'cpusubtype': cpusubtype,
+                    'offset': slice_offset,
+                    'size': slice_size,
+                    'align': align
+                })
     return slices
-
 
 def parse_arch_name(cputype, cpusubtype):
     if cputype == ARM64_CPUTYPE:
@@ -62,7 +62,6 @@ def parse_arch_name(cputype, cpusubtype):
         return "x86_64"
     else:
         return f"cputype_{cputype}"
-
 
 def list_all_archs(binary_path):
     try:
@@ -86,20 +85,18 @@ def list_all_archs(binary_path):
         log_message(f"Failed to list architectures for {binary_path}: {e}", 'ERROR')
         return ["unknown"]
 
-
 def is_macho_binary(file_path):
     try:
         with open(file_path, 'rb') as f:
             magic_bytes = f.read(4)
             if len(magic_bytes) < 4:
                 return False
-            magic = struct.unpack('<I', magic_bytes)[0]
-            return magic in (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32,
-                           FAT_MAGIC, FAT_CIGAM)
+            magic_le = struct.unpack('<I', magic_bytes)[0]
+            magic_be = struct.unpack('>I', magic_bytes)[0]
+            return magic_le in (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32) or magic_be in (FAT_MAGIC, FAT_CIGAM)
     except Exception as e:
         log_message(f"Failed to check Mach-O binary {file_path}: {e}", 'ERROR')
         return False
-
 
 def is_fat_binary(binary_path):
     try:
@@ -108,7 +105,6 @@ def is_fat_binary(binary_path):
             return magic in (FAT_MAGIC, FAT_CIGAM)
     except:
         return False
-
 
 def thin_binary_to_arm64(binary_path):
     try:
@@ -125,7 +121,11 @@ def thin_binary_to_arm64(binary_path):
         endian = '>' if magic == FAT_MAGIC else '<'
         nfat = struct.unpack_from(endian + 'I', data, 4)[0]
         
+        if nfat > 20 or nfat < 1:
+            return False
+        
         arm64_slice = None
+        arm64_index = -1
         
         for i in range(nfat):
             offset = 8 + i * 20
@@ -140,11 +140,17 @@ def thin_binary_to_arm64(binary_path):
             arm64_cputype = 0x0100000C
             clean_subtype = cpusubtype & 0x0FFFFFFF
             if cputype == arm64_cputype and clean_subtype in (0, 2):
-                arm64_slice = data[slice_offset:slice_offset + slice_size]
+                if slice_offset + slice_size <= len(data):
+                    arm64_slice = data[slice_offset:slice_offset + slice_size]
+                    arm64_index = i
                 break
         
         if arm64_slice is None:
             log_message("No arm64 slice found in FAT binary", 'WARN')
+            return False
+        
+        if len(arm64_slice) < 4:
+            log_message("Arm64 slice is too small", 'WARN')
             return False
         
         with open(binary_path, 'wb') as f:
@@ -156,19 +162,24 @@ def thin_binary_to_arm64(binary_path):
         log_message(f"Failed to thin binary: {e}", 'ERROR')
         return False
 
-
 def _align(value, alignment):
     return (value + alignment - 1) & ~(alignment - 1)
 
-
 def get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds):
-    min_section_offset = len(data)
+    min_section_offset = None
     cmd_offset = offset + header_size
+    max_offset = len(data)
+    
+    if ncmds > 1000:
+        return None
+    
     for _ in range(ncmds):
         if cmd_offset + 8 > offset + header_size + sizeofcmds:
             break
+        if cmd_offset + 8 > max_offset:
+            break
         cmd, cmdsize_cur = struct.unpack_from(endian + 'II', data, cmd_offset)
-        if cmdsize_cur < 8:
+        if cmdsize_cur < 8 or cmdsize_cur > 4096:
             break
         if cmd in (0x19, 0x01):
             if cmd == 0x19:
@@ -181,16 +192,20 @@ def get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds)
                 sect_base = cmd_offset + 56
                 sect_size = 68
                 foff_inner_offset = 40
+            if nsects_off + 4 > max_offset:
+                break
             nsects = struct.unpack_from(endian + 'I', data, nsects_off)[0]
+            if nsects > 1000:
+                break
             for s in range(nsects):
                 foff_off = sect_base + (s * sect_size) + foff_inner_offset
-                if foff_off + 4 <= len(data):
+                if foff_off + 4 <= max_offset:
                     foff = struct.unpack_from(endian + 'I', data, foff_off)[0]
                     if foff > 0:
-                        min_section_offset = min(min_section_offset, foff)
+                        if min_section_offset is None or foff < min_section_offset:
+                            min_section_offset = foff
         cmd_offset += cmdsize_cur
     return min_section_offset
-
 
 def get_main_executable(app_dir, plist_data):
     executable_name = plist_data.get("CFBundleExecutable")
@@ -204,36 +219,51 @@ def get_main_executable(app_dir, plist_data):
             return os.path.join(root, executable_name)
     return None
 
-
 def _inject_load_dylib_into_slice(data, offset, dylib_install_name):
     try:
+        if offset + 4 > len(data):
+            return False
         magic = struct.unpack_from('<I', data, offset)[0]
         endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
         is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
         header_size = 32 if is_64 else 28
+        if offset + header_size > len(data):
+            return False
         ncmds = struct.unpack_from(endian + 'I', data, offset + 16)[0]
+        if ncmds > 1000:
+            return False
         sizeofcmds = struct.unpack_from(endian + 'I', data, offset + 20)[0]
         cmd_offset = offset + header_size
+        max_offset = len(data)
 
         for _ in range(ncmds):
             if cmd_offset + 8 > offset + header_size + sizeofcmds:
                 break
+            if cmd_offset + 8 > max_offset:
+                break
             cmd, cmdsize = struct.unpack_from(endian + 'II', data, cmd_offset)
-            if cmdsize < 8:
+            if cmdsize < 8 or cmdsize > 4096:
                 break
             if cmd in (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB):
+                if cmd_offset + 12 > max_offset:
+                    break
                 name_offset = struct.unpack_from(endian + 'I', data, cmd_offset + 8)[0]
                 name_start = cmd_offset + name_offset
+                if name_start >= max_offset:
+                    break
                 name_end = name_start
-                while name_end < cmd_offset + cmdsize and data[name_end] != 0:
+                while name_end < cmd_offset + cmdsize and name_end < max_offset and data[name_end] != 0:
                     name_end += 1
-                existing_name = data[name_start:name_end].decode('utf-8', errors='replace')
-                if existing_name == dylib_install_name:
-                    return True
+                if name_start < max_offset and name_end <= max_offset and name_end > name_start:
+                    existing_name = data[name_start:name_end].decode('utf-8', errors='replace')
+                    if existing_name == dylib_install_name:
+                        return True
             cmd_offset += cmdsize
 
         raw_name = dylib_install_name.encode('utf-8') + b'\x00'
         cmdsize = (24 + len(raw_name) + 7) & ~7
+        if cmdsize > 4096:
+            return False
         padding = cmdsize - 24 - len(raw_name)
         new_cmd = struct.pack(endian + 'IIIIII',
                               LC_LOAD_DYLIB, cmdsize, 24,
@@ -242,11 +272,16 @@ def _inject_load_dylib_into_slice(data, offset, dylib_install_name):
 
         insert_at = offset + header_size + sizeofcmds
         min_section_offset = get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds)
+        if min_section_offset is None:
+            return False
         available_space = min_section_offset - insert_at
         if available_space < len(new_cmd):
             log_message(f"Not enough space: need {len(new_cmd)} bytes, available {available_space}", 'ERROR')
             return False
 
+        if insert_at + len(new_cmd) > max_offset:
+            return False
+            
         data[insert_at:insert_at + len(new_cmd)] = new_cmd
         new_ncmds = ncmds + 1
         new_sizeofcmds = sizeofcmds + len(new_cmd)
@@ -257,7 +292,6 @@ def _inject_load_dylib_into_slice(data, offset, dylib_install_name):
         log_message(f"Failed to inject LC_LOAD_DYLIB: {e}", 'ERROR')
         return False
 
-
 def inject_lc_load_dylib(binary_path, dylib_install_name):
     try:
         with open(binary_path, 'rb') as f:
@@ -266,10 +300,15 @@ def inject_lc_load_dylib(binary_path, dylib_install_name):
         log_message(f"Failed to read binary: {e}", 'ERROR')
         return False
 
+    if len(data) < 4:
+        return False
+        
     magic = struct.unpack_from('>I', data, 0)[0]
     success = False
     if magic in (FAT_MAGIC, FAT_CIGAM):
         slices = get_arch_slices(data)
+        if not slices:
+            return False
         any_ok = False
         for s in slices:
             if is_arm64_slice(s['cputype'], s['cpusubtype']):
@@ -290,47 +329,69 @@ def inject_lc_load_dylib(binary_path, dylib_install_name):
         log_message(f"Failed to write binary: {e}", 'ERROR')
         return False
 
-
 def _inject_rpath_into_slice(data, offset, rpath_path):
     try:
+        if offset + 4 > len(data):
+            return False
         magic = struct.unpack_from('<I', data, offset)[0]
         endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
         is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
         header_size = 32 if is_64 else 28
+        if offset + header_size > len(data):
+            return False
         ncmds = struct.unpack_from(endian + 'I', data, offset + 16)[0]
+        if ncmds > 1000:
+            return False
         sizeofcmds = struct.unpack_from(endian + 'I', data, offset + 20)[0]
         cmd_offset = offset + header_size
+        max_offset = len(data)
 
         for _ in range(ncmds):
             if cmd_offset + 8 > offset + header_size + sizeofcmds:
                 break
+            if cmd_offset + 8 > max_offset:
+                break
             cmd, cmdsize = struct.unpack_from(endian + 'II', data, cmd_offset)
+            if cmdsize < 8 or cmdsize > 4096:
+                break
             if cmd == LC_RPATH:
+                if cmd_offset + 12 > max_offset:
+                    break
                 path_offset = struct.unpack_from(endian + 'I', data, cmd_offset + 8)[0]
                 path_start = cmd_offset + path_offset
+                if path_start >= max_offset:
+                    break
                 path_end = path_start
-                while path_end < cmd_offset + cmdsize and data[path_end] != 0:
+                while path_end < cmd_offset + cmdsize and path_end < max_offset and data[path_end] != 0:
                     path_end += 1
-                existing = data[path_start:path_end].decode('utf-8', errors='replace')
-                if existing == rpath_path:
-                    return True
+                if path_start < max_offset and path_end <= max_offset and path_end > path_start:
+                    existing = data[path_start:path_end].decode('utf-8', errors='replace')
+                    if existing == rpath_path:
+                        return True
             if cmdsize < 8:
                 break
             cmd_offset += cmdsize
 
         raw_path = rpath_path.encode('utf-8') + b'\x00'
         cmdsize = (12 + len(raw_path) + 7) & ~7
+        if cmdsize > 4096:
+            return False
         padding = cmdsize - 12 - len(raw_path)
         new_cmd = struct.pack(endian + 'III', LC_RPATH, cmdsize, 12)
         new_cmd += raw_path + (b'\x00' * padding)
 
         insert_at = offset + header_size + sizeofcmds
         min_section_offset = get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds)
+        if min_section_offset is None:
+            return False
         available_space = min_section_offset - insert_at
         if available_space < len(new_cmd):
             log_message(f"Not enough space for LC_RPATH: need {len(new_cmd)} bytes", 'ERROR')
             return False
 
+        if insert_at + len(new_cmd) > max_offset:
+            return False
+            
         data[insert_at:insert_at + len(new_cmd)] = new_cmd
         new_ncmds = ncmds + 1
         new_sizeofcmds = sizeofcmds + len(new_cmd)
@@ -341,7 +402,6 @@ def _inject_rpath_into_slice(data, offset, rpath_path):
         log_message(f"Failed to inject LC_RPATH: {e}", 'ERROR')
         return False
 
-
 def inject_rpath(binary_path, rpath_path):
     try:
         with open(binary_path, 'rb') as f:
@@ -350,10 +410,15 @@ def inject_rpath(binary_path, rpath_path):
         log_message(f"Failed to read binary: {e}", 'ERROR')
         return False
 
+    if len(data) < 4:
+        return False
+        
     magic = struct.unpack_from('>I', data, 0)[0]
     success = False
     if magic in (FAT_MAGIC, FAT_CIGAM):
         slices = get_arch_slices(data)
+        if not slices:
+            return False
         any_ok = False
         for s in slices:
             if is_arm64_slice(s['cputype'], s['cpusubtype']):
@@ -374,11 +439,12 @@ def inject_rpath(binary_path, rpath_path):
         log_message(f"Failed to write binary: {e}", 'ERROR')
         return False
 
-
 def has_rpath(binary_path, rpath_path):
     try:
         with open(binary_path, 'rb') as f:
             data = bytearray(f.read())
+        if len(data) < 4:
+            return False
         magic = struct.unpack_from('>I', data, 0)[0]
         if magic in (FAT_MAGIC, FAT_CIGAM):
             slices = get_arch_slices(data)
@@ -393,30 +459,45 @@ def has_rpath(binary_path, rpath_path):
         log_message(f"Failed to check RPATH: {e}", 'ERROR')
         return False
 
-
 def _has_rpath_in_slice(data, offset, rpath_path):
     try:
+        if offset + 4 > len(data):
+            return False
         magic = struct.unpack_from('<I', data, offset)[0]
         endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
         is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
         header_size = 32 if is_64 else 28
+        if offset + header_size > len(data):
+            return False
         ncmds = struct.unpack_from(endian + 'I', data, offset + 16)[0]
+        if ncmds > 1000:
+            return False
         sizeofcmds = struct.unpack_from(endian + 'I', data, offset + 20)[0]
         cmd_offset = offset + header_size
+        max_offset = len(data)
 
         for _ in range(ncmds):
             if cmd_offset + 8 > offset + header_size + sizeofcmds:
                 break
+            if cmd_offset + 8 > max_offset:
+                break
             cmd, cmdsize = struct.unpack_from(endian + 'II', data, cmd_offset)
+            if cmdsize < 8 or cmdsize > 4096:
+                break
             if cmd == LC_RPATH:
+                if cmd_offset + 12 > max_offset:
+                    break
                 path_offset = struct.unpack_from(endian + 'I', data, cmd_offset + 8)[0]
                 path_start = cmd_offset + path_offset
+                if path_start >= max_offset:
+                    break
                 path_end = path_start
-                while path_end < cmd_offset + cmdsize and data[path_end] != 0:
+                while path_end < cmd_offset + cmdsize and path_end < max_offset and data[path_end] != 0:
                     path_end += 1
-                existing = data[path_start:path_end].decode('utf-8', errors='replace')
-                if existing == rpath_path:
-                    return True
+                if path_start < max_offset and path_end <= max_offset and path_end > path_start:
+                    existing = data[path_start:path_end].decode('utf-8', errors='replace')
+                    if existing == rpath_path:
+                        return True
             if cmdsize < 8:
                 break
             cmd_offset += cmdsize
@@ -425,23 +506,35 @@ def _has_rpath_in_slice(data, offset, rpath_path):
         log_message(f"Failed to check RPATH in slice: {e}", 'ERROR')
         return False
 
-
 def _add_code_signature_to_slice(data, offset, sig_offset, sig_size):
     try:
+        if offset + 4 > len(data):
+            return False
         magic = struct.unpack_from('<I', data, offset)[0]
         endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
         is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
         header_size = 32 if is_64 else 28
+        if offset + header_size > len(data):
+            return False
         ncmds = struct.unpack_from(endian + 'I', data, offset + 16)[0]
+        if ncmds > 1000:
+            return False
         sizeofcmds = struct.unpack_from(endian + 'I', data, offset + 20)[0]
         cmd_offset = offset + header_size
+        max_offset = len(data)
         found = False
 
         for _ in range(ncmds):
             if cmd_offset + 8 > offset + header_size + sizeofcmds:
                 break
+            if cmd_offset + 8 > max_offset:
+                break
             cmd, cmdsize = struct.unpack_from(endian + 'II', data, cmd_offset)
+            if cmdsize < 8 or cmdsize > 4096:
+                break
             if cmd == LC_CODE_SIGNATURE:
+                if cmd_offset + 16 > max_offset:
+                    break
                 struct.pack_into(endian + 'II', data, cmd_offset + 8, sig_offset, sig_size)
                 found = True
                 break
@@ -453,9 +546,13 @@ def _add_code_signature_to_slice(data, offset, sig_offset, sig_size):
             new_cmd = struct.pack(endian + 'IIII', LC_CODE_SIGNATURE, 16, sig_offset, sig_size)
             insert_at = offset + header_size + sizeofcmds
             min_section_offset = get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds)
+            if min_section_offset is None:
+                return False
             available_space = min_section_offset - insert_at
             if available_space < len(new_cmd):
                 log_message(f"No space for LC_CODE_SIGNATURE (need {len(new_cmd)} bytes)", 'ERROR')
+                return False
+            if insert_at + len(new_cmd) > max_offset:
                 return False
             data[insert_at:insert_at + len(new_cmd)] = new_cmd
             struct.pack_into(endian + 'I', data, offset + 16, ncmds + 1)
@@ -465,7 +562,6 @@ def _add_code_signature_to_slice(data, offset, sig_offset, sig_size):
         log_message(f"Failed to add code signature: {e}", 'ERROR')
         return False
 
-
 def inject_code_signature(binary_path, super_blob):
     try:
         with open(binary_path, 'rb') as f:
@@ -474,9 +570,14 @@ def inject_code_signature(binary_path, super_blob):
         log_message(f"Failed to read binary: {e}", 'ERROR')
         return False
 
+    if len(data) < 4 or not super_blob:
+        return False
+        
     magic = struct.unpack_from('>I', data, 0)[0]
     if magic in (FAT_MAGIC, FAT_CIGAM):
         slices = get_arch_slices(data)
+        if not slices:
+            return False
         target_slices = [(i, s) for i, s in enumerate(slices) if is_arm64_slice(s['cputype'], s['cpusubtype'])]
         if not target_slices:
             log_message("No arm64 slice found in FAT binary", 'WARN')
@@ -492,15 +593,23 @@ def inject_code_signature(binary_path, super_blob):
         data.extend(b'\x00' * (current_offset - len(data)))
         endian = '>' if magic == FAT_MAGIC else '<'
         for (slice_offset, blob_abs_offset), (orig_index, s) in zip(blob_positions, target_slices):
+            if blob_abs_offset + len(super_blob) > len(data):
+                return False
             data[blob_abs_offset:blob_abs_offset + len(super_blob)] = super_blob
             local_sig_offset = blob_abs_offset - slice_offset
             if not _add_code_signature_to_slice(data, s['offset'], local_sig_offset, len(super_blob)):
                 return False
             new_slice_size = (blob_abs_offset + len(super_blob)) - slice_offset
             fat_arch_size_offset = 8 + orig_index * 20 + 12
+            if fat_arch_size_offset + 4 > len(data):
+                return False
             struct.pack_into(endian + 'I', data, fat_arch_size_offset, new_slice_size)
     else:
-        aligned_offset = len(data)
+        aligned_offset = (len(data) + 7) & ~7
+        if aligned_offset + len(super_blob) > len(data) + 1024*1024:
+            return False
+        if len(data) < aligned_offset:
+            data.extend(b'\x00' * (aligned_offset - len(data)))
         if not _add_code_signature_to_slice(data, 0, aligned_offset, len(super_blob)):
             return False
         data.extend(super_blob)
@@ -513,7 +622,6 @@ def inject_code_signature(binary_path, super_blob):
     except Exception as e:
         log_message(f"Failed to write binary: {e}", 'ERROR')
         return False
-
 
 def _check_encryption_in_slice(f, offset):
     try:
@@ -530,6 +638,8 @@ def _check_encryption_in_slice(f, offset):
         if len(ncmds_bytes) < 4:
             return None
         ncmds = struct.unpack(endian + 'I', ncmds_bytes)[0]
+        if ncmds > 1000:
+            return None
         f.seek(offset + header_size)
 
         for _ in range(ncmds):
@@ -537,7 +647,7 @@ def _check_encryption_in_slice(f, offset):
             if len(cmd_data) < 8:
                 break
             cmd, cmdsize = struct.unpack(endian + 'II', cmd_data)
-            if cmdsize < 8:
+            if cmdsize < 8 or cmdsize > 4096:
                 break
             if cmd in (0x21, 0x2C):
                 crypt_data = f.read(12)
@@ -556,7 +666,6 @@ def _check_encryption_in_slice(f, offset):
     except Exception as e:
         log_message(f"Failed to check encryption: {e}", 'ERROR')
         return None
-
 
 def is_ipa_encrypted(app_dir, plist_data):
     executable_name = plist_data.get("CFBundleExecutable")
@@ -578,7 +687,12 @@ def is_ipa_encrypted(app_dir, plist_data):
             magic = struct.unpack('>I', magic_bytes)[0]
             if magic in (FAT_MAGIC, FAT_CIGAM):
                 f.seek(4)
-                nfat = struct.unpack('>I' if magic == FAT_MAGIC else '<I', f.read(4))[0]
+                nfat_bytes = f.read(4)
+                if len(nfat_bytes) < 4:
+                    return None
+                nfat = struct.unpack('>I' if magic == FAT_MAGIC else '<I', nfat_bytes)[0]
+                if nfat > 20 or nfat < 1:
+                    return None
                 for _ in range(nfat):
                     arch_data = f.read(20)
                     if len(arch_data) < 20:
