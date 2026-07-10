@@ -15,7 +15,6 @@ try:
 except ImportError:
     PYTHONISTA = False
 
-
 class ProgressBar:
     def __init__(self, total, description="Progress", width=50):
         self.total = total
@@ -38,14 +37,18 @@ class ProgressBar:
     def close(self):
         pass
 
-
 def extract_ipa_with_progress(ipa_path, dest_dir, delay=0):
     try:
         with zipfile.ZipFile(ipa_path, 'r') as zf:
             files = zf.infolist()
             pb = ProgressBar(len(files), 'Распаковка')
+            real_dest = os.path.realpath(dest_dir)
             for member in files:
+                if member.filename.startswith('/') or '..' in member.filename:
+                    continue
                 target_path = os.path.join(dest_dir, member.filename)
+                if not os.path.realpath(target_path).startswith(real_dest):
+                    continue
                 attr = member.external_attr >> 16
                 if stat.S_ISLNK(attr):
                     link_target = zf.read(member).decode('utf-8')
@@ -63,7 +66,6 @@ def extract_ipa_with_progress(ipa_path, dest_dir, delay=0):
         log_message(f"Failed to extract IPA: {e}", 'ERROR')
         raise
 
-
 def pack_ipa_with_progress(source_dir, output_path, delay=0):
     try:
         file_list = []
@@ -76,6 +78,8 @@ def pack_ipa_with_progress(source_dir, output_path, delay=0):
         pb = ProgressBar(len(file_list), 'Упаковка')
         with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
             for full, arcname in file_list:
+                if arcname.startswith('/') or '..' in arcname:
+                    continue
                 info = zipfile.ZipInfo(arcname)
                 st = os.stat(full)
 
@@ -99,14 +103,12 @@ def pack_ipa_with_progress(source_dir, output_path, delay=0):
         log_message(f"Failed to pack IPA: {e}", 'ERROR')
         raise
 
-
 def make_temp_dir():
     if PYTHONISTA:
         docs = os.path.expanduser("~/Documents")
         if os.path.isdir(docs):
             return tempfile.mkdtemp(prefix="ipa_patch_", dir=docs)
     return tempfile.mkdtemp(prefix="ipa_patch_")
-
 
 def find_app_dir(payload_path):
     if not os.path.isdir(payload_path):
@@ -115,7 +117,6 @@ def find_app_dir(payload_path):
         if item.endswith(".app"):
             return os.path.join(payload_path, item)
     return None
-
 
 def pick_ipa_file():
     if PYTHONISTA:
@@ -139,21 +140,19 @@ def pick_ipa_file():
             sys.exit(0)
         return os.path.expanduser(path)
 
-
 def pick_icon_from_photos():
     try:
         img = photos.pick_image()
         if img is None:
             return None
         temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, "icon_from_photos.png")
+        temp_path = os.path.join(temp_dir, f"icon_from_photos_{int(time.time())}.png")
         img.save(temp_path, 'PNG')
         log_message(f"Icon selected from Photos: {temp_path}", 'INFO')
         return temp_path
     except Exception as e:
         log_message(f"Error picking from Photos: {e}", 'ERROR')
         return None
-
 
 def pick_icon_file():
     if PYTHONISTA:
@@ -205,7 +204,6 @@ def pick_icon_file():
             print("\nПрервано.")
             sys.exit(0)
 
-
 def pick_tweak_file():
     if PYTHONISTA:
         try:
@@ -230,7 +228,6 @@ def pick_tweak_file():
         except KeyboardInterrupt:
             print("\nПрервано.")
             sys.exit(0)
-
 
 def pick_substrate_file():
     if PYTHONISTA:
