@@ -14,8 +14,7 @@ from macho import (
 )
 from substrate import inject_substrate, patch_tweak_substrate_dependencies
 from constants import MIN_HEADER_PADDING, MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32, FAT_MAGIC, FAT_CIGAM
-from utils import color_print, log_message
-
+from utils import color_print, log_message, ask_yes_no
 
 def verify_binary_architecture(binary_path):
     if not os.path.isfile(binary_path):
@@ -42,8 +41,8 @@ def verify_binary_architecture(binary_path):
                 
             nfat = struct.unpack_from(endian + 'I', header_data, 4)[0]
             
-            if nfat > 20:
-                return False, f"Ошибка структуры FAT заголовка: считано нереальное количество архитектур ({nfat})"
+            if nfat > 20 or nfat < 1:
+                return False, f"Ошибка структуры FAT заголовка: неверное количество архитектур ({nfat})"
             
             has_modern_arch = False
             detected_archs = []
@@ -83,6 +82,69 @@ def verify_binary_architecture(binary_path):
     except Exception as e:
         return False, f"Ошибка при анализе структуры бинарника: {e}"
 
+def verify_dylib_headers(dylib_path):
+    """Проверка заголовков dylib перед инъекцией"""
+    if not os.path.isfile(dylib_path):
+        return False, "File not found"
+    
+    try:
+        with open(dylib_path, 'rb') as f:
+            magic_bytes = f.read(4)
+            if len(magic_bytes) < 4:
+                return False, "File too small"
+            
+            magic_le = struct.unpack('<I', magic_bytes)[0]
+            magic_be = struct.unpack('>I', magic_bytes)[0]
+            
+            valid_magic = (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32, FAT_MAGIC, FAT_CIGAM)
+            if magic_le not in valid_magic and magic_be not in valid_magic:
+                return False, "Not a valid Mach-O binary"
+            
+            if magic_le in (MH_MAGIC_32, MH_CIGAM_32):
+                return False, "32-bit dylib not supported"
+            
+            f.seek(0)
+            file_data = f.read()
+            
+            if magic_be in (FAT_MAGIC, FAT_CIGAM):
+                slices = get_arch_slices(bytearray(file_data))
+                if not slices:
+                    return False, "Failed to parse FAT headers"
+                
+                has_arm64 = False
+                has_arm64e = False
+                
+                for s in slices:
+                    if is_arm64_slice(s['cputype'], s['cpusubtype']):
+                        has_arm64 = True
+                        clean_subtype = s['cpusubtype'] & 0x0FFFFFFF
+                        if clean_subtype == 2:
+                            has_arm64e = True
+                
+                if not has_arm64:
+                    return False, "No ARM64 slice found in FAT binary"
+                
+                arch_type = "ARM64e" if has_arm64e else "ARM64"
+                if has_arm64 and has_arm64e:
+                    arch_type = "ARM64 + ARM64e"
+                return True, f"Valid FAT binary with {arch_type} slice(s)"
+            
+            if len(file_data) >= 12:
+                endian = '>' if magic_le in (MH_CIGAM_64, MH_CIGAM_32) else '<'
+                cputype = struct.unpack_from(endian + 'i', file_data, 4)[0]
+                cpusubtype = struct.unpack_from(endian + 'i', file_data, 8)[0]
+                
+                if not is_arm64_slice(cputype, cpusubtype):
+                    return False, f"Not ARM64 architecture (cputype: {hex(cputype)})"
+                
+                clean_subtype = cpusubtype & 0x0FFFFFFF
+                arch_type = "ARM64e" if clean_subtype == 2 else "ARM64"
+                return True, f"Valid {arch_type} binary"
+            
+            return False, "Unable to determine architecture"
+            
+    except Exception as e:
+        return False, f"Error analyzing dylib: {e}"
 
 def count_modules_in_tweak(tweak_path):
     if not os.path.exists(tweak_path):
@@ -122,7 +184,6 @@ def count_modules_in_tweak(tweak_path):
     except:
         return 2
 
-
 def parse_dependencies(control_path):
     deps = []
     if not os.path.isfile(control_path):
@@ -140,7 +201,6 @@ def parse_dependencies(control_path):
     except:
         pass
     return deps
-
 
 def resolve_dependencies(dep_name, source_root, frameworks_dir, copied_dylibs, copied_frameworks):
     clean_name = dep_name
@@ -174,15 +234,16 @@ def resolve_dependencies(dep_name, source_root, frameworks_dir, copied_dylibs, c
                     found = True
     return found
 
-
 def check_header_space(main_executable, required_bytes):
     try:
         with open(main_executable, 'rb') as f:
             data = bytearray(f.read())
         if len(data) < 4:
             return True
-        magic = struct.unpack_from('>I', data, 0)[0]
-        if magic in (FAT_MAGIC, FAT_CIGAM):
+            
+        magic_be = struct.unpack_from('>I', data, 0)[0]
+        
+        if magic_be in (FAT_MAGIC, FAT_CIGAM):
             slices = get_arch_slices(data)
             for s in slices:
                 if not is_arm64_slice(s['cputype'], s['cpusubtype']):
@@ -197,12 +258,14 @@ def check_header_space(main_executable, required_bytes):
                 if slice_offset + header_size > len(data):
                     continue
                 ncmds = struct.unpack_from(endian + 'I', data, slice_offset + 16)[0]
+                if ncmds > 1000:
+                    continue
                 sizeofcmds = struct.unpack_from(endian + 'I', data, slice_offset + 20)[0]
                 insert_at = slice_offset + header_size + sizeofcmds
                 if insert_at > len(data):
                     continue
                 min_section_offset = get_min_section_offset(data, slice_offset, endian, ncmds, header_size, sizeofcmds)
-                if min_section_offset <= insert_at or min_section_offset > len(data):
+                if min_section_offset is None or min_section_offset <= insert_at or min_section_offset > len(data):
                     continue
                 available = min_section_offset - insert_at
                 if available < required_bytes:
@@ -210,33 +273,38 @@ def check_header_space(main_executable, required_bytes):
                     return False
             return True
         else:
-            endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
-            is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
-            header_size = 32 if is_64 else 28
-            if header_size > len(data):
+            if magic_be in (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32):
+                magic = struct.unpack_from('<I', data, 0)[0]
+                endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
+                is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
+                header_size = 32 if is_64 else 28
+                if header_size > len(data):
+                    return True
+                ncmds = struct.unpack_from(endian + 'I', data, 16)[0]
+                if ncmds > 1000:
+                    return True
+                sizeofcmds = struct.unpack_from(endian + 'I', data, 20)[0]
+                insert_at = header_size + sizeofcmds
+                if insert_at > len(data):
+                    return True
+                min_section_offset = get_min_section_offset(data, 0, endian, ncmds, header_size, sizeofcmds)
+                if min_section_offset is None or min_section_offset <= insert_at or min_section_offset > len(data):
+                    return True
+                available = min_section_offset - insert_at
+                if available < required_bytes:
+                    color_print(f"Not enough header space: {available} bytes available, {required_bytes} needed", 'yellow')
+                    return False
                 return True
-            ncmds = struct.unpack_from(endian + 'I', data, 16)[0]
-            sizeofcmds = struct.unpack_from(endian + 'I', data, 20)[0]
-            insert_at = header_size + sizeofcmds
-            if insert_at > len(data):
-                return True
-            min_section_offset = get_min_section_offset(data, 0, endian, ncmds, header_size, sizeofcmds)
-            if min_section_offset <= insert_at or min_section_offset > len(data):
-                return True
-            available = min_section_offset - insert_at
-            if available < required_bytes:
-                color_print(f"Not enough header space: {available} bytes available, {required_bytes} needed", 'yellow')
-                return False
             return True
     except Exception:
         return True
 
-
-def extract_archive_with_libarchive(archive_path, output_dir):
+def safe_extract_archive(archive_path, output_dir):
     try:
         libarchive = ctypes.CDLL('/usr/lib/libarchive.2.dylib')
     except OSError:
         raise RuntimeError("Failed to load system libarchive.2.dylib")
+    
     libarchive.archive_read_new.restype = ctypes.c_void_p
     libarchive.archive_read_support_filter_all.argtypes = [ctypes.c_void_p]
     libarchive.archive_read_support_format_all.argtypes = [ctypes.c_void_p]
@@ -248,34 +316,47 @@ def extract_archive_with_libarchive(archive_path, output_dir):
     libarchive.archive_read_extract.restype = ctypes.c_int
     libarchive.archive_read_free.argtypes = [ctypes.c_void_p]
     libarchive.archive_read_free.restype = ctypes.c_int
+    libarchive.archive_entry_pathname.argtypes = [ctypes.c_void_p]
+    libarchive.archive_entry_pathname.restype = ctypes.c_char_p
+    
     archive = libarchive.archive_read_new()
     libarchive.archive_read_support_filter_all(archive)
     libarchive.archive_read_support_format_all(archive)
+    
     if libarchive.archive_read_open_filename(archive, archive_path.encode('utf-8'), 10240) != 0:
         libarchive.archive_read_free(archive)
         raise RuntimeError(f"Failed to open archive: {archive_path}")
+    
     entry = ctypes.c_void_p()
     os.makedirs(output_dir, exist_ok=True)
     old_cwd = os.getcwd()
     os.chdir(output_dir)
     extract_flags = 22
+    real_output = os.path.realpath(output_dir)
+    
     try:
         while libarchive.archive_read_next_header(archive, ctypes.byref(entry)) == 0:
+            entry_path = libarchive.archive_entry_pathname(entry)
+            if entry_path:
+                path_str = entry_path.decode('utf-8')
+                full_path = os.path.join(output_dir, path_str)
+                if not os.path.realpath(full_path).startswith(real_output):
+                    raise ValueError(f"Path traversal attempt: {path_str}")
             libarchive.archive_read_extract(archive, entry, extract_flags)
     finally:
         libarchive.archive_read_free(archive)
         os.chdir(old_cwd)
+    
     color_print(f"Extracted: {os.path.basename(archive_path)}", 'hotpink')
 
-
 def extract_deb_recursive(deb_path, output_dir):
-    extract_archive_with_libarchive(deb_path, output_dir)
+    safe_extract_archive(deb_path, output_dir)
     for root, _, files in os.walk(output_dir):
         for f in files:
             if f.startswith('data.tar.') and f.endswith(('.lzma', '.xz', '.gz')):
                 data_archive = os.path.join(root, f)
                 color_print(f"Found nested archive: {data_archive}", 'hotpink')
-                extract_archive_with_libarchive(data_archive, output_dir)
+                safe_extract_archive(data_archive, output_dir)
                 try:
                     if os.path.isfile(data_archive):
                         os.remove(data_archive)
@@ -283,7 +364,6 @@ def extract_deb_recursive(deb_path, output_dir):
                 except Exception as e:
                     color_print(f"Failed to remove nested archive: {e}", 'yellow')
                 break
-
 
 def get_main_executable(app_dir, plist_data):
     if plist_data is None:
@@ -299,7 +379,6 @@ def get_main_executable(app_dir, plist_data):
             return os.path.join(root, executable_name)
     return None
 
-
 def patch_all_macho_in_dir(directory, replacements):
     if not os.path.isdir(directory):
         return
@@ -310,7 +389,6 @@ def patch_all_macho_in_dir(directory, replacements):
                 continue
             if is_macho_binary(file_path):
                 patch_strings_in_binary(file_path, replacements)
-
 
 def ensure_frameworks_rpath(main_executable):
     rpath_path = "@executable_path/Frameworks"
@@ -326,7 +404,6 @@ def ensure_frameworks_rpath(main_executable):
         color_print(f"LC_RPATH {rpath_path} already exists", 'hotpink')
         return True
 
-
 def ensure_executable_rpath(main_executable):
     rpath_path = "@executable_path/"
     if not has_rpath(main_executable, rpath_path):
@@ -340,7 +417,6 @@ def ensure_executable_rpath(main_executable):
     else:
         color_print(f"LC_RPATH {rpath_path} already exists", 'hotpink')
         return True
-
 
 def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
     if config is None:
@@ -389,11 +465,18 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
     
     ext = os.path.splitext(tweak_path)[1].lower()
     
-    if ext == '.dylib':
-        direct_dylib = tweak_path
-        color_print(f"Selected direct .dylib file: {os.path.basename(tweak_path)}", 'hotpink')
-    else:
-        try:
+    try:
+        if ext == '.dylib':
+            direct_dylib = tweak_path
+            is_valid, msg = verify_dylib_headers(tweak_path)
+            if not is_valid:
+                color_print(f"[WARN] Dylib verification failed: {msg}", 'yellow')
+                if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
+                    return False, "Dylib verification failed"
+            else:
+                color_print(f"[INFO] Dylib verification passed: {msg}", 'green')
+            color_print(f"Selected direct .dylib file: {os.path.basename(tweak_path)}", 'hotpink')
+        else:
             if ext == '.deb':
                 temp_extract = tempfile.mkdtemp(prefix="deb_extract_")
                 extract_deb_recursive(tweak_path, temp_extract)
@@ -406,12 +489,15 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
                         resolve_dependencies(dep, source_root, frameworks_dir, copied_dylibs, copied_frameworks)
             elif ext in ('.tar', '.lzma', '.xz', '.gz', '.tgz'):
                 temp_extract = tempfile.mkdtemp(prefix="archive_extract_")
-                extract_archive_with_libarchive(tweak_path, temp_extract)
+                safe_extract_archive(tweak_path, temp_extract)
                 source_root = temp_extract
             elif tweak_path.endswith('.zip'):
                 temp_extract = tempfile.mkdtemp(prefix="tweak_zip_")
                 with zipfile.ZipFile(tweak_path, 'r') as zf:
-                    zf.extractall(temp_extract)
+                    for info in zf.infolist():
+                        if info.filename.startswith('/') or '..' in info.filename:
+                            continue
+                        zf.extract(info, temp_extract)
                 items = os.listdir(temp_extract)
                 if len(items) == 1 and os.path.isdir(os.path.join(temp_extract, items[0])):
                     source_root = os.path.join(temp_extract, items[0])
@@ -509,14 +595,14 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
                 if os.path.exists(unwanted_path):
                     shutil.rmtree(unwanted_path, ignore_errors=True)
                     color_print(f"Removed unnecessary folder: {unwanted_path}", 'hotpink')
-        except Exception as e:
-            color_print(f"Processing error: {e}", 'red')
-            if temp_extract:
-                shutil.rmtree(temp_extract, ignore_errors=True)
-            return False, f"Error: {e}"
-        finally:
-            if temp_extract and os.path.exists(temp_extract):
-                shutil.rmtree(temp_extract, ignore_errors=True)
+    except Exception as e:
+        color_print(f"Processing error: {e}", 'red')
+        if temp_extract and os.path.exists(temp_extract):
+            shutil.rmtree(temp_extract, ignore_errors=True)
+        return False, f"Error: {e}"
+    finally:
+        if temp_extract and os.path.exists(temp_extract):
+            shutil.rmtree(temp_extract, ignore_errors=True)
     
     if direct_dylib:
         dylib_name = os.path.basename(direct_dylib)
