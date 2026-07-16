@@ -26,6 +26,9 @@ from entitlements import generate_custom_entitlements
 from advanced_patches import apply_advanced_patches, check_patch_availability
 from patch_strings import patch_strings_in_binary
 from utils import color_print, log_message, clear_screen, ensure_directories, PATCHED_DIR, ask_input, ask_yes_no
+from icon_manager import replace_icon_with_priority, replace_icon_standard
+from icon_generator import replace_icon_loose_method
+from boms_editor import analyze_boms
 
 try:
     import dialogs, console
@@ -58,6 +61,15 @@ def get_adaptive_delay(ipa_path):
         pass
     return min(base_delay, 0.01)
 
+def sanitize_filename(name):
+    if not name:
+        return ""
+    if isinstance(name, str):
+        name = os.path.basename(name)
+        name = name.replace('/', '_').replace('\\', '_').replace('..', '_')
+        return name
+    return ""
+
 def get_icon_names_from_plist(app_dir):
     info_plist_path = os.path.join(app_dir, "Info.plist")
     if not os.path.isfile(info_plist_path):
@@ -73,16 +85,20 @@ def get_icon_names_from_plist(app_dir):
         if isinstance(primary, dict):
             icon_files = primary.get("CFBundleIconFiles")
             if isinstance(icon_files, list):
-                icon_names.extend(icon_files)
+                for name in icon_files:
+                    if isinstance(name, str):
+                        icon_names.append(sanitize_filename(name))
     if not icon_names:
         icon_files_root = plist.get("CFBundleIconFiles")
         if isinstance(icon_files_root, list):
-            icon_names.extend(icon_files_root)
+            for name in icon_files_root:
+                if isinstance(name, str):
+                    icon_names.append(sanitize_filename(name))
     if not icon_names:
         icon_names = ["AppIcon60x60", "Icon-60", "Icon"]
     result = []
     for name in icon_names:
-        if isinstance(name, str):
+        if name:
             base = name.replace(".png", "").replace(".PNG", "")
             result.append(f"{base}.png")
             result.append(f"{base}@2x.png")
@@ -113,54 +129,7 @@ def add_icons_to_plist(app_dir, icon_names):
     return True
 
 def replace_icon(app_dir, icon_path, remove_assets=False):
-    if not os.path.isfile(icon_path):
-        color_print(f"[ERROR] Файл иконки не найден: {icon_path}", 'red')
-        return False
-    
-    color_print(f"[INFO] Замена иконки: {os.path.basename(icon_path)}", 'blue')
-    
-    icon_names = get_icon_names_from_plist(app_dir)
-    if not icon_names:
-        color_print("[INFO] Иконки не найдены в Info.plist, используются стандартные имена", 'yellow')
-        icon_names = [
-            "AppIcon60x60@2x.png",
-            "AppIcon60x60@3x.png",
-            "Icon-60@2x.png",
-            "Icon-60@3x.png",
-            "Icon.png",
-            "Icon@2x.png",
-            "iTunesArtwork",
-            "iTunesArtwork@2x"
-        ]
-    
-    replaced = False
-    for name in icon_names:
-        target = os.path.join(app_dir, name)
-        try:
-            shutil.copy2(icon_path, target)
-            color_print(f"  Создано: {name}", 'green')
-            replaced = True
-        except Exception as e:
-            log.warning("Не удалось создать %s: %s", name, e)
-    
-    add_icons_to_plist(app_dir, icon_names)
-    
-    if remove_assets:
-        assets_car = os.path.join(app_dir, "Assets.car")
-        if os.path.exists(assets_car):
-            try:
-                os.remove(assets_car)
-                color_print("[INFO] Assets.car удален", 'green')
-            except Exception as e:
-                log.warning("Не удалось удалить Assets.car: %s", e)
-                color_print("[WARN] Не удалось удалить Assets.car", 'yellow')
-    
-    if replaced:
-        color_print("[SUCCESS] Иконка заменена!", 'green')
-    else:
-        color_print("[ERROR] Не удалось заменить иконку", 'red')
-    
-    return replaced
+    return replace_icon_with_priority(app_dir, icon_path, remove_assets)
 
 def deep_patch_bundle_id(app_dir, old_id, new_id):
     old_bytes = old_id.encode('utf-8')
@@ -178,10 +147,15 @@ def deep_patch_bundle_id(app_dir, old_id, new_id):
     skip_extensions = ('.png', '.jpg', '.jpeg', '.pvr', '.ktx', '.cae', '.mp3', '.ogg', '.wav', 
                       '.m4a', '.mp4', '.mov', '.ttc', '.ttf', '.woff', '.nib', '.storyboardc', '.car')
     
+    skip_files = ('Info.plist', 'entitlements.plist', 'embedded.mobileprovision')
+    
     found = False
     for root, _, files in os.walk(app_dir):
         for f in files:
             if f.startswith('._') or f.lower().endswith(skip_extensions):
+                continue
+            
+            if f in skip_files:
                 continue
             
             file_path = os.path.join(root, f)
@@ -236,10 +210,15 @@ def deep_patch_version(app_dir, old_version, new_version):
     skip_extensions = ('.png', '.jpg', '.jpeg', '.pvr', '.ktx', '.cae', '.mp3', '.ogg', '.wav', 
                       '.m4a', '.mp4', '.mov', '.ttc', '.ttf', '.woff', '.nib', '.storyboardc', '.car')
     
+    skip_files = ('Info.plist', 'entitlements.plist', 'embedded.mobileprovision')
+    
     found = False
     for root, _, files in os.walk(app_dir):
         for f in files:
             if f.startswith('._') or f.lower().endswith(skip_extensions):
+                continue
+            
+            if f in skip_files:
                 continue
             
             file_path = os.path.join(root, f)
@@ -348,14 +327,15 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 
                 if mode == "2":
                     deep_version_mode = True
+                    changes["version_deep"] = True
                     color_print("Выбрана глубокая замена версии", 'yellow')
                 else:
                     deep_version_mode = False
+                    changes["version_deep"] = False
                     color_print("Выбрана замена только в Info.plist", 'yellow')
                 
                 plist_data["CFBundleShortVersionString"] = new_ver
                 changes["version"] = new_ver
-                changes["version_deep"] = deep_version_mode
                 modified = True
                 color_print("Версия изменена в Info.plist", 'green')
                 
@@ -378,14 +358,15 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 
                 if mode == "2":
                     deep_bundle_mode = True
+                    changes["bundle_deep"] = True
                     color_print("Выбрана глубокая замена Bundle ID", 'yellow')
                 else:
                     deep_bundle_mode = False
+                    changes["bundle_deep"] = False
                     color_print("Выбрана замена только в Info.plist", 'yellow')
                 
                 plist_data["CFBundleIdentifier"] = new_id
                 changes["bundle_id"] = new_id
-                changes["bundle_deep"] = deep_bundle_mode
                 modified = True
                 color_print("Bundle ID изменен в Info.plist", 'green')
                 
@@ -401,13 +382,62 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             color_print("\nВыберите изображение для иконки...", 'blue')
             img_path = pick_icon_file()
             if img_path:
-                remove_assets = ask_yes_no("Удалить Assets.car (риск краша на iOS 15+)?", default=False)
-                if replace_icon(app_dir, img_path, remove_assets):
+                color_print("\nВыберите метод замены иконки:", 'cyan')
+                print("1. Гибридный (рекомендуется) - маскирует Assets.car + loose-иконки")
+                print("2. Только маскировка Assets.car (без замены файлов)")
+                print("3. Только loose-иконки + Info.plist")
+                print("4. Только стандартная замена")
+                print("5. Удалить Assets.car (Возможен вылет на IOS/iPadOS 15+!)")
+                
+                method = ask_input("Ваш выбор", "1")
+                
+                remove_assets = False
+                auto_increment = True
+                success = False
+                
+                if method == "1":
+                    color_print("[INFO] Выбран гибридный режим", 'blue')
+                    success = replace_icon_with_priority(app_dir, img_path, remove_assets, auto_increment)
+                elif method == "2":
+                    color_print("[INFO] Выбрана маскировка Assets.car", 'blue')
+                    from boms_editor import patch_boms_icon
+                    success = patch_boms_icon(os.path.join(app_dir, "Assets.car"))
+                    if success:
+                        color_print("[SUCCESS] Токены иконок замаскированы", 'green')
+                elif method == "3":
+                    color_print("[INFO] Выбран метод loose-иконок", 'blue')
+                    success = replace_icon_loose_method(app_dir, img_path, auto_increment)
+                elif method == "4":
+                    color_print("[INFO] Выбрана стандартная замена", 'blue')
+                    success = replace_icon_standard(app_dir, img_path, False, auto_increment)
+                elif method == "5":
+                    color_print("[WARN] Выбрано удаление Assets.car (ОПАСНО!)", 'red')
+                    if ask_yes_no("Подтвердить удаление Assets.car?", default=False):
+                        success = replace_icon_standard(app_dir, img_path, True, auto_increment)
+                    else:
+                        continue
+                else:
+                    color_print("Неверный выбор", 'red')
+                    continue
+                
+                if success:
                     icon_replaced = True
                     changes["icon"] = True
                     modified = True
+                    
+                    try:
+                        import plistlib
+                        with open(os.path.join(app_dir, "Info.plist"), 'rb') as f:
+                            plist_data = plistlib.load(f)
+                        color_print("[INFO] Info.plist обновлен (версия: {})".format(
+                            plist_data.get('CFBundleVersion', 'не указана')
+                        ), 'blue')
+                    except:
+                        pass
+                    
+                    color_print("[SUCCESS] Иконка заменена!", 'green')
                 else:
-                    color_print("Иконка не заменена", 'red')
+                    color_print("[ERROR] Не удалось заменить иконку", 'red')
             else:
                 color_print("Иконка не заменена (файл не выбран)", 'red')
                 
@@ -513,6 +543,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 
         elif choice == "9":
             if modified or icon_replaced or tweak_injected or ("custom_edit" in changes) or ("entitlements" in changes) or ("advanced_patched" in changes):
+                
                 color_print("\n--- Сводка изменений ---", 'cyan')
                 if "name" in changes:
                     print(f"Имя: {original.get('CFBundleName')} -> {changes['name']}")
@@ -543,7 +574,12 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print("Права (Entitlements): НАСТРОЕНЫ", 'green')
                 if "advanced_patched" in changes:
                     color_print("Расширенные патчи: ПРИМЕНЕНЫ", 'green')
+                
+                current_version = plist_data.get('CFBundleVersion', 'не указана')
+                color_print(f"Текущая версия сборки: {current_version}", 'cyan')
+                
                 if ask_yes_no("\nПрименить изменения и собрать IPA?", default=True):
+                    
                     return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, ("file_support" in changes), changes, deep_bundle_mode, deep_version_mode
                 else:
                     continue
@@ -711,11 +747,25 @@ def clean_non_standard_dirs(app_dir):
             shutil.rmtree(path, ignore_errors=True)
             color_print(f"Удалена ненужная папка: {path}", 'red')
 
+def update_ext_bundle_id(plist_path, old_parent, new_parent):
+    if not os.path.isfile(plist_path):
+        return
+    try:
+        ext_plist = load_plist(plist_path)
+        current = ext_plist.get("CFBundleIdentifier", "")
+        if current and isinstance(current, str) and current.startswith(old_parent):
+            new_id = current.replace(old_parent, new_parent, 1)
+            ext_plist["CFBundleIdentifier"] = new_id
+            save_plist(ext_plist, plist_path)
+            log_message(f"Bundle ID расширения обновлен: {current} -> {new_id}", 'INFO')
+    except Exception as e:
+        log_message(f"Ошибка обновления Bundle ID для {plist_path}: {e}", 'WARN')
+
 def main():
     ensure_directories()
     if PYTHONISTA:
         console.clear()
-    color_print("=== IPA Patcher Lite v1.0.5 ===", 'cyan')
+    color_print("=== IPA Patcher Lite v1.0.6 ===", 'cyan')
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
         color_print("Файл не найден", 'red')
@@ -752,6 +802,7 @@ def main():
         updated_plist, modified, original_bundle_id, icon_replaced, tweak_injected, file_support_enabled, changes, deep_bundle_mode, deep_version_mode = edit_menu(
             plist, app_dir, script_dir, temp_dir
         )
+        
         if modified:
             save_plist(updated_plist, info_plist_path)
             color_print("Info.plist обновлен", 'green')
@@ -775,32 +826,20 @@ def main():
         if new_bundle_id != original_bundle_id:
             color_print("Обновление Bundle ID в расширениях (.appex)...", 'blue')
             
-            def update_ext_bundle_id(plist_path, old_parent, new_parent):
-                if not os.path.isfile(plist_path):
-                    return
-                try:
-                    ext_plist = load_plist(plist_path)
-                    current = ext_plist.get("CFBundleIdentifier", "")
-                    if current.startswith(old_parent):
-                        new_id = current.replace(old_parent, new_parent, 1)
-                        ext_plist["CFBundleIdentifier"] = new_id
-                        save_plist(ext_plist, plist_path)
-                        log_message(f"Bundle ID расширения обновлен: {current} -> {new_id}", 'INFO')
-                except Exception as e:
-                    log_message(f"Ошибка обновления Bundle ID для {plist_path}: {e}", 'WARN')
-
             plugins_path = os.path.join(app_dir, "PlugIns")
             if os.path.isdir(plugins_path):
                 for ext in os.listdir(plugins_path):
                     if ext.endswith(".appex"):
-                        ext_plist = os.path.join(plugins_path, ext, "Info.plist")
+                        ext_name = sanitize_filename(ext)
+                        ext_plist = os.path.join(plugins_path, ext_name, "Info.plist")
                         update_ext_bundle_id(ext_plist, original_bundle_id, new_bundle_id)
             
             watch_path = os.path.join(app_dir, "Watch")
             if os.path.isdir(watch_path):
                 for item in os.listdir(watch_path):
                     if item.endswith(".app"):
-                        watch_plist = os.path.join(watch_path, item, "Info.plist")
+                        item_name = sanitize_filename(item)
+                        watch_plist = os.path.join(watch_path, item_name, "Info.plist")
                         update_ext_bundle_id(watch_plist, original_bundle_id, new_bundle_id)
             
             for root, dirs, files in os.walk(app_dir):
@@ -808,7 +847,8 @@ def main():
                     continue
                 for d in dirs:
                     if d.endswith(".appex"):
-                        ext_plist = os.path.join(root, d, "Info.plist")
+                        ext_name = sanitize_filename(d)
+                        ext_plist = os.path.join(root, ext_name, "Info.plist")
                         update_ext_bundle_id(ext_plist, original_bundle_id, new_bundle_id)
             
             if deep_bundle_mode:
@@ -836,9 +876,12 @@ def main():
             color_print("Создана папка Documents для файлового шеринга", 'green')
             
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
+        
+        
         app_name = updated_plist.get("CFBundleDisplayName") or updated_plist.get("CFBundleName") or app_basename
         app_version = updated_plist.get("CFBundleShortVersionString", "1.0")
         clean_app_name = app_name.replace(' ', '_').replace('/', '_').replace(':', '_')
+        
         filename_parts = []
         filename_parts.append(clean_app_name)
         filename_parts.append(f"v{app_version}")
