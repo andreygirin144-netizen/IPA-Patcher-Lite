@@ -7,6 +7,7 @@ import tempfile
 import json
 import zipfile
 import time
+import plistlib
 from constants import UNWANTED_DIRS, PatchConfig
 from ipa_utils import (
     pick_ipa_file,
@@ -131,22 +132,23 @@ def add_icons_to_plist(app_dir, icon_names):
 def replace_icon(app_dir, icon_path, remove_assets=False):
     return replace_icon_with_priority(app_dir, icon_path, remove_assets)
 
-def deep_patch_bundle_id(app_dir, old_id, new_id):
-    old_bytes = old_id.encode('utf-8')
-    new_bytes = new_id.encode('utf-8')
-    
+def deep_patch_string_in_bundle(app_dir, old_str, new_str):
+    old_bytes = old_str.encode('utf-8')
+    new_bytes = new_str.encode('utf-8')
     len_old = len(old_bytes)
     len_new = len(new_bytes)
     
     if len_new > len_old:
-        color_print(f"[WARN] Новый ID длиннее старого ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
+        color_print(f"[WARN] Новый текст длиннее старого ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
         return False
     
     padded_new = new_bytes + b'\x00' * (len_old - len_new)
     
-    skip_extensions = ('.png', '.jpg', '.jpeg', '.pvr', '.ktx', '.cae', '.mp3', '.ogg', '.wav', 
-                      '.m4a', '.mp4', '.mov', '.ttc', '.ttf', '.woff', '.nib', '.storyboardc', '.car')
-    
+    skip_extensions = (
+        '.png', '.jpg', '.jpeg', '.pvr', '.ktx', '.cae', '.mp3', '.ogg', '.wav', 
+        '.m4a', '.mp4', '.mov', '.ttc', '.ttf', '.woff', '.nib', '.storyboardc', '.car',
+        '.mp3', '.aiff', '.caf', '.aac', '.m4v', '.mpv', '.gif', '.bmp', '.tiff'
+    )
     skip_files = ('Info.plist', 'entitlements.plist', 'embedded.mobileprovision')
     
     found = False
@@ -154,29 +156,27 @@ def deep_patch_bundle_id(app_dir, old_id, new_id):
         for f in files:
             if f.startswith('._') or f.lower().endswith(skip_extensions):
                 continue
-            
             if f in skip_files:
                 continue
             
             file_path = os.path.join(root, f)
+            if not os.path.isfile(file_path):
+                continue
             
             try:
                 f_size = os.path.getsize(file_path)
-                if f_size == 0:
+                if f_size == 0 or f_size > 20 * 1024 * 1024:
                     continue
             except OSError:
                 continue
             
-            is_macho = is_macho_binary(file_path)
-            
-            if is_macho and f_size < 200 * 1024 * 1024:
-                replacements = [(old_bytes, padded_new)]
-                if patch_strings_in_binary(file_path, replacements):
-                    color_print(f"  Bundle ID заменен в бинарнике: {f}", 'green')
+            if is_macho_binary(file_path) and f_size < 200 * 1024 * 1024:
+                if patch_strings_in_binary(file_path, [(old_bytes, padded_new)]):
+                    color_print(f"  Заменено в бинарнике: {f}", 'green')
                     found = True
                 continue
             
-            if not is_macho and f_size <= 50 * 1024 * 1024:
+            if f_size <= 5 * 1024 * 1024:
                 try:
                     with open(file_path, 'rb') as fr:
                         content = fr.read()
@@ -184,78 +184,21 @@ def deep_patch_bundle_id(app_dir, old_id, new_id):
                         new_content = content.replace(old_bytes, padded_new)
                         with open(file_path, 'wb') as fw:
                             fw.write(new_content)
-                        color_print(f"  Bundle ID заменен в файле: {os.path.relpath(file_path, app_dir)}", 'green')
+                        color_print(f"  Заменено в файле: {os.path.relpath(file_path, app_dir)}", 'green')
                         found = True
                 except:
                     pass
     
     if not found:
-        color_print("[WARN] Bundle ID не найден для глубокой замены", 'yellow')
+        color_print("[WARN] Строка не найдена для глубокой замены", 'yellow')
     
     return found
 
+def deep_patch_bundle_id(app_dir, old_id, new_id):
+    return deep_patch_string_in_bundle(app_dir, old_id, new_id)
+
 def deep_patch_version(app_dir, old_version, new_version):
-    old_bytes = old_version.encode('utf-8')
-    new_bytes = new_version.encode('utf-8')
-    
-    len_old = len(old_bytes)
-    len_new = len(new_bytes)
-    
-    if len_new > len_old:
-        color_print(f"[WARN] Новая версия длиннее старой ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
-        return False
-    
-    padded_new = new_bytes + b'\x00' * (len_old - len_new)
-    
-    skip_extensions = ('.png', '.jpg', '.jpeg', '.pvr', '.ktx', '.cae', '.mp3', '.ogg', '.wav', 
-                      '.m4a', '.mp4', '.mov', '.ttc', '.ttf', '.woff', '.nib', '.storyboardc', '.car')
-    
-    skip_files = ('Info.plist', 'entitlements.plist', 'embedded.mobileprovision')
-    
-    found = False
-    for root, _, files in os.walk(app_dir):
-        for f in files:
-            if f.startswith('._') or f.lower().endswith(skip_extensions):
-                continue
-            
-            if f in skip_files:
-                continue
-            
-            file_path = os.path.join(root, f)
-            
-            try:
-                f_size = os.path.getsize(file_path)
-                if f_size == 0:
-                    continue
-            except OSError:
-                continue
-            
-            is_macho = is_macho_binary(file_path)
-            
-            if is_macho and f_size < 200 * 1024 * 1024:
-                replacements = [(old_bytes, padded_new)]
-                if patch_strings_in_binary(file_path, replacements):
-                    color_print(f"  Версия заменена в бинарнике: {f}", 'green')
-                    found = True
-                continue
-            
-            if not is_macho and f_size <= 50 * 1024 * 1024:
-                try:
-                    with open(file_path, 'rb') as fr:
-                        content = fr.read()
-                    if old_bytes in content:
-                        new_content = content.replace(old_bytes, padded_new)
-                        with open(file_path, 'wb') as fw:
-                            fw.write(new_content)
-                        color_print(f"  Версия заменена в файле: {os.path.relpath(file_path, app_dir)}", 'green')
-                        found = True
-                except:
-                    pass
-    
-    if not found:
-        color_print("[WARN] Версия не найдена для глубокой замены", 'yellow')
-    
-    return found
+    return deep_patch_string_in_bundle(app_dir, old_version, new_version)
 
 def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
     from constants import MIN_HEADER_PADDING
@@ -579,7 +522,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print(f"Текущая версия сборки: {current_version}", 'cyan')
                 
                 if ask_yes_no("\nПрименить изменения и собрать IPA?", default=True):
-                    
                     return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, ("file_support" in changes), changes, deep_bundle_mode, deep_version_mode
                 else:
                     continue
@@ -876,7 +818,6 @@ def main():
             color_print("Создана папка Documents для файлового шеринга", 'green')
             
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
-        
         
         app_name = updated_plist.get("CFBundleDisplayName") or updated_plist.get("CFBundleName") or app_basename
         app_version = updated_plist.get("CFBundleShortVersionString", "1.0")
