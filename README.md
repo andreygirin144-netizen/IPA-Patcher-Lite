@@ -454,6 +454,6 @@ Pythonista 3.4 и новее.
 
 <div align="center">
 
-Сделано для iOS · работает на Pythonista 3 · MIT License
+Сделано для iOS/iPadOS · работает на Pythonista 3 · MIT License
 
 </div>
