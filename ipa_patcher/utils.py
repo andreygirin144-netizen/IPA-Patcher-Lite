@@ -83,11 +83,19 @@ def ask_input(prompt, default=""):
 
 def ask_yes_no(prompt, default=False):
     try:
-        default_str = "y/n"
-        result = input(f"{prompt} ({default_str}): ").strip().lower()
-        if not result:
-            return default
-        return result in ('y', 'yes', 'д', 'да')
+        while True:
+            default_str = "y/n"
+            result = input(f"{prompt} ({default_str}): ").strip().lower()
+            
+            if not result:
+                return default
+            
+            if result in ('y', 'yes', 'д', 'да'):
+                return True
+            elif result in ('n', 'no', 'н', 'нет'):
+                return False
+            
+            color_print("Ошибка: введите 'y' или 'n' (д/н)", 'red')
     except KeyboardInterrupt:
         print("\nПрервано.")
         sys.exit(0)
