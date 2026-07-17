@@ -5,13 +5,13 @@ from utils import log_message
 
 def patch_strings_in_binary(file_path, replacements):
     if not file_path or not os.path.isfile(file_path):
-        return False
+        return 0
     try:
         with open(file_path, 'rb+') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_WRITE) as data:
                 if len(data) == 0:
-                    return False
-                modified = False
+                    return 0
+                total_replacements = 0
                 for old, new in replacements:
                     if not old or len(old) == 0:
                         continue
@@ -30,11 +30,11 @@ def patch_strings_in_binary(file_path, replacements):
                         if idx + old_len <= len(data):
                             data[idx:idx+old_len] = padded_new
                             log_message(f"Replaced in {os.path.basename(file_path)}: {old} -> {new}", 'INFO')
-                            modified = True
+                            total_replacements += 1
                             pos = idx + old_len
                         else:
                             break
-                return modified
+                return total_replacements
     except Exception as e:
         log_message(f"Failed to patch {file_path}: {e}", 'ERROR')
-        return False
+        return 0
