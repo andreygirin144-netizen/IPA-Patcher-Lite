@@ -38,7 +38,7 @@ CONFIG = {
     'MAX_CONNECTIONS': 10,
 }
 
-VERSION = '1.0.6'
+VERSION = '1.0.7'
 
 DOCS_DIR = os.path.expanduser('~/Documents')
 FILES_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Files')
@@ -497,7 +497,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 <input type="password" id="pin" placeholder="ПИН-КОД" maxlength="6" autofocus>
                 <button class="btn" id="login">Войти</button>
                 <div class="hint">Введите 6-значный ПИН из консоли</div>
-                <div class="version">IPA Patcher Lite v1.0.6</div>
+                <div class="version">IPA Patcher Lite v1.0.7</div>
             </div>
             <script>
                 document.getElementById('login').onclick = function() {
@@ -567,7 +567,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 <div class="exts">
                     <span>.ipa</span><span>.zip</span><span>.deb</span><span>.dylib</span>
                 </div>
-                <div class="version">IPA Patcher Lite v1.0.6</div>
+                <div class="version">IPA Patcher Lite v1.0.7</div>
             </div>
             <script>
                 (function() {{
