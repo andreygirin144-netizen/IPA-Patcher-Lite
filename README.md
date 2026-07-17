@@ -184,7 +184,7 @@ python3 main.py
 
 ## 🕹 Использование
 
-### Pythonista 3 (iOS)
+### Pythonista 3 (iOS/iPadOS)
 
 1. Открой `main.py` в Pythonista и нажми **▶ Run**.
 2. Выбери `.ipa` через системный файловый пикер.
