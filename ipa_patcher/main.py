@@ -30,6 +30,7 @@ from utils import color_print, log_message, clear_screen, ensure_directories, PA
 from icon_manager import replace_icon_with_priority, replace_icon_standard
 from icon_generator import replace_icon_loose_method
 from boms_editor import analyze_boms
+from hex_patcher import start_hex_patcher
 
 try:
     import dialogs, console
@@ -47,6 +48,8 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
 config = PatchConfig()
+hex_patcher_used = False
+UNDO_LOG_FILE = "undo_log.json"
 
 def get_adaptive_delay(ipa_path):
     base_delay = 0.0
@@ -132,14 +135,14 @@ def add_icons_to_plist(app_dir, icon_names):
 def replace_icon(app_dir, icon_path, remove_assets=False):
     return replace_icon_with_priority(app_dir, icon_path, remove_assets)
 
-def deep_patch_string_in_bundle(app_dir, old_str, new_str):
+def deep_patch_string_in_bundle(app_dir, old_str, new_str, desc="строка"):
     old_bytes = old_str.encode('utf-8')
     new_bytes = new_str.encode('utf-8')
     len_old = len(old_bytes)
     len_new = len(new_bytes)
     
     if len_new > len_old:
-        color_print(f"[WARN] Новый текст длиннее старого ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
+        color_print(f"[WARN] Новый {desc} длиннее старого ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
         return False
     
     padded_new = new_bytes + b'\x00' * (len_old - len_new)
@@ -165,40 +168,38 @@ def deep_patch_string_in_bundle(app_dir, old_str, new_str):
             
             try:
                 f_size = os.path.getsize(file_path)
-                if f_size == 0 or f_size > 20 * 1024 * 1024:
+                if f_size == 0:
                     continue
             except OSError:
                 continue
             
-            if is_macho_binary(file_path) and f_size < 200 * 1024 * 1024:
-                if patch_strings_in_binary(file_path, [(old_bytes, padded_new)]):
-                    color_print(f"  Заменено в бинарнике: {f}", 'green')
+            if is_macho_binary(file_path):
+                count = patch_strings_in_binary(file_path, [(old_bytes, padded_new)])
+                if count > 0:
+                    color_print(f"  {desc.capitalize()} заменена в бинарнике: {f} ({count} вхождений)", 'green')
                     found = True
                 continue
-            
-            if f_size <= 5 * 1024 * 1024:
-                try:
-                    with open(file_path, 'rb') as fr:
-                        content = fr.read()
-                    if old_bytes in content:
-                        new_content = content.replace(old_bytes, padded_new)
-                        with open(file_path, 'wb') as fw:
-                            fw.write(new_content)
-                        color_print(f"  Заменено в файле: {os.path.relpath(file_path, app_dir)}", 'green')
-                        found = True
-                except:
-                    pass
-    
-    if not found:
-        color_print("[WARN] Строка не найдена для глубокой замены", 'yellow')
+            else:
+                if f_size <= 200 * 1024 * 1024:
+                    try:
+                        with open(file_path, 'rb') as fr:
+                            content = fr.read()
+                        if old_bytes in content:
+                            new_content = content.replace(old_bytes, padded_new)
+                            with open(file_path, 'wb') as fw:
+                                fw.write(new_content)
+                            color_print(f"  {desc.capitalize()} заменена в файле: {os.path.relpath(file_path, app_dir)}", 'green')
+                            found = True
+                    except:
+                        pass
     
     return found
 
 def deep_patch_bundle_id(app_dir, old_id, new_id):
-    return deep_patch_string_in_bundle(app_dir, old_id, new_id)
+    return deep_patch_string_in_bundle(app_dir, old_id, new_id, "Bundle ID")
 
 def deep_patch_version(app_dir, old_version, new_version):
-    return deep_patch_string_in_bundle(app_dir, old_version, new_version)
+    return deep_patch_string_in_bundle(app_dir, old_version, new_version, "версия")
 
 def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
     from constants import MIN_HEADER_PADDING
@@ -209,7 +210,7 @@ def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
     return check_header_space(main_executable, required)
 
 def edit_menu(plist_data, app_dir, script_dir, temp_dir):
-    global config
+    global config, hex_patcher_used
     original = plist_data.copy()
     changes = {}
     modified = False
@@ -246,6 +247,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print("12. Расширенное редактирование Info.plist (JSON)")
         print("13. Настроить права (Entitlements)")
         print("14. Расширенные патчи (понижение iOS, удаление плагинов и ограничений)")
+        print("15. Hex патчер (замена строк/HEX)")
         print("0. Выход без сохранения")
         print("=" * 50)
         choice = ask_input("Ваш выбор", "9")
@@ -314,12 +316,34 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Bundle ID изменен в Info.plist", 'green')
                 
         elif choice == "5":
-            if add_file_support(plist_data):
-                changes["file_support"] = True
-                modified = True
-                color_print("Файловый шеринг включен", 'green')
+            color_print("\nВыберите режим файлового шеринга:", 'cyan')
+            print("1. Старый (iTunes File Sharing) - только UIFileSharingEnabled")
+            print("2. Современный (iOS 14+) - только LSSupportsOpeningDocumentsInPlace")
+            print("3. Гибридный (рекомендуется) - оба ключа")
+            fs_mode = ask_input("Ваш выбор", "3")
+            
+            if fs_mode == "1":
+                plist_data["UIFileSharingEnabled"] = True
+                if "LSSupportsOpeningDocumentsInPlace" in plist_data:
+                    del plist_data["LSSupportsOpeningDocumentsInPlace"]
+                changes["file_support"] = "legacy"
+                color_print("Файловый шеринг: СТАРЫЙ режим (iTunes)", 'green')
+            elif fs_mode == "2":
+                plist_data["LSSupportsOpeningDocumentsInPlace"] = True
+                if "UIFileSharingEnabled" in plist_data:
+                    del plist_data["UIFileSharingEnabled"]
+                changes["file_support"] = "modern"
+                color_print("Файловый шеринг: СОВРЕМЕННЫЙ режим (iOS 14+)", 'green')
             else:
-                color_print("Файловый шеринг уже включен", 'yellow')
+                plist_data["UIFileSharingEnabled"] = True
+                plist_data["LSSupportsOpeningDocumentsInPlace"] = True
+                changes["file_support"] = "hybrid"
+                color_print("Файловый шеринг: ГИБРИДНЫЙ режим (рекомендуется)", 'green')
+            
+            # КРИТИЧЕСКИ ВАЖНЫЙ КЛЮЧ: Включает системный браузер документов
+            plist_data["UISupportsDocumentBrowser"] = True
+            
+            modified = True
                 
         elif choice == "6":
             color_print("\nВыберите изображение для иконки...", 'blue')
@@ -485,7 +509,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print(f"Ошибка создания списка: {e}", 'red')
                 
         elif choice == "9":
-            if modified or icon_replaced or tweak_injected or ("custom_edit" in changes) or ("entitlements" in changes) or ("advanced_patched" in changes):
+            if modified or icon_replaced or tweak_injected or ("custom_edit" in changes) or ("entitlements" in changes) or ("advanced_patched" in changes) or hex_patcher_used:
                 
                 color_print("\n--- Сводка изменений ---", 'cyan')
                 if "name" in changes:
@@ -501,7 +525,12 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 if "min_os" in changes:
                     print(f"Минимальная iOS: {original.get('MinimumOSVersion', 'не указана')} -> {changes['min_os']}")
                 if "file_support" in changes:
-                    color_print("Файловый шеринг: ВКЛЮЧЕН", 'green')
+                    mode_map = {
+                        'legacy': 'СТАРЫЙ (iTunes)',
+                        'modern': 'СОВРЕМЕННЫЙ (iOS 14+)',
+                        'hybrid': 'ГИБРИДНЫЙ (рекомендуется)'
+                    }
+                    color_print(f"Файловый шеринг: {mode_map.get(changes['file_support'], 'ВКЛЮЧЕН')}", 'green')
                 if "icon" in changes:
                     color_print("Иконка приложения: ЗАМЕНЕНА", 'green')
                 if "tweak" in changes:
@@ -517,6 +546,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print("Права (Entitlements): НАСТРОЕНЫ", 'green')
                 if "advanced_patched" in changes:
                     color_print("Расширенные патчи: ПРИМЕНЕНЫ", 'green')
+                if hex_patcher_used:
+                    color_print("Hex патчер: ИЗМЕНЕНИЯ ВНЕСЕНЫ В БИНАРНИК", 'green')
                 
                 current_version = plist_data.get('CFBundleVersion', 'не указана')
                 color_print(f"Текущая версия сборки: {current_version}", 'cyan')
@@ -676,6 +707,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 color_print("Никаких изменений не внесено.", 'yellow')
                 
+        elif choice == "15":
+            if 'app_dir' in locals() and app_dir and os.path.exists(app_dir):
+                hex_patcher_used = True
+                start_hex_patcher(app_dir)
+            else:
+                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA.", 'red')
+                
         elif choice == "0":
             color_print("Выход без сохранения.", 'yellow')
             sys.exit(0)
@@ -688,6 +726,14 @@ def clean_non_standard_dirs(app_dir):
         if os.path.exists(path):
             shutil.rmtree(path, ignore_errors=True)
             color_print(f"Удалена ненужная папка: {path}", 'red')
+    
+    signed_by_esign = os.path.join(app_dir, "SignedByEsign")
+    if os.path.exists(signed_by_esign):
+        try:
+            os.remove(signed_by_esign)
+            color_print(f"Удален артефакт чужой подписи: SignedByEsign", 'green')
+        except Exception as e:
+            log_message(f"Ошибка удаления SignedByEsign: {e}", 'WARN')
 
 def update_ext_bundle_id(plist_path, old_parent, new_parent):
     if not os.path.isfile(plist_path):
@@ -707,7 +753,7 @@ def main():
     ensure_directories()
     if PYTHONISTA:
         console.clear()
-    color_print("=== IPA Patcher Lite v1.0.6 ===", 'cyan')
+    color_print("=== IPA Patcher Lite v1.0.7 ===", 'cyan')
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
         color_print("Файл не найден", 'red')
@@ -830,7 +876,7 @@ def main():
             filename_parts.append("tweaked")
         if icon_replaced:
             filename_parts.append("icon")
-        if modified:
+        if modified or hex_patcher_used:
             filename_parts.append("patched")
         output_filename = "_".join(filename_parts) + ".ipa"
         
@@ -850,6 +896,12 @@ def main():
         
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(UNDO_LOG_FILE):
+            try:
+                os.remove(UNDO_LOG_FILE)
+                color_print("[INFO] Временный undo_log.json удален для очистки места", 'green')
+            except:
+                pass
     
     color_print("\nГотово!", 'green')
     color_print(f"Файл: {os.path.basename(output_path)}", 'blue')
