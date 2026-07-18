@@ -8,7 +8,7 @@
 [![Pythonista 3.4](https://img.shields.io/badge/Pythonista-3.4-FF6B35?style=flat-square)](http://omz-software.com/pythonista/)
 [![Platform](https://img.shields.io/badge/Platform-iOS/iPadOS%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)]()
 [![No Dependencies](https://img.shields.io/badge/Зависимости-0-22C55E?style=flat-square)]()
-[![Version](https://img.shields.io/badge/Версия-1.0.7-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Версия-1.0.8-blue?style=flat-square)]()
 [![License MIT](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](LICENSE)
 
 **Распаковка → редактирование → инъекция твиков → расширенные патчи → пересборка `.ipa` — всё в одном скрипте**
