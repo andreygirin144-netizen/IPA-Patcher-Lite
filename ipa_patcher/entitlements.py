@@ -57,7 +57,7 @@ def generate_custom_entitlements(app_dir, bundle_id):
         color_print("[WARN] Team ID не найден, используется заглушка (будет заменена при подписи)", 'yellow')
 
     print("\n" + "="*40)
-    print("   НАСТРОЙКА ПРАВ (Entitlements) v1.0.7")
+    print("   НАСТРОЙКА ПРАВ (Entitlements) v1.0.8")
     print("="*40)
     print("1. Бесплатный Apple ID (Free Developer Account)")
     print("2. Платный Apple ID ($99 Developer Account)")
