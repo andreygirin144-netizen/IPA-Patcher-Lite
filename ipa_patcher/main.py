@@ -340,7 +340,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 changes["file_support"] = "hybrid"
                 color_print("Файловый шеринг: ГИБРИДНЫЙ режим (рекомендуется)", 'green')
             
-            # КРИТИЧЕСКИ ВАЖНЫЙ КЛЮЧ: Включает системный браузер документов
             plist_data["UISupportsDocumentBrowser"] = True
             
             modified = True
@@ -349,6 +348,9 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             color_print("\nВыберите изображение для иконки...", 'blue')
             img_path = pick_icon_file()
             if img_path:
+                if not img_path.lower().endswith('.png'):
+                    color_print("Ошибка: поддерживаются только PNG файлы.", 'red')
+                    continue
                 color_print("\nВыберите метод замены иконки:", 'cyan')
                 print("1. Гибридный (рекомендуется) - маскирует Assets.car + loose-иконки")
                 print("2. Только маскировка Assets.car (без замены файлов)")
@@ -618,6 +620,12 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         modified = True
                         changes["custom_edit"] = True
                         
+                        
+                        info_plist_path = os.path.join(app_dir, "Info.plist")
+                        save_plist(plist_data, info_plist_path)
+                        color_print("[INFO] Info.plist сохранен на диск.", 'green')
+                        
+                        
                         new_bundle_id = plist_data.get("CFBundleIdentifier")
                         if new_bundle_id and new_bundle_id != old_bundle_id:
                             changes["bundle_id"] = new_bundle_id
@@ -640,6 +648,36 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         if new_min_os and new_min_os != old_min_os:
                             changes["min_os"] = new_min_os
                         
+                        
+                        if changes.get("bundle_id"):
+                            color_print("\nВыберите способ замены Bundle ID:", 'cyan')
+                            print("1. Только Info.plist (безопасно)")
+                            print("2. Глубокая замена (во всех файлах)")
+                            mode = ask_input("Ваш выбор", "1")
+                            if mode == "2":
+                                deep_bundle_mode = True
+                                changes["bundle_deep"] = True
+                                color_print("Выбрана глубокая замена Bundle ID", 'yellow')
+                            else:
+                                deep_bundle_mode = False
+                                changes["bundle_deep"] = False
+                                color_print("Выбрана замена только в Info.plist", 'yellow')
+                        
+                        
+                        if changes.get("version"):
+                            color_print("\nВыберите способ замены версии:", 'cyan')
+                            print("1. Только Info.plist (безопасно)")
+                            print("2. Глубокая замена (во всех файлах)")
+                            mode = ask_input("Ваш выбор", "1")
+                            if mode == "2":
+                                deep_version_mode = True
+                                changes["version_deep"] = True
+                                color_print("Выбрана глубокая замена версии", 'yellow')
+                            else:
+                                deep_version_mode = False
+                                changes["version_deep"] = False
+                                color_print("Выбрана замена только в Info.plist", 'yellow')
+                        
                         color_print("Info.plist обновлен из JSON.", 'green')
                     else:
                         color_print("Ошибка: JSON должен быть объектом (словарем).", 'red')
@@ -649,6 +687,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print(f"Ошибка парсинга JSON: {e}", 'red')
             except Exception as e:
                 color_print(f"Ошибка: {e}", 'red')
+            finally:
+                if os.path.exists(json_path):
+                    try:
+                        os.remove(json_path)
+                        color_print("[INFO] Временный JSON-файл удален.", 'green')
+                    except:
+                        pass
                 
         elif choice == "13":
             bundle_id = plist_data.get("CFBundleIdentifier")
@@ -753,7 +798,7 @@ def main():
     ensure_directories()
     if PYTHONISTA:
         console.clear()
-    color_print("=== IPA Patcher Lite v1.0.7 ===", 'cyan')
+    color_print("=== IPA Patcher Lite v1.0.8 ===", 'cyan')
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
         color_print("Файл не найден", 'red')
@@ -896,6 +941,13 @@ def main():
         
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+        tmp_root = os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "tmp")
+        if os.path.exists(tmp_root):
+            try:
+                shutil.rmtree(tmp_root)
+                color_print("[INFO] Папка tmp полностью удалена", 'green')
+            except Exception as e:
+                color_print(f"[WARN] Не удалось удалить папку tmp: {e}", 'yellow')
         if os.path.exists(UNDO_LOG_FILE):
             try:
                 os.remove(UNDO_LOG_FILE)
