@@ -184,11 +184,8 @@ def deep_patch_string_in_bundle(app_dir, old_str, new_str, desc="строка"):
                     try:
                         with open(file_path, 'rb') as fr:
                             content = fr.read()
-                        if old_bytes in content or old_str.lower().encode('utf-8') in content.lower():
+                        if old_bytes in content:
                             new_content = content.replace(old_bytes, padded_new)
-                            old_lower = old_str.lower().encode('utf-8')
-                            if old_lower in content:
-                                new_content = new_content.replace(old_lower, padded_new)
                             with open(file_path, 'wb') as fw:
                                 fw.write(new_content)
                             color_print(f"  {desc.capitalize()} заменена в файле: {os.path.relpath(file_path, app_dir)}", 'green')
@@ -558,12 +555,12 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print(f"Текущая версия сборки: {current_version}", 'cyan')
                 
                 if ask_yes_no("\nПрименить изменения и собрать IPA?", default=True):
-                    return plist_data, modified, original.get("CFBundleIdentifier", ""), original.get("CFBundleShortVersionString", "1.0"), icon_replaced, tweak_injected, ("file_support" in changes), changes, deep_bundle_mode, deep_version_mode
+                    return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, ("file_support" in changes), changes, deep_bundle_mode, deep_version_mode
                 else:
                     continue
             else:
                 color_print("Изменений нет. Сборка без изменений.", 'yellow')
-                return plist_data, modified, original.get("CFBundleIdentifier", ""), original.get("CFBundleShortVersionString", "1.0"), icon_replaced, tweak_injected, False, changes, deep_bundle_mode, deep_version_mode
+                return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, False, changes, deep_bundle_mode, deep_version_mode
                 
         elif choice == "10":
             config.use_rpath = not config.use_rpath
@@ -623,11 +620,9 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         modified = True
                         changes["custom_edit"] = True
                         
-                        
                         info_plist_path = os.path.join(app_dir, "Info.plist")
                         save_plist(plist_data, info_plist_path)
                         color_print("[INFO] Info.plist сохранен на диск.", 'green')
-                        
                         
                         new_bundle_id = plist_data.get("CFBundleIdentifier")
                         if new_bundle_id and new_bundle_id != old_bundle_id:
@@ -651,7 +646,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         if new_min_os and new_min_os != old_min_os:
                             changes["min_os"] = new_min_os
                         
-                        
                         if changes.get("bundle_id"):
                             color_print("\nВыберите способ замены Bundle ID:", 'cyan')
                             print("1. Только Info.plist (безопасно)")
@@ -665,7 +659,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                                 deep_bundle_mode = False
                                 changes["bundle_deep"] = False
                                 color_print("Выбрана замена только в Info.plist", 'yellow')
-                        
                         
                         if changes.get("version"):
                             color_print("\nВыберите способ замены версии:", 'cyan')
@@ -835,9 +828,20 @@ def main():
         if old_version:
             log.info("Текущая версия: %s", old_version)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        updated_plist, modified, original_bundle_id, original_version, icon_replaced, tweak_injected, file_support_enabled, changes, deep_bundle_mode, deep_version_mode = edit_menu(
+        updated_plist, modified, original_bundle_id, icon_replaced, tweak_injected, file_support_enabled, changes, deep_bundle_mode, deep_version_mode = edit_menu(
             plist, app_dir, script_dir, temp_dir
         )
+        
+        
+        if "bundle_id" in changes:
+            updated_plist["CFBundleIdentifier"] = changes["bundle_id"]
+        if "version" in changes:
+            updated_plist["CFBundleShortVersionString"] = changes["version"]
+        if "build" in changes:
+            updated_plist["CFBundleVersion"] = changes["build"]
+        if "name" in changes:
+            updated_plist["CFBundleDisplayName"] = changes["name"]
+            updated_plist["CFBundleName"] = changes["name"]
         
         if modified:
             save_plist(updated_plist, info_plist_path)
@@ -849,66 +853,51 @@ def main():
             if "version" in changes or "build" in changes:
                 update_version_in_extensions(app_dir, new_version, new_build)
             
-            
-            if deep_version_mode and "version" in changes:
-                old_v = original_version
-                new_v = changes["version"]
-                color_print("Глубокая замена версии в бинарниках и файлах...", 'blue')
-                if len(new_v.encode('utf-8')) <= len(old_v.encode('utf-8')):
-                    if not deep_patch_version(app_dir, old_v, new_v):
+            if "version" in changes and deep_version_mode:
+                if len(new_version.encode('utf-8')) <= len(old_version.encode('utf-8')):
+                    color_print("Глубокая замена версии в бинарниках и файлах...", 'blue')
+                    if not deep_patch_version(app_dir, old_version, new_version):
                         color_print("[WARN] Не удалось выполнить глубокую замену версии", 'yellow')
-                        if not ask_yes_no("Продолжить сборку без глубокой замены версии?", default=True):
-                            color_print("Сборка отменена пользователем.", 'red')
-                            sys.exit(1)
                 else:
                     color_print("[WARN] Новая версия длиннее старой. Глубокая замена пропущена.", 'yellow')
-                    if not ask_yes_no("Продолжить сборку без глубокой замены версии?", default=True):
-                        color_print("Сборка отменена пользователем.", 'red')
-                        sys.exit(1)
+        
+        new_bundle_id = updated_plist.get("CFBundleIdentifier", original_bundle_id)
+        
+        if new_bundle_id != original_bundle_id:
+            color_print("Обновление Bundle ID в расширениях (.appex)...", 'blue')
             
+            plugins_path = os.path.join(app_dir, "PlugIns")
+            if os.path.isdir(plugins_path):
+                for ext in os.listdir(plugins_path):
+                    if ext.endswith(".appex"):
+                        ext_name = sanitize_filename(ext)
+                        ext_plist = os.path.join(plugins_path, ext_name, "Info.plist")
+                        update_ext_bundle_id(ext_plist, original_bundle_id, new_bundle_id)
             
-            if deep_bundle_mode and "bundle_id" in changes:
-                old_id = original_bundle_id
-                new_id = changes["bundle_id"]
-                color_print("Обновление Bundle ID в расширениях (.appex)...", 'blue')
-                
-                plugins_path = os.path.join(app_dir, "PlugIns")
-                if os.path.isdir(plugins_path):
-                    for ext in os.listdir(plugins_path):
-                        if ext.endswith(".appex"):
-                            ext_name = sanitize_filename(ext)
-                            ext_plist = os.path.join(plugins_path, ext_name, "Info.plist")
-                            update_ext_bundle_id(ext_plist, old_id, new_id)
-                
-                watch_path = os.path.join(app_dir, "Watch")
-                if os.path.isdir(watch_path):
-                    for item in os.listdir(watch_path):
-                        if item.endswith(".app"):
-                            item_name = sanitize_filename(item)
-                            watch_plist = os.path.join(watch_path, item_name, "Info.plist")
-                            update_ext_bundle_id(watch_plist, old_id, new_id)
-                
-                for root, dirs, files in os.walk(app_dir):
-                    if "PlugIns" in root or "Watch" in root:
-                        continue
-                    for d in dirs:
-                        if d.endswith(".appex"):
-                            ext_name = sanitize_filename(d)
-                            ext_plist = os.path.join(root, ext_name, "Info.plist")
-                            update_ext_bundle_id(ext_plist, old_id, new_id)
-                
-                color_print("Глубокая замена Bundle ID в бинарниках и файлах...", 'blue')
-                if len(new_id.encode('utf-8')) <= len(old_id.encode('utf-8')):
-                    if not deep_patch_bundle_id(app_dir, old_id, new_id):
+            watch_path = os.path.join(app_dir, "Watch")
+            if os.path.isdir(watch_path):
+                for item in os.listdir(watch_path):
+                    if item.endswith(".app"):
+                        item_name = sanitize_filename(item)
+                        watch_plist = os.path.join(watch_path, item_name, "Info.plist")
+                        update_ext_bundle_id(watch_plist, original_bundle_id, new_bundle_id)
+            
+            for root, dirs, files in os.walk(app_dir):
+                if "PlugIns" in root or "Watch" in root:
+                    continue
+                for d in dirs:
+                    if d.endswith(".appex"):
+                        ext_name = sanitize_filename(d)
+                        ext_plist = os.path.join(root, ext_name, "Info.plist")
+                        update_ext_bundle_id(ext_plist, original_bundle_id, new_bundle_id)
+            
+            if deep_bundle_mode:
+                if len(new_bundle_id.encode('utf-8')) <= len(original_bundle_id.encode('utf-8')):
+                    color_print("Глубокая замена Bundle ID в бинарниках и файлах...", 'blue')
+                    if not deep_patch_bundle_id(app_dir, original_bundle_id, new_bundle_id):
                         color_print("[WARN] Не удалось выполнить глубокую замену Bundle ID", 'yellow')
-                        if not ask_yes_no("Продолжить сборку без глубокой замены Bundle ID?", default=True):
-                            color_print("Сборка отменена пользователем.", 'red')
-                            sys.exit(1)
                 else:
                     color_print("[WARN] Новый Bundle ID длиннее старого. Глубокая замена пропущена.", 'yellow')
-                    if not ask_yes_no("Продолжить сборку без глубокой замены Bundle ID?", default=True):
-                        color_print("Сборка отменена пользователем.", 'red')
-                        sys.exit(1)
         
         color_print("\n--- Очистка подписи ---", 'red')
         clean_signature_files(app_dir)
@@ -928,8 +917,8 @@ def main():
             
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
         
-        app_name = changes.get("name", updated_plist.get("CFBundleDisplayName") or updated_plist.get("CFBundleName") or app_basename)
-        app_version = changes.get("version", updated_plist.get("CFBundleShortVersionString", "1.0"))
+        app_name = updated_plist.get("CFBundleDisplayName") or updated_plist.get("CFBundleName") or app_basename
+        app_version = updated_plist.get("CFBundleShortVersionString", "1.0")
         clean_app_name = app_name.replace(' ', '_').replace('/', '_').replace(':', '_')
         
         filename_parts = []
