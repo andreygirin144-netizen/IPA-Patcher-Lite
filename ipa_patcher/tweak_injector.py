@@ -400,25 +400,49 @@ def safe_extract_archive(archive_path, output_dir):
         
         elif archive_ext in ('.tar', '.tgz', '.gz', '.bz2', '.xz', '.lzma'):
             with tarfile.open(archive_path, 'r:*') as tar:
-                for member in tar.getmembers():
+                members = tar.getmembers()
+                symlinks_to_resolve = []
+
+                for member in members:
                     target_path = os.path.join(output_dir, member.name)
                     if not os.path.realpath(target_path).startswith(real_output):
                         raise ValueError("Path traversal attempt")
-                    
-                    if (member.issym() or member.islnk()) and sys.platform == 'win32':
+
+                    if member.isdir():
+                        os.makedirs(target_path, exist_ok=True)
+                    elif member.isfile():
+                        tar.extract(member, path=output_dir)
+                    elif member.issym() or member.islnk():
+                        symlinks_to_resolve.append((member.name, member.linkname))
+
+                for link_name, link_target in symlinks_to_resolve:
+                    link_path = os.path.join(output_dir, link_name)
+                    os.makedirs(os.path.dirname(link_path), exist_ok=True)
+
+                    if link_target.startswith('/') or link_target.startswith('\\'):
+                        target_real_path = os.path.normpath(os.path.join(output_dir, link_target.lstrip('/\\')))
+                    else:
+                        link_dir = os.path.dirname(link_path)
+                        target_real_path = os.path.normpath(os.path.join(link_dir, link_target))
+
+                    if os.path.exists(target_real_path):
                         try:
-                            link_dir = os.path.dirname(member.name)
-                            target_member_path = os.path.normpath(os.path.join(link_dir, member.linkname)).replace('\\', '/')
-                            target_member = tar.getmember(target_member_path)
+                            if os.path.isdir(target_real_path):
+                                shutil.copytree(target_real_path, link_path, dirs_exist_ok=True)
+                            else:
+                                shutil.copy2(target_real_path, link_path)
+                        except Exception:
+                            pass
+                    else:
+                        clean_target = link_target.lstrip('/\\')
+                        try:
+                            target_member = tar.getmember(clean_target)
                             f_in = tar.extractfile(target_member)
                             if f_in:
-                                os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                                with open(target_path, 'wb') as f_out:
+                                with open(link_path, 'wb') as f_out:
                                     f_out.write(f_in.read())
                         except Exception:
                             pass
-                
-                tar.extractall(output_dir)
         
         else:
             raise ValueError(f"Unsupported archive format: {archive_ext}")
