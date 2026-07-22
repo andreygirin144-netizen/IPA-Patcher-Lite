@@ -161,21 +161,7 @@ def count_modules_in_tweak(tweak_path):
                         count += 1
             return max(count, 1)
         elif ext == '.deb':
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ['ar', 't', tweak_path],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0:
-                    for line in result.stdout.splitlines():
-                        if 'data.tar.' in line:
-                            count += 3
-                            break
-                else:
-                    count = 3
-            except:
-                count = 3
+            count = 3
             return max(count, 1)
         elif ext in ('.tar', '.lzma', '.xz', '.gz', '.tgz'):
             return 2
