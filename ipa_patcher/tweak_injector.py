@@ -300,7 +300,7 @@ def check_header_space(main_executable, required_bytes):
         return True
 
 def safe_extract_archive(archive_path, output_dir):
-    if sys.platform == 'ios' or sys.platform == 'iphoneos':
+    if sys.platform in ('ios', 'iphoneos'):
         try:
             libarchive = ctypes.CDLL('/usr/lib/libarchive.2.dylib')
         except OSError:
@@ -358,7 +358,6 @@ def safe_extract_archive(archive_path, output_dir):
             return
     
     import tarfile
-    import tempfile
     
     if not os.path.exists(archive_path):
         raise FileNotFoundError(f"Archive not found: {archive_path}")
@@ -370,25 +369,33 @@ def safe_extract_archive(archive_path, output_dir):
     try:
         if archive_ext == '.deb':
             with open(archive_path, 'rb') as f:
-                data = f.read()
-            tar_start = data.find(b'data.tar')
-            if tar_start == -1:
-                raise ValueError("No data.tar found in .deb file")
-            
-            with tempfile.NamedTemporaryFile(suffix='.tar', delete=False) as tmp:
-                tmp.write(data[tar_start:])
-                tmp_path = tmp.name
-            
-            with tarfile.open(tmp_path, 'r:*') as tar:
-                for member in tar.getmembers():
-                    target_path = os.path.join(output_dir, member.name)
-                    if not os.path.realpath(target_path).startswith(real_output):
-                        raise ValueError("Path traversal attempt")
-                tar.extractall(output_dir)
-            
-            os.unlink(tmp_path)
+                magic = f.read(8)
+                if magic != b'!<arch>\n':
+                    raise ValueError("Файл не является валидным .deb / ar архивом")
+                
+                while True:
+                    header = f.read(60)
+                    if not header or len(header) < 60:
+                        break
+                    
+                    filename = header[:16].decode('ascii', errors='ignore').strip().rstrip('/')
+                    
+                    try:
+                        file_size = int(header[48:58].decode('ascii').strip())
+                    except ValueError:
+                        break
+                    
+                    file_data = f.read(file_size)
+                    
+                    if file_size % 2 != 0:
+                        f.seek(1, os.SEEK_CUR)
+                    
+                    if filename:
+                        target_file = os.path.join(output_dir, filename)
+                        with open(target_file, 'wb') as out_f:
+                            out_f.write(file_data)
         
-        elif archive_ext in ('.tar', '.tgz', '.gz'):
+        elif archive_ext in ('.tar', '.tgz', '.gz', '.bz2', '.xz', '.lzma'):
             with tarfile.open(archive_path, 'r:*') as tar:
                 for member in tar.getmembers():
                     target_path = os.path.join(output_dir, member.name)
@@ -396,22 +403,9 @@ def safe_extract_archive(archive_path, output_dir):
                         raise ValueError("Path traversal attempt")
                 tar.extractall(output_dir)
         
-        elif archive_ext == '.xz':
-            try:
-                import lzma
-                with lzma.open(archive_path) as f:
-                    with tarfile.open(fileobj=f, mode='r|') as tar:
-                        for member in tar.getmembers():
-                            target_path = os.path.join(output_dir, member.name)
-                            if not os.path.realpath(target_path).startswith(real_output):
-                                raise ValueError("Path traversal attempt")
-                        tar.extractall(output_dir)
-            except ImportError:
-                raise ValueError("lzma module not available")
-        
         else:
             raise ValueError(f"Unsupported archive format: {archive_ext}")
-    
+            
     except Exception as e:
         color_print(f"Ошибка распаковки {archive_path}: {e}", 'red')
         raise
