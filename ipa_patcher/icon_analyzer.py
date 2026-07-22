@@ -11,7 +11,6 @@ try:
 except ImportError:
     HAVE_PIL = False
 
-
 def increment_bundle_version(app_dir):
     info_plist_path = os.path.join(app_dir, "Info.plist")
     if not os.path.isfile(info_plist_path):
@@ -48,7 +47,6 @@ def increment_bundle_version(app_dir):
         log_message(f"Не удалось обновить CFBundleVersion: {e}", 'WARN')
         return None
 
-
 def extract_icon_names_from_plist(app_dir):
     info_plist_path = os.path.join(app_dir, "Info.plist")
     if not os.path.isfile(info_plist_path):
@@ -80,7 +78,6 @@ def extract_icon_names_from_plist(app_dir):
     except Exception as e:
         log_message(f"Ошибка при извлечении имен иконок из plist: {e}", 'WARN')
         return [], None
-
 
 def extract_icon_names_from_plist_old(app_dir):
     info_plist_path = os.path.join(app_dir, "Info.plist")
@@ -130,7 +127,6 @@ def extract_icon_names_from_plist_old(app_dir):
     
     return icon_names, icon_names_ipad
 
-
 def get_all_icon_variants(base_names):
     variants = []
     
@@ -177,7 +173,6 @@ def get_all_icon_variants(base_names):
     
     return list(set(variants))
 
-
 def scan_directory_for_icons(app_dir):
     app_icon_pattern = re.compile(
         r'^(AppIcon|Icon|icon)([0-9x@.~]*)(~ipad|~iphone)?(@[0-9]+x)?\.png$',
@@ -196,7 +191,6 @@ def scan_directory_for_icons(app_dir):
             found.append((file, size))
     
     return found
-
 
 def calculate_target_size(name):
     match = re.search(r'(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)', name)
@@ -218,39 +212,37 @@ def calculate_target_size(name):
         return (76, 76)
     return (60, 60)
 
-
 def optimize_and_save_icon(icon_path, target_path, size=None):
-    if not HAVE_PIL:
+    if HAVE_PIL:
+        try:
+            with Image.open(icon_path) as img:
+                if img.mode != 'RGBA':
+                    img = img.convert('RGBA')
+                
+                if size:
+                    try:
+                        img = img.resize(size, Image.LANCZOS)
+                    except AttributeError:
+                        try:
+                            img = img.resize(size, Image.ANTIALIAS)
+                        except AttributeError:
+                            img = img.resize(size)
+                
+                if size and size[0] <= 40 and size[1] <= 40:
+                    try:
+                        img = img.quantize(colors=128, method=2)
+                        img = img.convert('RGBA')
+                    except:
+                        pass
+                
+                img.save(target_path, "PNG", optimize=True, compress_level=9)
+                return True
+        except Exception:
+            shutil.copy2(icon_path, target_path)
+            return False
+    else:
         shutil.copy2(icon_path, target_path)
         return True
-    
-    try:
-        with Image.open(icon_path) as img:
-            if img.mode != 'RGBA':
-                img = img.convert('RGBA')
-            
-            if size:
-                try:
-                    img = img.resize(size, Image.LANCZOS)
-                except AttributeError:
-                    try:
-                        img = img.resize(size, Image.ANTIALIAS)
-                    except AttributeError:
-                        img = img.resize(size)
-            
-            if size and size[0] <= 40 and size[1] <= 40:
-                try:
-                    img = img.quantize(colors=128, method=2)
-                    img = img.convert('RGBA')
-                except Exception as e:
-                    pass
-            
-            img.save(target_path, "PNG", optimize=True, compress_level=9)
-            return True
-    except Exception as e:
-        shutil.copy2(icon_path, target_path)
-        return False
-
 
 def analyze_app_icons(app_dir):
     color_print("\n--- АНАЛИЗ ИКОНОК ПРИЛОЖЕНИЯ ---", 'cyan')
@@ -272,7 +264,7 @@ def analyze_app_icons(app_dir):
         for name in icon_names:
             color_print(f"  - {name}", 'white')
     else:
-        color_print("  (не найдены)", 'yellow')
+        color_print("  (не найдены)", 'yellow')
     
     if icon_names_ipad:
         color_print("[INFO] Иконки для iPad:", 'blue')
@@ -281,7 +273,7 @@ def analyze_app_icons(app_dir):
     
     all_variants = get_all_icon_variants(icon_names + icon_names_ipad)
     
-    color_print("\n[INFO] Поиск существующих файлов иконок:", 'blue')
+    color_print("\n[INFO] Поиск существующих файлов иконок:", 'blue')
     existing_icons = []
     for variant in all_variants:
         file_path = os.path.join(app_dir, variant)
@@ -297,7 +289,7 @@ def analyze_app_icons(app_dir):
             color_print(f"  ✓ {name} (scanned, {size} bytes)", 'green')
     
     if not existing_icons:
-        color_print("  (файлы иконок не найдены)", 'yellow')
+        color_print("  (файлы иконок не найдены)", 'yellow')
     
     return {
         'names': icon_names,
@@ -305,7 +297,6 @@ def analyze_app_icons(app_dir):
         'existing': existing_icons,
         'all_variants': all_variants
     }
-
 
 def process_bundle(app_dir, icon_path, auto_increment=True, is_sub_bundle=False):
     if not is_sub_bundle:
@@ -334,7 +325,6 @@ def process_bundle(app_dir, icon_path, auto_increment=True, is_sub_bundle=False)
     
     return replaced > 0
 
-
 def process_all_bundles(payload_dir, icon_path, auto_increment=True):
     results = []
     
@@ -349,7 +339,6 @@ def process_all_bundles(payload_dir, icon_path, auto_increment=True):
     
     return results
 
-
 def force_replace_icons(app_dir, icon_path, icon_info=None, auto_increment=True):
     if not os.path.isfile(icon_path):
         color_print("[ERROR] Icon file not found", 'red')
@@ -362,7 +351,7 @@ def force_replace_icons(app_dir, icon_path, icon_info=None, auto_increment=True)
         color_print("[WARN] No existing icons found, using standard names", 'yellow')
         return replace_standard_icons(app_dir, icon_path)
     
-    color_print("[INFO] Replacing existing icon files with optimization...", 'blue')
+    color_print("[INFO] Replacing existing icon files with resizing...", 'blue')
     replaced = 0
     
     for name, _ in icon_info['existing']:
@@ -371,16 +360,13 @@ def force_replace_icons(app_dir, icon_path, icon_info=None, auto_increment=True)
         target = os.path.join(app_dir, name)
         size = calculate_target_size(name)
         
-        try:
-            if optimize_and_save_icon(icon_path, target, size):
-                color_print(f"  Replaced: {name} (Size: {size[0]}x{size[1]})", 'green')
-                replaced += 1
-            else:
-                shutil.copy2(icon_path, target)
-                color_print(f"  Replaced: {name} (fallback)", 'green')
-                replaced += 1
-        except Exception as e:
-            log_message(f"Failed to replace {name}: {e}", 'WARN')
+        if optimize_and_save_icon(icon_path, target, size):
+            color_print(f"  Replaced: {name} (Size: {size[0]}x{size[1]})", 'green')
+            replaced += 1
+        else:
+            shutil.copy2(icon_path, target)
+            color_print(f"  Replaced: {name} (fallback)", 'green')
+            replaced += 1
     
     if replaced == 0:
         color_print("[WARN] No icons were replaced, using standard method", 'yellow')
@@ -392,7 +378,6 @@ def force_replace_icons(app_dir, icon_path, icon_info=None, auto_increment=True)
     color_print(f"[SUCCESS] Replaced {replaced} icon files", 'green')
     return True
 
-
 def replace_standard_icons(app_dir, icon_path, auto_increment=True):
     icon_info = analyze_app_icons(app_dir)
     icon_names = icon_info['all_variants']
@@ -402,16 +387,13 @@ def replace_standard_icons(app_dir, icon_path, auto_increment=True):
         target = os.path.join(app_dir, name)
         size = calculate_target_size(name)
         
-        try:
-            if optimize_and_save_icon(icon_path, target, size):
-                color_print(f"  Created: {name} (Size: {size[0]}x{size[1]})", 'green')
-                replaced = True
-            else:
-                shutil.copy2(icon_path, target)
-                color_print(f"  Created: {name} (fallback)", 'green')
-                replaced = True
-        except Exception as e:
-            log_message(f"Failed to create {name}: {e}", 'WARN')
+        if optimize_and_save_icon(icon_path, target, size):
+            color_print(f"  Created: {name} (Size: {size[0]}x{size[1]})", 'green')
+            replaced = True
+        else:
+            shutil.copy2(icon_path, target)
+            color_print(f"  Created: {name} (fallback)", 'green')
+            replaced = True
     
     if replaced and auto_increment:
         increment_bundle_version(app_dir)
