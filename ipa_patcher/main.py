@@ -44,6 +44,12 @@ try:
 except ImportError:
     HAVE_EDITOR = False
 
+try:
+    from PIL import Image
+    HAVE_PIL = True
+except ImportError:
+    HAVE_PIL = False
+
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
@@ -794,7 +800,7 @@ def main():
     ensure_directories()
     if PYTHONISTA:
         console.clear()
-    color_print("=== IPA Patcher Lite v1.0.8 ===", 'cyan')
+    color_print("=== IPA Patcher Lite v1.0.9 ===", 'cyan')
     ipa_path = pick_ipa_file()
     if not os.path.isfile(ipa_path):
         color_print("Файл не найден", 'red')
@@ -831,7 +837,6 @@ def main():
         updated_plist, modified, original_bundle_id, icon_replaced, tweak_injected, file_support_enabled, changes, deep_bundle_mode, deep_version_mode = edit_menu(
             plist, app_dir, script_dir, temp_dir
         )
-        
         
         if "bundle_id" in changes:
             updated_plist["CFBundleIdentifier"] = changes["bundle_id"]
@@ -947,14 +952,13 @@ def main():
                 color_print(msg, 'red')
         
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        tmp_root = os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "tmp")
-        if os.path.exists(tmp_root):
+        ipa_patcher_root = os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher")
+        if os.path.exists(ipa_patcher_root):
             try:
-                shutil.rmtree(tmp_root)
-                color_print("[INFO] Папка tmp полностью удалена", 'green')
+                shutil.rmtree(ipa_patcher_root)
+                color_print("[INFO] Папка ipa_patcher полностью удалена", 'green')
             except Exception as e:
-                color_print(f"[WARN] Не удалось удалить папку tmp: {e}", 'yellow')
+                color_print(f"[WARN] Не удалось удалить папку ipa_patcher: {e}", 'yellow')
         if os.path.exists(UNDO_LOG_FILE):
             try:
                 os.remove(UNDO_LOG_FILE)
