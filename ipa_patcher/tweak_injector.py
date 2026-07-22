@@ -161,21 +161,24 @@ def count_modules_in_tweak(tweak_path):
                         count += 1
             return max(count, 1)
         elif ext == '.deb':
-            try:
-                import subprocess
-                result = subprocess.run(
-                    ['ar', 't', tweak_path],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0:
-                    for line in result.stdout.splitlines():
-                        if 'data.tar.' in line:
-                            count += 3
-                            break
-                else:
-                    count = 3
-            except:
+            if sys.platform == 'win32':
                 count = 3
+            else:
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ['ar', 't', tweak_path],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        for line in result.stdout.splitlines():
+                            if 'data.tar.' in line:
+                                count += 3
+                                break
+                    else:
+                        count = 3
+                except:
+                    count = 3
             return max(count, 1)
         elif ext in ('.tar', '.lzma', '.xz', '.gz', '.tgz'):
             return 2
@@ -401,6 +404,20 @@ def safe_extract_archive(archive_path, output_dir):
                     target_path = os.path.join(output_dir, member.name)
                     if not os.path.realpath(target_path).startswith(real_output):
                         raise ValueError("Path traversal attempt")
+                    
+                    if (member.issym() or member.islnk()) and sys.platform == 'win32':
+                        try:
+                            link_dir = os.path.dirname(member.name)
+                            target_member_path = os.path.normpath(os.path.join(link_dir, member.linkname)).replace('\\', '/')
+                            target_member = tar.getmember(target_member_path)
+                            f_in = tar.extractfile(target_member)
+                            if f_in:
+                                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                                with open(target_path, 'wb') as f_out:
+                                    f_out.write(f_in.read())
+                        except Exception:
+                            pass
+                
                 tar.extractall(output_dir)
         
         else:
@@ -757,7 +774,6 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
         color_print(f"Successfully injected: {injected}", 'hotpink')
     if failed:
         color_print(f"Failed to inject: {failed}", 'yellow')
-    
     
     all_injected = list(set(injected + [name for name, _ in copied_frameworks if name not in failed]))
     if all_injected:
