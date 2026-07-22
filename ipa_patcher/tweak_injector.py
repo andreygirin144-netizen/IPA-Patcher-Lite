@@ -161,7 +161,21 @@ def count_modules_in_tweak(tweak_path):
                         count += 1
             return max(count, 1)
         elif ext == '.deb':
-            count = 3
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['ar', 't', tweak_path],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.splitlines():
+                        if 'data.tar.' in line:
+                            count += 3
+                            break
+                else:
+                    count = 3
+            except:
+                count = 3
             return max(count, 1)
         elif ext in ('.tar', '.lzma', '.xz', '.gz', '.tgz'):
             return 2
@@ -336,6 +350,12 @@ def safe_extract_archive(archive_path, output_dir):
         
         color_print(f"Extracted: {os.path.basename(archive_path)}", 'hotpink')
         return
+    
+    if sys.platform != 'win32':
+        import subprocess
+        if os.path.splitext(archive_path)[1].lower() == '.deb':
+            subprocess.run(['ar', 'x', archive_path], cwd=output_dir, check=True)
+            return
     
     import tarfile
     import tempfile
