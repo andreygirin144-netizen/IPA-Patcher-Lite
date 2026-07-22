@@ -6,6 +6,7 @@ import zipfile
 import struct
 import re
 import ctypes
+import sys
 from patch_strings import patch_strings_in_binary
 from macho import (
     inject_lc_load_dylib, inject_rpath, is_macho_binary, has_rpath,
@@ -83,7 +84,6 @@ def verify_binary_architecture(binary_path):
         return False, f"Ошибка при анализе структуры бинарника: {e}"
 
 def verify_dylib_headers(dylib_path):
-    """Проверка заголовков dylib перед инъекцией"""
     if not os.path.isfile(dylib_path):
         return False, "File not found"
     
@@ -300,54 +300,112 @@ def check_header_space(main_executable, required_bytes):
         return True
 
 def safe_extract_archive(archive_path, output_dir):
-    try:
-        libarchive = ctypes.CDLL('/usr/lib/libarchive.2.dylib')
-    except OSError:
-        raise RuntimeError("Failed to load system libarchive.2.dylib")
+    if sys.platform == 'ios' or sys.platform == 'iphoneos':
+        try:
+            libarchive = ctypes.CDLL('/usr/lib/libarchive.2.dylib')
+        except OSError:
+            raise RuntimeError("Failed to load system libarchive.2.dylib")
+        
+        libarchive.archive_read_new.restype = ctypes.c_void_p
+        libarchive.archive_read_support_filter_all.argtypes = [ctypes.c_void_p]
+        libarchive.archive_read_support_format_all.argtypes = [ctypes.c_void_p]
+        libarchive.archive_read_open_filename.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
+        libarchive.archive_read_open_filename.restype = ctypes.c_int
+        libarchive.archive_read_next_header.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        libarchive.archive_read_next_header.restype = ctypes.c_int
+        libarchive.archive_read_extract.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+        libarchive.archive_read_extract.restype = ctypes.c_int
+        libarchive.archive_read_free.argtypes = [ctypes.c_void_p]
+        libarchive.archive_read_free.restype = ctypes.c_int
+        libarchive.archive_entry_pathname.argtypes = [ctypes.c_void_p]
+        libarchive.archive_entry_pathname.restype = ctypes.c_char_p
+        
+        archive = libarchive.archive_read_new()
+        libarchive.archive_read_support_filter_all(archive)
+        libarchive.archive_read_support_format_all(archive)
+        
+        if libarchive.archive_read_open_filename(archive, archive_path.encode('utf-8'), 10240) != 0:
+            libarchive.archive_read_free(archive)
+            raise RuntimeError(f"Failed to open archive: {archive_path}")
+        
+        entry = ctypes.c_void_p()
+        os.makedirs(output_dir, exist_ok=True)
+        old_cwd = os.getcwd()
+        os.chdir(output_dir)
+        extract_flags = 22
+        real_output = os.path.realpath(output_dir)
+        
+        try:
+            while libarchive.archive_read_next_header(archive, ctypes.byref(entry)) == 0:
+                entry_path = libarchive.archive_entry_pathname(entry)
+                if entry_path:
+                    path_str = entry_path.decode('utf-8')
+                    full_path = os.path.join(output_dir, path_str)
+                    if not os.path.realpath(full_path).startswith(real_output):
+                        raise ValueError(f"Path traversal attempt: {path_str}")
+                libarchive.archive_read_extract(archive, entry, extract_flags)
+        finally:
+            libarchive.archive_read_free(archive)
+            os.chdir(old_cwd)
+        
+        color_print(f"Extracted: {os.path.basename(archive_path)}", 'hotpink')
+        return
     
-    libarchive.archive_read_new.restype = ctypes.c_void_p
-    libarchive.archive_read_support_filter_all.argtypes = [ctypes.c_void_p]
-    libarchive.archive_read_support_format_all.argtypes = [ctypes.c_void_p]
-    libarchive.archive_read_open_filename.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
-    libarchive.archive_read_open_filename.restype = ctypes.c_int
-    libarchive.archive_read_next_header.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-    libarchive.archive_read_next_header.restype = ctypes.c_int
-    libarchive.archive_read_extract.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-    libarchive.archive_read_extract.restype = ctypes.c_int
-    libarchive.archive_read_free.argtypes = [ctypes.c_void_p]
-    libarchive.archive_read_free.restype = ctypes.c_int
-    libarchive.archive_entry_pathname.argtypes = [ctypes.c_void_p]
-    libarchive.archive_entry_pathname.restype = ctypes.c_char_p
+    import tarfile
+    import gzip
+    import lzma
     
-    archive = libarchive.archive_read_new()
-    libarchive.archive_read_support_filter_all(archive)
-    libarchive.archive_read_support_format_all(archive)
+    if not os.path.exists(archive_path):
+        raise ValueError(f"Archive not found: {archive_path}")
     
-    if libarchive.archive_read_open_filename(archive, archive_path.encode('utf-8'), 10240) != 0:
-        libarchive.archive_read_free(archive)
-        raise RuntimeError(f"Failed to open archive: {archive_path}")
-    
-    entry = ctypes.c_void_p()
     os.makedirs(output_dir, exist_ok=True)
-    old_cwd = os.getcwd()
-    os.chdir(output_dir)
-    extract_flags = 22
     real_output = os.path.realpath(output_dir)
+    archive_ext = os.path.splitext(archive_path)[1].lower()
     
     try:
-        while libarchive.archive_read_next_header(archive, ctypes.byref(entry)) == 0:
-            entry_path = libarchive.archive_entry_pathname(entry)
-            if entry_path:
-                path_str = entry_path.decode('utf-8')
-                full_path = os.path.join(output_dir, path_str)
-                if not os.path.realpath(full_path).startswith(real_output):
-                    raise ValueError(f"Path traversal attempt: {path_str}")
-            libarchive.archive_read_extract(archive, entry, extract_flags)
-    finally:
-        libarchive.archive_read_free(archive)
-        os.chdir(old_cwd)
+        if archive_ext == '.deb':
+            import subprocess
+            with tempfile.TemporaryDirectory() as tmpdir:
+                subprocess.run(['ar', 'x', archive_path], cwd=tmpdir, check=True, capture_output=True)
+                for f in os.listdir(tmpdir):
+                    if f.startswith('data.tar.'):
+                        data_archive = os.path.join(tmpdir, f)
+                        safe_extract_archive(data_archive, output_dir)
+                        return
+            raise ValueError("No data.tar.* found in deb")
+        
+        elif archive_ext in ('.tar', '.tgz', '.gz'):
+            with tarfile.open(archive_path, 'r:*') as tar:
+                for member in tar.getmembers():
+                    target_path = os.path.join(output_dir, member.name)
+                    if not os.path.realpath(target_path).startswith(real_output):
+                        raise ValueError("Path traversal attempt")
+                tar.extractall(output_dir)
+        
+        elif archive_ext == '.xz':
+            with lzma.open(archive_path) as f:
+                with tarfile.open(fileobj=f, mode='r|') as tar:
+                    for member in tar.getmembers():
+                        target_path = os.path.join(output_dir, member.name)
+                        if not os.path.realpath(target_path).startswith(real_output):
+                            raise ValueError("Path traversal attempt")
+                    tar.extractall(output_dir)
+        
+        elif archive_ext == '.lzma':
+            with lzma.open(archive_path, format=lzma.FORMAT_LZMA) as f:
+                with tarfile.open(fileobj=f, mode='r|') as tar:
+                    for member in tar.getmembers():
+                        target_path = os.path.join(output_dir, member.name)
+                        if not os.path.realpath(target_path).startswith(real_output):
+                            raise ValueError("Path traversal attempt")
+                    tar.extractall(output_dir)
+        
+        else:
+            raise ValueError(f"Unsupported archive format: {archive_ext}")
     
-    color_print(f"Extracted: {os.path.basename(archive_path)}", 'hotpink')
+    except Exception as e:
+        color_print(f"Ошибка распаковки {archive_path}: {e}", 'red')
+        raise
 
 def extract_deb_recursive(deb_path, output_dir):
     safe_extract_archive(deb_path, output_dir)
