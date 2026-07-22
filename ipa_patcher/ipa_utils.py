@@ -5,16 +5,21 @@ import zipfile
 import tempfile
 import shutil
 import time
-import stat
-from utils import log_message
 
 try:
     import dialogs
-    import photos
     PYTHONISTA = True
 except ImportError:
     PYTHONISTA = False
 
+def get_tmp_dir():
+    docs = os.path.expanduser("~/Documents")
+    base = os.path.join(docs, "ipa_patcher")
+    if not os.path.exists(base):
+        os.makedirs(base, exist_ok=True)
+    tmp = os.path.join(base, "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    return tmp
 
 class ProgressBar:
     def __init__(self, total, description="Progress", width=50):
@@ -22,123 +27,63 @@ class ProgressBar:
         self.description = description
         self.width = width
         self.current = 0
+        self.last_percent = -1
 
     def update(self, n=1):
         self.current += n
         if self.total == 0:
             return
         percent = 100 * self.current // self.total
-        filled = int(self.width * percent / 100)
-        bar = '[' + '=' * filled + '>' + '.' * (self.width - filled - 1) + ']'
-        sys.stdout.write(f'\r{self.description}: {bar} {percent}%')
-        sys.stdout.flush()
-        if percent == 100:
-            sys.stdout.write('\n')
+        if percent != self.last_percent:
+            self.last_percent = percent
+            filled = int(self.width * percent / 100)
+            bar = '[' + '=' * filled + '>' + '.' * (self.width - filled - 1) + ']'
+            sys.stdout.write(f'\r{self.description}: {bar} {percent}%')
+            sys.stdout.flush()
+            if percent == 100:
+                sys.stdout.write('\n')
 
     def close(self):
         pass
 
-
-def extract_ipa_with_progress(ipa_path, dest_dir, delay=0):
-    try:
-        with zipfile.ZipFile(ipa_path, 'r') as zf:
-            files = zf.infolist()
-            pb = ProgressBar(len(files), 'Распаковка')
-            real_dest = os.path.realpath(dest_dir)
-            for member in files:
-                if member.filename.startswith('/') or '..' in member.filename:
-                    continue
-                target_path = os.path.join(dest_dir, member.filename)
-                if not os.path.realpath(target_path).startswith(real_dest):
-                    continue
-                attr = member.external_attr >> 16
-                if stat.S_ISLNK(attr):
-                    link_target = zf.read(member).decode('utf-8')
-                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                    if not os.path.exists(target_path):
-                        os.symlink(link_target, target_path)
-                else:
-                    zf.extract(member, dest_dir)
-                pb.update()
-                if delay > 0:
-                    time.sleep(delay)
-            pb.close()
-        log_message(f"IPA extracted to: {dest_dir}", 'INFO')
-    except Exception as e:
-        log_message(f"Failed to extract IPA: {e}", 'ERROR')
-        raise
-
-
-def pack_ipa_with_progress(source_dir, output_path, delay=0):
-    try:
-        file_list = []
-        for root, _, files in os.walk(source_dir):
-            for f in files:
-                full = os.path.join(root, f)
-                arcname = os.path.relpath(full, source_dir)
-                file_list.append((full, arcname))
-
-        pb = ProgressBar(len(file_list), 'Упаковка')
-        
-        try:
-            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=9, allowZip64=True) as zf:
-                for full, arcname in file_list:
-                    if arcname.startswith('/') or '..' in arcname:
-                        continue
-                    info = zipfile.ZipInfo(arcname)
-                    st = os.stat(full)
-
-                    is_exec = (
-                        os.access(full, os.X_OK) or
-                        arcname.endswith('.dylib') or
-                        '.framework/' in arcname or
-                        arcname == os.path.basename(arcname) and '.' not in arcname
-                    )
-                    perm = 0o100755 if is_exec else 0o100644
-                    info.external_attr = (perm << 16) | (st.st_mode & 0xFFFF)
-                    info.compress_type = zipfile.ZIP_DEFLATED
-
-                    with open(full, 'rb') as fh:
-                        zf.writestr(info, fh.read())
-                    pb.update()
-                    if delay > 0:
-                        time.sleep(delay)
-        except TypeError:
-            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-                for full, arcname in file_list:
-                    if arcname.startswith('/') or '..' in arcname:
-                        continue
-                    info = zipfile.ZipInfo(arcname)
-                    st = os.stat(full)
-
-                    is_exec = (
-                        os.access(full, os.X_OK) or
-                        arcname.endswith('.dylib') or
-                        '.framework/' in arcname or
-                        arcname == os.path.basename(arcname) and '.' not in arcname
-                    )
-                    perm = 0o100755 if is_exec else 0o100644
-                    info.external_attr = (perm << 16) | (st.st_mode & 0xFFFF)
-                    info.compress_type = zipfile.ZIP_DEFLATED
-
-                    with open(full, 'rb') as fh:
-                        zf.writestr(info, fh.read())
-                    pb.update()
-                    if delay > 0:
-                        time.sleep(delay)
+def extract_ipa_with_progress(ipa_path, dest_dir, delay=0.005):
+    with zipfile.ZipFile(ipa_path, 'r') as zf:
+        files = zf.infolist()
+        pb = ProgressBar(len(files), 'Распаковка')
+        for member in files:
+            zf.extract(member, dest_dir)
+            pb.update()
+            if delay > 0:
+                time.sleep(delay)
         pb.close()
-    except Exception as e:
-        log_message(f"Failed to pack IPA: {e}", 'ERROR')
-        raise
 
+def pack_ipa_with_progress(source_dir, output_path, delay=0.005):
+    file_list = []
+    for root, _, files in os.walk(source_dir):
+        for f in files:
+            full = os.path.join(root, f)
+            arcname = os.path.relpath(full, source_dir)
+            file_list.append((full, arcname))
+    pb = ProgressBar(len(file_list), 'Упаковка')
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+        for full, arcname in file_list:
+            info = zipfile.ZipInfo(arcname)
+            st = os.stat(full)
+            info.external_attr = (st.st_mode & 0xFFFF) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with open(full, 'rb') as fh:
+                zf.writestr(info, fh.read())
+            pb.update()
+            if delay > 0:
+                time.sleep(delay)
+    pb.close()
 
 def make_temp_dir():
-    if PYTHONISTA:
-        docs = os.path.expanduser("~/Documents")
-        if os.path.isdir(docs):
-            return tempfile.mkdtemp(prefix="ipa_patch_", dir=docs)
-    return tempfile.mkdtemp(prefix="ipa_patch_")
-
+    docs = os.path.expanduser("~/Documents")
+    base = os.path.join(docs, "ipa_patcher")
+    if not os.path.exists(base):
+        os.makedirs(base, exist_ok=True)
+    return tempfile.mkdtemp(prefix="ipa_patch_", dir=base)
 
 def find_app_dir(payload_path):
     if not os.path.isdir(payload_path):
@@ -148,142 +93,228 @@ def find_app_dir(payload_path):
             return os.path.join(payload_path, item)
     return None
 
+def smart_find_in_tmp(extensions):
+    tmp_dir = get_tmp_dir()
+    found = []
+    if not os.path.isdir(tmp_dir):
+        return found
+    for f in os.listdir(tmp_dir):
+        full = os.path.join(tmp_dir, f)
+        if os.path.isfile(full):
+            for ext in extensions:
+                if f.lower().endswith(f'.{ext.lower()}'):
+                    found.append((f, full))
+    return found
 
 def pick_ipa_file():
     if PYTHONISTA:
         try:
+            import dialogs
             path = dialogs.pick_document(types=["public.data"])
-            if path is None:
-                print("Выбор файла отменён.")
-                sys.exit(0)
+        except:
+            path = None
+        if path:
             if not path.lower().endswith('.ipa'):
                 print("Ошибка: нужен .ipa файл.")
                 return pick_ipa_file()
             return path
-        except Exception as e:
-            log_message(f"Error picking IPA: {e}", 'ERROR')
-            sys.exit(1)
-    else:
-        try:
-            path = input("Путь к .ipa: ").strip().strip('"')
-        except KeyboardInterrupt:
-            print("\nПрервано.")
-            sys.exit(0)
-        return os.path.expanduser(path)
 
-
-def pick_icon_from_photos():
-    try:
-        img = photos.pick_image()
-        if img is None:
-            return None
-        temp_dir = tempfile.gettempdir()
-        temp_path = os.path.join(temp_dir, f"icon_from_photos_{int(time.time())}.png")
-        img.save(temp_path, 'PNG')
-        log_message(f"Icon selected from Photos: {temp_path}", 'INFO')
-        return temp_path
-    except Exception as e:
-        log_message(f"Error picking from Photos: {e}", 'ERROR')
-        return None
-
-
-def pick_icon_file():
-    if PYTHONISTA:
-        print("\nВыберите источник иконки:")
-        print("  [1] Файлы (Documents)")
-        print("  [2] Фото (библиотека)")
-        print("  [0] Отмена")
-
-        choice = input("  Выберите: ").strip()
-
-        if choice == "1":
+    found = smart_find_in_tmp(['ipa'])
+    if found:
+        print("\n--- Доступные IPA в tmp/ ---")
+        for i, (name, _) in enumerate(found, 1):
+            print(f"  {i}) {name}")
+        print("  0) Ввести путь вручную")
+        while True:
             try:
-                path = dialogs.pick_document(types=["public.png", "public.jpeg"])
-                if path is None:
-                    print("Выбор файла отменён.")
-                    return None
-                ext = os.path.splitext(path)[1].lower()
-                if ext not in ('.png', '.jpg', '.jpeg'):
-                    print("Ошибка: нужен PNG или JPEG.")
-                    return pick_icon_file()
-                return path
-            except Exception as e:
-                log_message(f"Error picking icon from files: {e}", 'ERROR')
-                return None
-
-        elif choice == "2":
-            print("\nОткрытие библиотеки фото...")
-            path = pick_icon_from_photos()
-            if path:
-                print("[+] Изображение выбрано из Фото")
-                return path
-            else:
-                print("Ошибка при выборе из Фото.")
-                return None
-
-        elif choice == "0":
-            print("Отмена.")
-            return None
-        else:
-            print("Неверный выбор.")
-            return pick_icon_file()
+                ch = input("Выберите файл: ").strip()
+                if ch == '0' or not ch:
+                    break
+                num = int(ch)
+                if 1 <= num <= len(found):
+                    return found[num-1][1]
+                print("Неверный номер.")
+            except ValueError:
+                print("Введите число.")
     else:
-        try:
-            path = input("Путь к иконке (PNG/JPEG): ").strip().strip('"')
-            if path:
-                return os.path.expanduser(path)
-            return None
-        except KeyboardInterrupt:
-            print("\nПрервано.")
-            sys.exit(0)
+        print("В tmp/ не найдено .ipa файлов.")
 
+    path = input("Введите полный путь к .ipa: ").strip().strip('"')
+    return os.path.expanduser(path) if path else None
 
 def pick_tweak_file():
     if PYTHONISTA:
         try:
+            import dialogs
             path = dialogs.pick_document(types=["public.data", "public.zip", "com.apple.dylib"])
-            if path is None:
-                print("Выбор файла отменён.")
-                return None
+        except:
+            path = None
+        if path:
             ext = os.path.splitext(path)[1].lower()
             if ext not in ('.dylib', '.zip', '.deb', '.tar', '.lzma', '.xz', '.gz', '.tgz'):
                 print("Ошибка: поддерживаются .dylib, .zip, .deb, .tar, .lzma, .xz, .gz, .tgz")
                 return pick_tweak_file()
             return path
-        except Exception as e:
-            log_message(f"Error picking tweak: {e}", 'ERROR')
-            return None
-    else:
-        try:
-            path = input("Путь к твику/архиву: ").strip().strip('"')
-            if path:
-                return os.path.expanduser(path)
-            return None
-        except KeyboardInterrupt:
-            print("\nПрервано.")
-            sys.exit(0)
 
+    found = smart_find_in_tmp(['dylib', 'zip', 'deb', 'tar', 'lzma', 'xz', 'gz', 'tgz'])
+    if found:
+        print("\n--- Доступные твики в tmp/ ---")
+        for i, (name, _) in enumerate(found, 1):
+            print(f"  {i}) {name}")
+        print("  0) Ввести путь вручную")
+        while True:
+            try:
+                ch = input("Выберите файл: ").strip()
+                if ch == '0' or not ch:
+                    break
+                num = int(ch)
+                if 1 <= num <= len(found):
+                    return found[num-1][1]
+                print("Неверный номер.")
+            except ValueError:
+                print("Введите число.")
+    else:
+        print("В tmp/ не найдено подходящих файлов твиков.")
+
+    path = input("Введите полный путь к твику/архиву: ").strip().strip('"')
+    return os.path.expanduser(path) if path else None
+
+def pick_icon_file():
+    if PYTHONISTA:
+        try:
+            import dialogs
+            path = dialogs.pick_document(types=["public.png"])
+        except:
+            path = None
+        if path:
+            if not path.lower().endswith('.png'):
+                print("Ошибка: нужен PNG файл.")
+                return pick_icon_file()
+            return path
+
+    found = smart_find_in_tmp(['png'])
+    if found:
+        print("\n--- Доступные PNG в tmp/ ---")
+        for i, (name, _) in enumerate(found, 1):
+            print(f"  {i}) {name}")
+        print("  0) Ввести путь вручную")
+        while True:
+            try:
+                ch = input("Выберите файл: ").strip()
+                if ch == '0' or not ch:
+                    break
+                num = int(ch)
+                if 1 <= num <= len(found):
+                    return found[num-1][1]
+                print("Неверный номер.")
+            except ValueError:
+                print("Введите число.")
+    else:
+        print("В tmp/ не найдено PNG файлов.")
+
+    path = input("Введите полный путь к PNG: ").strip().strip('"')
+    return os.path.expanduser(path) if path else None
 
 def pick_substrate_file():
     if PYTHONISTA:
         try:
+            import dialogs
             path = dialogs.pick_document(types=["com.apple.dylib"])
-            if path is None:
-                print("Выбор файла отменён.")
-                return None
+        except:
+            path = None
+        if path:
             if not path.lower().endswith('.dylib'):
                 print("Ошибка: нужен .dylib файл.")
                 return pick_substrate_file()
             return path
-        except Exception as e:
-            log_message(f"Error picking substrate: {e}", 'ERROR')
-            return None
+
+    found = smart_find_in_tmp(['dylib'])
+    if found:
+        print("\n--- Доступные libsubstrate в tmp/ ---")
+        for i, (name, _) in enumerate(found, 1):
+            print(f"  {i}) {name}")
+        print("  0) Ввести путь вручную")
+        while True:
+            try:
+                ch = input("Выберите файл: ").strip()
+                if ch == '0' or not ch:
+                    break
+                num = int(ch)
+                if 1 <= num <= len(found):
+                    return found[num-1][1]
+                print("Неверный номер.")
+            except ValueError:
+                print("Введите число.")
     else:
+        print("В tmp/ не найдено .dylib для субстрата.")
+
+    path = input("Введите полный путь к libsubstrate.dylib: ").strip().strip('"')
+    return os.path.expanduser(path) if path else None
+
+def pick_cert_zip():
+    if PYTHONISTA:
         try:
-            path = input("Путь к libsubstrate.dylib: ").strip().strip('"')
-            if path:
-                return os.path.expanduser(path)
-            return None
-        except KeyboardInterrupt:
-            print("\nПрервано.")
-            sys.exit(0)
+            import dialogs
+            path = dialogs.pick_document(types=["public.zip"])
+        except:
+            path = None
+        if path:
+            if not path.lower().endswith('.zip'):
+                print("Ошибка: нужен .zip архив.")
+                return pick_cert_zip()
+            return path
+
+    found = smart_find_in_tmp(['zip'])
+    if found:
+        print("\n--- Доступные сертификаты в tmp/ ---")
+        for i, (name, _) in enumerate(found, 1):
+            print(f"  {i}) {name}")
+        print("  0) Ввести путь вручную")
+        while True:
+            try:
+                ch = input("Выберите файл: ").strip()
+                if ch == '0' or not ch:
+                    break
+                num = int(ch)
+                if 1 <= num <= len(found):
+                    return found[num-1][1]
+                print("Неверный номер.")
+            except ValueError:
+                print("Введите число.")
+    else:
+        print("В tmp/ не найдено .zip архивов.")
+
+    path = input("Введите полный путь к .zip архиву с сертификатом: ").strip().strip('"')
+    return os.path.expanduser(path) if path else None
+
+def ask_input(prompt, default=""):
+    try:
+        if default:
+            result = input(f"{prompt} [{default}]: ").strip()
+        else:
+            result = input(f"{prompt}: ").strip()
+        if not result and default:
+            return default
+        return result
+    except KeyboardInterrupt:
+        print("\nПрервано.")
+        sys.exit(0)
+
+def ask_yes_no(prompt, default=True):
+    hint = " [Y/n]" if default else " [y/N]"
+    try:
+        while True:
+            ans = input(prompt + hint + " ").strip().lower()
+            if not ans:
+                return default
+            if ans in ("y", "yes", "д", "да"):
+                return True
+            if ans in ("n", "no", "н", "нет"):
+                return False
+            print("Ошибка: введите 'y' или 'n' (д/н)")
+    except KeyboardInterrupt:
+        print("\nПрервано.")
+        sys.exit(0)
+
+def print_section(title):
+    print(f"\n--- {title} ---")
