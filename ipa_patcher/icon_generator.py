@@ -10,7 +10,6 @@ try:
 except ImportError:
     HAVE_PIL = False
 
-
 def replace_icon_loose_legacy_method(app_dir, icon_path, auto_increment=True):
     info_plist_path = os.path.join(app_dir, "Info.plist")
     if not os.path.isfile(info_plist_path):
@@ -54,14 +53,6 @@ def replace_icon_loose_legacy_method(app_dir, icon_path, auto_increment=True):
         
         color_print("[INFO] Info.plist finalized with clean legacy routing", 'green')
         
-        try:
-            from PIL import Image
-            img = Image.open(icon_path)
-            has_pillow = True
-        except ImportError:
-            has_pillow = False
-            color_print("[WARN] Pillow library not found. Falling back to binary copying.", 'yellow')
-        
         for icon_name in legacy_icons:
             if not icon_name.lower().endswith('.png'):
                 full_name = f"{icon_name}.png"
@@ -70,7 +61,7 @@ def replace_icon_loose_legacy_method(app_dir, icon_path, auto_increment=True):
             
             target_path = os.path.join(app_dir, full_name)
             
-            if has_pillow:
+            if HAVE_PIL:
                 if '@3x' in full_name:
                     size = (180, 180)
                 elif '@2x' in full_name:
@@ -80,26 +71,26 @@ def replace_icon_loose_legacy_method(app_dir, icon_path, auto_increment=True):
                 else:
                     size = (60, 60)
                 
-                if img.mode != 'RGBA':
-                    img = img.convert('RGBA')
-                
-                try:
-                    resized_img = img.resize(size, Image.LANCZOS)
-                except AttributeError:
+                with Image.open(icon_path) as img:
+                    if img.mode != 'RGBA':
+                        img = img.convert('RGBA')
                     try:
-                        resized_img = img.resize(size, Image.ANTIALIAS)
+                        resized_img = img.resize(size, Image.LANCZOS)
                     except AttributeError:
-                        resized_img = img.resize(size)
-                
-                if size[0] <= 40 and size[1] <= 40:
-                    try:
-                        resized_img = resized_img.quantize(colors=128, method=2)
-                        resized_img = resized_img.convert('RGBA')
-                    except:
-                        pass
-                
-                resized_img.save(target_path, "PNG", optimize=True, compress_level=9)
-                color_print(f"  [Loose Method] Overwrote: {full_name} ({size[0]}x{size[1]})", 'green')
+                        try:
+                            resized_img = img.resize(size, Image.ANTIALIAS)
+                        except AttributeError:
+                            resized_img = img.resize(size)
+                    
+                    if size[0] <= 40 and size[1] <= 40:
+                        try:
+                            resized_img = resized_img.quantize(colors=128, method=2)
+                            resized_img = resized_img.convert('RGBA')
+                        except:
+                            pass
+                    
+                    resized_img.save(target_path, "PNG", optimize=True, compress_level=9)
+                    color_print(f"  [Loose Method] Resized: {full_name} ({size[0]}x{size[1]})", 'green')
             else:
                 shutil.copy2(icon_path, target_path)
                 color_print(f"  [Loose Method] Copied binary: {full_name}", 'green')
@@ -110,20 +101,12 @@ def replace_icon_loose_legacy_method(app_dir, icon_path, auto_increment=True):
         log_message(f"Failed to execute loose icon replacement method: {e}", 'ERROR')
         return False
 
-
 def generate_loose_icons(source_icon_path, app_dir, prefix='patched_icon'):
     if not os.path.isfile(source_icon_path):
         color_print(f"[ERROR] Icon file not found: {source_icon_path}", 'red')
         return False
     
-    try:
-        from PIL import Image
-        has_pillow = True
-    except ImportError:
-        has_pillow = False
-        color_print("[WARN] Pillow library not found. Using fallback copy method.", 'yellow')
-    
-    if not has_pillow:
+    if not HAVE_PIL:
         return _generate_loose_icons_fallback(source_icon_path, app_dir, prefix)
     
     try:
@@ -174,7 +157,6 @@ def generate_loose_icons(source_icon_path, app_dir, prefix='patched_icon'):
         log_message(f"Failed to generate icons: {e}", 'ERROR')
         return False
 
-
 def _generate_loose_icons_fallback(source_icon_path, app_dir, prefix='patched_icon'):
     try:
         with open(source_icon_path, 'rb') as f:
@@ -208,7 +190,6 @@ def _generate_loose_icons_fallback(source_icon_path, app_dir, prefix='patched_ic
     except Exception as e:
         log_message(f"Failed to copy icons: {e}", 'ERROR')
         return False
-
 
 def patch_info_plist_icon(app_dir, bundle_version_increment=True):
     plist_path = os.path.join(app_dir, "Info.plist")
@@ -280,7 +261,6 @@ def patch_info_plist_icon(app_dir, bundle_version_increment=True):
     except Exception as e:
         log_message(f"Failed to patch Info.plist: {e}", 'ERROR')
         return False
-
 
 def replace_icon_loose_method(app_dir, icon_path, auto_increment=True):
     color_print("[INFO] Generating loose icons (legacy mode)...", 'blue')
