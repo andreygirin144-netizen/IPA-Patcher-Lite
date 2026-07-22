@@ -758,6 +758,11 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
     if failed:
         color_print(f"Failed to inject: {failed}", 'yellow')
     
+    
+    all_injected = list(set(injected + [name for name, _ in copied_frameworks if name not in failed]))
+    if all_injected:
+        color_print(f"Total successfully injected: {all_injected}", 'green')
+    
     if not injected and (copied_dylibs or copied_frameworks):
         return False, "Injection failed (not enough space in header)"
     
