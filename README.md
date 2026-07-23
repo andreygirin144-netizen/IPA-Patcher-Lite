@@ -184,7 +184,7 @@ hex_patcher/
 1. Скопируй все файлы проекта (включая папку `hex_patcher/`) в **Pythonista → Documents** (`libsubstrate.dylib` — только если планируешь инъекцию твиков в режиме “авто”).
 1. Готово — остальное работает на стандартной библиотеке.
 
-### 🖥️ macOS / Linux
+### 🖥️ macOS / Linux / Windows
 
 ```bash
 git clone https://github.com/andreygirin144-netizen/ipa-patcher.git
@@ -193,7 +193,7 @@ pip install Pillow   # опционально, для качественной �
 python3 main.py
 ```
 
-> На macOS/Linux часть функций (например, отправка через Share Sheet, цветной вывод через `console`, диалоги `dialogs.pick_document`) автоматически отключается — скрипт сам определяет окружение через `try/except import` и переключается на обычный `input()`.
+> На macOS/Linux/Windows функция Share Sheet Not supported, только для Pythonista (iOS/iPadOS)
 
 -----
 
