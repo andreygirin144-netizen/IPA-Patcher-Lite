@@ -505,6 +505,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 input("Нажмите Enter после просмотра...")
             except Exception as e:
                 color_print(f"Ошибка создания списка: {e}", 'red')
+            finally:
+                if os.path.exists(list_path):
+                    try:
+                        os.remove(list_path)
+                        color_print("[INFO] Временный файл списка удален.", 'green')
+                    except:
+                        pass
                 
         elif choice == "9":
             if modified or icon_replaced or tweak_injected or ("custom_edit" in changes) or ("entitlements" in changes) or ("advanced_patched" in changes) or hex_patcher_used:
