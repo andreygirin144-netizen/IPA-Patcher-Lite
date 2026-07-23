@@ -185,6 +185,15 @@ hex_patcher/
 1. Скопируй все файлы проекта (включая папку `hex_patcher/`) в **Pythonista → Documents** (`libsubstrate.dylib` — только если планируешь инъекцию твиков в режиме “авто”).
 1. Готово — остальное работает на стандартной библиотеке.
 
+### 📱 iPhone / iPad – a-Shell mini
+
+1. Установи a‑Shell mini из App Store.
+Открой a‑Shell mini и перейди в папку Documents:
+cd ~/Documents
+1. Скопируй все файлы проекта в эту папку (например, через iCloud Drive, AirDrop или файловый менеджер).
+1. Запусти скрипт:
+python3 main.py
+
 ### 🖥️ macOS / Linux / Windows
 
 ```bash
