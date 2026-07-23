@@ -156,7 +156,7 @@ ipa_patcher/
 ├── constants.py            # Магические числа Mach-O, load-команды, списки файлов подписи, PatchConfig
 ├── utils.py                # Логирование, цветной вывод (console/ANSI), ввод пользователя, пути к Logs/Patched
 ├── libsubstrate.dylib      # Стандартный субстрат для твиков (кладётся рядом со скриптом, опционально)
-└── hex_patcher/
+hex_patcher/
 ├── __init__.py             # Точка импорта, экспорт публичных классов (PatchEngine, start_hex_patcher)
 ├── core/                   # Ядро патчера
 │   ├── __init__.py         # Экспорт ядра
