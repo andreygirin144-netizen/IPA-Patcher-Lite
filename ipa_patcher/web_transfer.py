@@ -38,7 +38,7 @@ CONFIG = {
     'MAX_CONNECTIONS': 10,
 }
 
-VERSION = '1.0.9'
+VERSION = '1.0.7'
 
 DOCS_DIR = os.path.expanduser('~/Documents')
 FILES_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Files')
@@ -46,6 +46,9 @@ LOGS_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Logs')
 LOG_FILE = os.path.join(LOGS_DIR, 'web_transfer.log')
 BLACKLIST_FILE = os.path.join(LOGS_DIR, 'blacklist.json')
 AUDIT_LOG = os.path.join(LOGS_DIR, 'audit.log')
+
+STOP_SERVER = False
+SERVER_INSTANCE = None
 
 
 class SecurityManager:
@@ -154,17 +157,21 @@ def log_message(msg, level='INFO'):
             f.write(f"[{timestamp}] [{level}] {msg}\n")
     except:
         pass
-    
+
+    color_print(f"[{timestamp}] {msg}", level_to_color(level))
+
+
+def level_to_color(level):
     if level == 'INFO':
-        color_print(f"[{timestamp}] {msg}", 'cyan')
+        return 'cyan'
     elif level == 'SUCCESS':
-        color_print(f"[{timestamp}] {msg}", 'green')
+        return 'green'
     elif level == 'WARN':
-        color_print(f"[{timestamp}] {msg}", 'yellow')
+        return 'yellow'
     elif level == 'ERROR':
-        color_print(f"[{timestamp}] {msg}", 'red')
+        return 'red'
     else:
-        color_print(f"[{timestamp}] {msg}", 'white')
+        return 'white'
 
 
 def ensure_directories():
@@ -174,35 +181,61 @@ def ensure_directories():
 
 
 def color_print(text, color='white'):
-    if not HAVE_CONSOLE:
-        print(text)
-        return
-    try:
-        colors = {
-            'white': (1.0, 1.0, 1.0),
-            'red': (1.0, 0.0, 0.0),
-            'green': (0.0, 1.0, 0.0),
-            'yellow': (1.0, 1.0, 0.0),
-            'blue': (0.0, 0.5, 1.0),
-            'cyan': (0.0, 1.0, 1.0),
-            'magenta': (1.0, 0.0, 1.0),
-            'orange': (1.0, 0.5, 0.0),
-        }
-        r, g, b = colors.get(color, (1.0, 1.0, 1.0))
-        console.set_color(r, g, b)
-        print(text)
-        console.set_color(1.0, 1.0, 1.0)
-    except:
-        print(text)
+    if HAVE_CONSOLE:
+        try:
+            colors = {
+                'white': (1.0, 1.0, 1.0),
+                'red': (1.0, 0.0, 0.0),
+                'green': (0.0, 1.0, 0.0),
+                'yellow': (1.0, 1.0, 0.0),
+                'blue': (0.0, 0.5, 1.0),
+                'cyan': (0.0, 1.0, 1.0),
+                'magenta': (1.0, 0.0, 1.0),
+                'orange': (1.0, 0.5, 0.0),
+            }
+            r, g, b = colors.get(color, (1.0, 1.0, 1.0))
+            console.set_color(r, g, b)
+            print(text)
+            console.set_color(1.0, 1.0, 1.0)
+            return
+        except:
+            pass
+
+    ansi_colors = {
+        'white': '\033[97m',
+        'red': '\033[91m',
+        'green': '\033[92m',
+        'yellow': '\033[93m',
+        'blue': '\033[94m',
+        'cyan': '\033[96m',
+        'magenta': '\033[95m',
+        'orange': '\033[33m',
+    }
+    reset = '\033[0m'
+    code = ansi_colors.get(color, '\033[97m')
+    print(f"{code}{text}{reset}")
+
+
+def clear_screen():
+    if HAVE_CONSOLE:
+        try:
+            console.clear()
+            return
+        except:
+            pass
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
 
 
 def get_local_ip():
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        try:
-            s.connect(('8.8.8.8', 1))
-            return s.getsockname()[0]
-        except:
-            return '127.0.0.1'
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 1))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return '127.0.0.1'
 
 
 def sanitize_filename(filename):
@@ -225,31 +258,15 @@ def is_safe_path(path):
         return False
 
 
+def shorten_path(path):
+    if 'Documents' in path:
+        return '~/Documents' + path.split('Documents')[1]
+    return path
+
+
 class ThreadedFastHTTPServer(ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
-
-    def get_request(self):
-        sock, addr = super().get_request()
-        ip = addr[0]
-
-        if security.check_ban(ip) or not security.check_connection_limit():
-            sock.close()
-            return None, None
-
-        try:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.settimeout(60)
-        except:
-            pass
-
-        return sock, addr
-
-    def finish_request(self, request, client_address):
-        try:
-            super().finish_request(request, client_address)
-        finally:
-            security.release_connection()
 
 
 class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
@@ -277,6 +294,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_security_headers()
         self.end_headers()
         self.wfile.write(response)
+        self.close_connection = True
 
     def send_html_response(self, html_text, status=200):
         response = html_text.encode('utf-8')
@@ -287,6 +305,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_security_headers()
         self.end_headers()
         self.wfile.write(response)
+        self.close_connection = True
 
     def validate_request(self):
         ip = self.client_address[0]
@@ -295,12 +314,14 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(403)
             self.send_header('Connection', 'close')
             self.end_headers()
+            self.close_connection = True
             return False
 
         if not security.check_rate_limit(ip):
             self.send_response(429)
             self.send_header('Connection', 'close')
             self.end_headers()
+            self.close_connection = True
             return False
 
         security.get_session_id(ip)['last_activity'] = time.time()
@@ -318,6 +339,9 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
+        if STOP_SERVER:
+            return
+
         ip = self.client_address[0]
 
         if not self.validate_request():
@@ -377,11 +401,20 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json_response(files)
                 return
 
+            if clean_path == '/api/stop':
+                stop_server()
+                self.send_json_response({'status': 'stopped'})
+                return
+
         self.send_response(404)
         self.send_header('Connection', 'close')
         self.end_headers()
+        self.close_connection = True
 
     def do_POST(self):
+        if STOP_SERVER:
+            return
+
         ip = self.client_address[0]
 
         if not self.validate_request():
@@ -460,6 +493,10 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 'time': round(elapsed, 2)
             })
 
+            print()
+            color_print(f"  [+] Успешно загружен: {safe_filename}", 'green')
+            return
+
         except Exception as e:
             if os.path.exists(temp_path):
                 try:
@@ -471,7 +508,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_response({'error': 'Internal Server Error'}, 500)
 
     def get_login_page(self):
-        return """
+        return f"""
         <!DOCTYPE html>
         <html>
         <head>
@@ -479,16 +516,16 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>Secure Transfer - Вход</title>
             <style>
-                *{margin:0;padding:0;box-sizing:border-box}
-                body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#1c1c1e;display:flex;justify-content:center;align-items:center;min-height:100vh}
-                .card{background:#2c2c2e;padding:30px;border-radius:16px;text-align:center;width:320px;color:white}
-                h2{margin-bottom:20px;font-size:20px;font-weight:600}
-                input{width:100%;padding:12px;border:none;border-radius:10px;margin-bottom:16px;font-size:16px;text-align:center;background:#3a3a3c;color:white;font-family:monospace;letter-spacing:2px}
-                input:focus{outline:2px solid #007aff}
-                .btn{background:#007aff;color:white;padding:12px;border:none;border-radius:10px;width:100%;font-weight:600;font-size:16px;cursor:pointer;transition:opacity 0.2s}
-                .btn:hover{opacity:0.8}
-                .hint{font-size:12px;color:#8e8e93;margin-top:12px}
-                .version{font-size:11px;color:#5a5a5c;margin-top:8px}
+                *{{margin:0;padding:0;box-sizing:border-box}}
+                body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#1c1c1e;display:flex;justify-content:center;align-items:center;min-height:100vh}}
+                .card{{background:#2c2c2e;padding:30px;border-radius:16px;text-align:center;width:320px;color:white}}
+                h2{{margin-bottom:20px;font-size:20px;font-weight:600}}
+                input{{width:100%;padding:12px;border:none;border-radius:10px;margin-bottom:16px;font-size:16px;text-align:center;background:#3a3a3c;color:white;font-family:monospace;letter-spacing:2px}}
+                input:focus{{outline:2px solid #007aff}}
+                .btn{{background:#007aff;color:white;padding:12px;border:none;border-radius:10px;width:100%;font-weight:600;font-size:16px;cursor:pointer;transition:opacity 0.2s}}
+                .btn:hover{{opacity:0.8}}
+                .hint{{font-size:12px;color:#8e8e93;margin-top:12px}}
+                .version{{font-size:11px;color:#5a5a5c;margin-top:8px}}
             </style>
         </head>
         <body>
@@ -497,18 +534,18 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 <input type="password" id="pin" placeholder="ПИН-КОД" maxlength="6" autofocus>
                 <button class="btn" id="login">Войти</button>
                 <div class="hint">Введите 6-значный ПИН из консоли</div>
-                <div class="version">IPA Patcher Lite v1.0.9</div>
+                <div class="version">IPA Patcher Lite Transfer v{VERSION}</div>
             </div>
             <script>
-                document.getElementById('login').onclick = function() {
+                document.getElementById('login').onclick = function() {{
                     const pin = document.getElementById('pin').value.trim();
                     if (!pin) return;
                     fetch('/api/verify?token=' + encodeURIComponent(pin))
                         .then(r => r.ok ? window.location.href='/?token='+encodeURIComponent(pin) : alert('Неверный ПИН'));
-                };
-                document.getElementById('pin').onkeydown = function(e) {
+                }};
+                document.getElementById('pin').onkeydown = function(e) {{
                     if (e.key === 'Enter') document.getElementById('login').click();
-                };
+                }};
                 setTimeout(() => document.getElementById('pin').focus(), 300);
             </script>
         </body>
@@ -564,10 +601,11 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 <button class="btn" id="uploadBtn">Выбрать файл</button>
                 <div id="prog"><div id="fill"></div></div>
                 <div id="msg" class="info"></div>
+                <button id="stopBtn" style="background:#ff3b30;color:white;padding:14px;border-radius:12px;border:none;width:100%;font-size:16px;font-weight:600;margin-top:12px;cursor:pointer">Остановить сервер</button>
                 <div class="exts">
                     <span>.ipa</span><span>.zip</span><span>.deb</span><span>.dylib</span>
                 </div>
-                <div class="version">IPA Patcher Lite v1.0.9</div>
+                <div class="version">IPA Patcher Lite Transfer v{VERSION}</div>
             </div>
             <script>
                 (function() {{
@@ -582,6 +620,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     const fill = document.getElementById('fill');
                     const msg = document.getElementById('msg');
                     const pinDisplay = document.getElementById('pinDisplay');
+                    const stopBtn = document.getElementById('stopBtn');
 
                     pinDisplay.onclick = function() {{
                         navigator.clipboard.writeText(TOKEN).then(() => {{
@@ -672,6 +711,23 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                         xhr.setRequestHeader('X-Access-Token', TOKEN);
                         xhr.send(file);
                     }};
+
+                    stopBtn.onclick = function() {{
+                        if (confirm('Остановить сервер?')) {{
+                            fetch('/api/stop?token=' + TOKEN)
+                                .then(r => {{
+                                    if (r.ok) {{
+                                        status.className = 'badge error';
+                                        status.textContent = 'Остановлен';
+                                        btn.disabled = true;
+                                        stopBtn.disabled = true;
+                                        msg.textContent = 'Сервер остановлен. Закройте страницу.';
+                                        prog.style.display = 'none';
+                                        setTimeout(() => {{ window.close(); }}, 1000);
+                                    }}
+                                }});
+                        }}
+                    }};
                 }})();
             </script>
         </body>
@@ -679,15 +735,32 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         """
 
 
-def clear_screen():
-    os.system('clear' if os.name == 'posix' else 'cls')
+def stop_server():
+    global STOP_SERVER, SERVER_INSTANCE
+    STOP_SERVER = True
+    log_message("Сервер остановлен по команде с веб-страницы", 'INFO')
+    audit_log("Сервер остановлен по команде с веб-страницы", 'INFO')
+    
+    def shutdown_server():
+        time.sleep(0.1)
+        if SERVER_INSTANCE:
+            try:
+                SERVER_INSTANCE.shutdown()
+                SERVER_INSTANCE.server_close()
+            except:
+                pass
+    
+    threading.Thread(target=shutdown_server, daemon=True).start()
 
 
 def print_header():
     clear_screen()
-    color_print("=" * 60, 'cyan')
-    color_print(f"     IPA PATCHER LITE - Secure Transfer v{VERSION}", 'cyan')
-    color_print("=" * 60, 'cyan')
+    width = 45
+    title = f"IPA PATCHER LITE TRANSFER v{VERSION}"
+    
+    color_print("=" * width, 'cyan')
+    color_print(title.center(width), 'cyan')
+    color_print("=" * width, 'cyan')
     print()
 
 
@@ -695,18 +768,18 @@ def print_status(ip, port, running=False):
     if running:
         color_print(f"  Статус: [РАБОТАЕТ]", 'green')
         color_print(f"  Адрес: http://{ip}:{port}", 'blue')
-        color_print(f"  Папка: {FILES_DIR}", 'white')
+        color_print(f"  Папка: {shorten_path(FILES_DIR)}", 'white')
         color_print(f"  ПИН-код: {security.get_token()}", 'yellow')
         color_print(f"  Макс. размер: {CONFIG['MAX_FILE_SIZE']//(1024*1024)} MB", 'white')
         color_print(f"  Активных соединений: {security.active_connections}", 'white')
         if HAVE_BACKGROUND:
             color_print("  Фоновый режим: АКТИВЕН", 'green')
-        color_print(f"  Лог: {LOG_FILE}", 'white')
-        color_print(f"  Аудит: {AUDIT_LOG}", 'white')
+        color_print(f"  Лог: {shorten_path(LOG_FILE)}", 'white')
+        color_print(f"  Аудит: {shorten_path(AUDIT_LOG)}", 'white')
     else:
         color_print(f"  Статус: [ОСТАНОВЛЕН]", 'yellow')
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     print()
 
 
@@ -737,7 +810,7 @@ def show_security_info():
     color_print(f"    Макс. соединений: {CONFIG['MAX_CONNECTIONS']}", 'white')
     color_print(f"    Бан после: {CONFIG['BAN_THRESHOLD']} неудачных попыток", 'white')
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     input("\n  Нажмите Enter для продолжения...")
 
 
@@ -746,7 +819,7 @@ def view_security_logs():
     print_header()
     color_print("  ЛОГ АУДИТА БЕЗОПАСНОСТИ", 'cyan')
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     print()
 
     if not os.path.exists(AUDIT_LOG):
@@ -764,7 +837,7 @@ def view_security_logs():
             color_print(f"  Ошибка чтения лога: {e}", 'red')
 
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     input("\n  Нажмите Enter для продолжения...")
 
 
@@ -773,7 +846,7 @@ def view_upload_log():
     print_header()
     color_print("  ЛОГ ЗАГРУЗОК ФАЙЛОВ", 'cyan')
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     print()
 
     if not os.path.exists(LOG_FILE):
@@ -791,16 +864,16 @@ def view_upload_log():
             color_print(f"  Ошибка чтения лога: {e}", 'red')
 
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     input("\n  Нажмите Enter для продолжения...")
 
 
 def clear_log():
     clear_screen()
-    color_print("  ОЧИСТКА ЛОГА ЗАГРУЗОК", 'cyan')
+    color_print("  ОЧИСТКА ЛОГОВ", 'cyan')
     print()
     
-    choice = input("  Очистить лог загрузок? (y/n): ").strip().lower()
+    choice = input("  Очистить логи системы и загрузок? (y/n): ").strip().lower()
     if choice == 'y':
         try:
             if os.path.exists(LOGS_DIR):
@@ -810,28 +883,32 @@ def clear_log():
             else:
                 color_print("  Папка с логами не найдена.", 'yellow')
         except Exception as e:
-            color_print(f"  Ошибка очистки: {e}", 'red')
+            color_print(f"  Ошибка очистки логов: {e}", 'red')
     
     input("\n  Нажмите Enter для продолжения...")
 
 
-def clear_audit_log():
+def clear_files():
     clear_screen()
-    color_print("  ОЧИСТКА ЛОГА АУДИТА", 'cyan')
+    print_header()
+    color_print("  ОЧИСТКА ПАПКИ С ФАЙЛАМИ", 'cyan')
+    print()
+    color_print(f"  Внимание! Все файлы в {shorten_path(FILES_DIR)} будут безвозвратно удалены.", 'orange')
     print()
     
-    choice = input("  Очистить лог аудита? (y/n): ").strip().lower()
+    choice = input("  Удалить все загруженные файлы? (y/n): ").strip().lower()
     if choice == 'y':
         try:
-            if os.path.exists(LOGS_DIR):
-                shutil.rmtree(LOGS_DIR)
-                os.makedirs(LOGS_DIR, mode=0o755, exist_ok=True)
-                color_print("  Папка с логами очищена.", 'green')
+            if os.path.exists(FILES_DIR):
+                shutil.rmtree(FILES_DIR)
+                ensure_directories()
+                color_print("  Папка с загруженными файлами успешно очищена.", 'green')
+                log_message("Папка с файлами очищена через меню", 'INFO')
             else:
-                color_print("  Папка с логами не найдена.", 'yellow')
+                color_print("  Папка с файлами не найдена.", 'yellow')
         except Exception as e:
-            color_print(f"  Ошибка очистки: {e}", 'red')
-    
+            color_print(f"  Ошибка при очистке папки: {e}", 'red')
+            
     input("\n  Нажмите Enter для продолжения...")
 
 
@@ -854,7 +931,7 @@ def manage_blacklist():
                 color_print(f"    {ip} - истекает...", 'yellow')
 
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     choice = input("\n  [1] Очистить черный список\n  [2] Назад\n  Выберите: ")
 
     if choice == "1":
@@ -889,7 +966,9 @@ def change_port():
 
 
 def run_server():
-    global CONFIG
+    global CONFIG, STOP_SERVER, SERVER_INSTANCE
+    STOP_SERVER = False
+    SERVER_INSTANCE = None
     clear_screen()
     print_header()
 
@@ -902,14 +981,13 @@ def run_server():
 
     log_message(f"Сервер запущен на порту {port}", 'INFO')
     log_message(f"ПИН-код доступа: {security.get_token()}", 'INFO')
-    log_message(f"Папка для файлов: {FILES_DIR}", 'INFO')
     audit_log(f"Сервер запущен на {ip}:{port}", 'INFO')
 
-    color_print("\n  ПИН-КОД (введите на странице входа):", 'yellow')
+    color_print("\n  ПИН-КОД (для страницы входа):", 'yellow')
     color_print(f"     {security.get_token()}", 'cyan')
-    color_print("\n  Откройте в браузере: http://{ip}:{port}", 'blue')
-    color_print("\n  Нажмите Ctrl+C для остановки сервера", 'yellow')
-    color_print("-" * 60, 'cyan')
+    color_print(f"\n  Ссылка: http://{ip}:{port}", 'blue')
+    color_print("\n  Для остановки нажмите CTRL+C или кнопку на сайте", 'orange')
+    color_print("-" * 45, 'cyan')
     print()
 
     os.chdir(FILES_DIR)
@@ -917,18 +995,22 @@ def run_server():
         background.keep_alive()
         log_message("Фоновый режим активирован", 'INFO')
 
-    httpd = ThreadedFastHTTPServer(('', port), SecureHTTPRequestHandler)
+    SERVER_INSTANCE = ThreadedFastHTTPServer(('', port), SecureHTTPRequestHandler)
+
     try:
-        httpd.serve_forever()
+        SERVER_INSTANCE.serve_forever()
     except KeyboardInterrupt:
         print()
-        log_message("Сервер остановлен пользователем", 'INFO')
-        audit_log("Сервер остановлен пользователем", 'INFO')
-        color_print("  Сервер остановлен.", 'red')
-        httpd.server_close()
-        input("\n  Нажмите Enter для продолжения...")
-        return True
-    return False
+    finally:
+        log_message("Сервер остановлен", 'INFO')
+        audit_log("Сервер остановлен", 'INFO')
+        if SERVER_INSTANCE:
+            SERVER_INSTANCE.server_close()
+            SERVER_INSTANCE = None
+
+    color_print("\n  Сервер остановлен. Возврат в меню.", 'green')
+    time.sleep(1)
+    return
 
 
 def interactive_menu():
@@ -948,15 +1030,17 @@ def interactive_menu():
         color_print("  [8] Список загруженных файлов", 'white')
         color_print("  [9] Сгенерировать новый ПИН", 'white')
         color_print("  [10] Очистить логи", 'white')
+        color_print("  [11] Очистить загруженные файлы (!!!)", 'orange')
         color_print("  [0] Выход", 'white')
         print()
-        color_print("-" * 60, 'cyan')
+        color_print("-" * 45, 'cyan')
         print()
 
         choice = input("  Выберите: ").strip()
 
         if choice == "1":
             run_server()
+            continue
         elif choice == "2":
             show_security_info()
         elif choice == "3":
@@ -977,6 +1061,8 @@ def interactive_menu():
             time.sleep(2)
         elif choice == "10":
             clear_log()
+        elif choice == "11":
+            clear_files()
         elif choice == "0":
             clear_screen()
             color_print("\n  До свидания!", 'cyan')
@@ -996,7 +1082,7 @@ def show_ip():
     color_print(f"  Локальный: http://{ip}:{CONFIG['PORT']}", 'blue')
     color_print(f"  Localhost: http://127.0.0.1:{CONFIG['PORT']}", 'blue')
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     input("\n  Нажмите Enter для продолжения...")
 
 
@@ -1005,14 +1091,16 @@ def open_files_folder():
     print_header()
     color_print("  СПИСОК ЗАГРУЖЕННЫХ ФАЙЛОВ", 'cyan')
     print()
-    color_print(f"  Путь: {FILES_DIR}", 'blue')
+    color_print(f"  Путь: {shorten_path(FILES_DIR)}", 'blue')
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     print()
 
     try:
-        files = [f for f in os.listdir(FILES_DIR)
-                if os.path.isfile(os.path.join(FILES_DIR, f)) and not f.startswith('.')]
+        files = []
+        if os.path.exists(FILES_DIR):
+            files = [f for f in os.listdir(FILES_DIR) 
+                     if os.path.isfile(os.path.join(FILES_DIR, f)) and not f.startswith('.')]
 
         if not files:
             color_print("  Папка пуста. Файлов нет.", 'yellow')
@@ -1027,7 +1115,7 @@ def open_files_folder():
         color_print(f"  Ошибка чтения файлов: {e}", 'red')
 
     print()
-    color_print("-" * 60, 'cyan')
+    color_print("-" * 45, 'cyan')
     input("\n  Нажмите Enter для продолжения...")
 
 
