@@ -25,27 +25,45 @@ def ensure_directories():
                 pass
 
 def color_print(text, color='white'):
-    if not HAVE_CONSOLE:
+    if HAVE_CONSOLE:
+        try:
+            colors = {
+                'white': (1.0, 1.0, 1.0),
+                'red': (1.0, 0.0, 0.0),
+                'green': (0.0, 1.0, 0.0),
+                'yellow': (1.0, 1.0, 0.0),
+                'blue': (0.0, 0.5, 1.0),
+                'cyan': (0.0, 1.0, 1.0),
+                'magenta': (1.0, 0.0, 1.0),
+                'orange': (1.0, 0.5, 0.0),
+                'hotpink': (1.0, 0.0, 0.5),
+            }
+            r, g, b = colors.get(color, (1.0, 1.0, 1.0))
+            console.set_color(r, g, b)
+            print(text)
+            console.set_color(1.0, 1.0, 1.0)
+            return
+        except:
+            pass
+
+    if not sys.stdout.isatty():
         print(text)
         return
-    try:
-        colors = {
-            'white': (1.0, 1.0, 1.0),
-            'red': (1.0, 0.0, 0.0),
-            'green': (0.0, 1.0, 0.0),
-            'yellow': (1.0, 1.0, 0.0),
-            'blue': (0.0, 0.5, 1.0),
-            'cyan': (0.0, 1.0, 1.0),
-            'magenta': (1.0, 0.0, 1.0),
-            'orange': (1.0, 0.5, 0.0),
-            'hotpink': (1.0, 0.0, 0.5),
-        }
-        r, g, b = colors.get(color, (1.0, 1.0, 1.0))
-        console.set_color(r, g, b)
-        print(text)
-        console.set_color(1.0, 1.0, 1.0)
-    except:
-        print(text)
+
+    ansi_colors = {
+        'white': '\033[97m',
+        'red': '\033[91m',
+        'green': '\033[92m',
+        'yellow': '\033[93m',
+        'blue': '\033[94m',
+        'cyan': '\033[96m',
+        'magenta': '\033[95m',
+        'orange': '\033[33m',
+        'hotpink': '\033[95m',
+    }
+    reset = '\033[0m'
+    code = ansi_colors.get(color, '\033[97m')
+    print(f"{code}{text}{reset}")
 
 def log_message(msg, level='INFO'):
     ensure_directories()
