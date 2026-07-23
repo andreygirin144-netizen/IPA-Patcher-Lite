@@ -194,7 +194,7 @@ hex_patcher/
 1. Запусти скрипт:
 `python3 main.py`
 
-### 🖥️ macOS / Linux / Windows
+### 🖥️ macOS / Linux / Windows – Python
 
 ```bash
 git clone https://github.com/andreygirin144-netizen/ipa-patcher.git
@@ -228,7 +228,7 @@ python3 main.py
 1. На a‑Shell mini нет диалоговых окон — все операции выполняются через консоль.
 1. Готовый IPA сохранится в `~/Documents/IPA_Patcher_Patched/`.
 
-### macOS / Linux / Windows
+### Python (macOS / Linux / Windows)
 
 ```bash
 python3 main.py
