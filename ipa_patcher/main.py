@@ -802,8 +802,8 @@ def main():
         console.clear()
     color_print("=== IPA Patcher Lite v1.0.9 ===", 'cyan')
     ipa_path = pick_ipa_file()
-    if not os.path.isfile(ipa_path):
-        color_print("Файл не найден", 'red')
+    if ipa_path is None or not os.path.isfile(ipa_path):
+        color_print("Файл не найден или выбор отменён", 'red')
         sys.exit(1)
     
     temp_dir = make_temp_dir()
@@ -815,7 +815,8 @@ def main():
         color_print("Задержка не требуется", 'green')
     try:
         color_print("\n--- Распаковка ---", 'cyan')
-        extract_ipa_with_progress(ipa_path, temp_dir, delay=delay)
+        extract_ipa_with_progress(ipa_path, temp_dir)
+        print()
         payload_path = os.path.join(temp_dir, "Payload")
         app_dir = find_app_dir(payload_path)
         if not app_dir:
@@ -941,7 +942,8 @@ def main():
         log.info("Сохранение в: %s", output_path)
         
         color_print("\n--- Сборка IPA ---", 'cyan')
-        pack_ipa_with_progress(temp_dir, output_path, delay=delay)
+        pack_ipa_with_progress(temp_dir, output_path)
+        print()
         color_print(f"[SUCCESS] IPA сохранен в: {output_path}", 'green')
         
         if ask_yes_no("\nУстановить IPA через SideStore/AltStore?", default=False):
