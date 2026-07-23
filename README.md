@@ -189,10 +189,10 @@ hex_patcher/
 
 1. Установи a‑Shell mini из App Store.
 Открой a‑Shell mini и перейди в папку Documents:
-cd ~/Documents
+`cd ~/Documents`
 1. Скопируй все файлы проекта в эту папку (например, через iCloud Drive, AirDrop или файловый менеджер).
 1. Запусти скрипт:
-python3 main.py
+`python3 main.py`
 
 ### 🖥️ macOS / Linux / Windows
 
@@ -222,11 +222,11 @@ python3 main.py
 ### a-Shell mini (iOS/iPadOS)
 
 1. Открой a‑Shell mini, перейди в папку с проектом и запусти:
-python3 main.py
-1. Введи полный путь к .ipa файлу вручную (или предварительно скопируй его в ~/Documents/ipa_patcher/tmp/).
+`python3 main.py`
+1. Введи полный путь к .ipa файлу вручную (или предварительно скопируй его в `~/Documents/ipa_patcher/tmp/`).
 1. Пройди по пунктам меню, используя цифровые клавиши и ввод.
 1. На a‑Shell mini нет диалоговых окон — все операции выполняются через консоль.
-1. Готовый IPA сохранится в ~/Documents/IPA_Patcher_Patched/.
+1. Готовый IPA сохранится в `~/Documents/IPA_Patcher_Patched/`.
 
 ### macOS / Linux / Windows
 
