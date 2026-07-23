@@ -630,26 +630,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         if new_bundle_id and new_bundle_id != old_bundle_id:
                             changes["bundle_id"] = new_bundle_id
                             changes["bundle_deep"] = deep_bundle_mode
-                        
-                        new_version = plist_data.get("CFBundleShortVersionString")
-                        if new_version and new_version != old_version:
-                            changes["version"] = new_version
-                            changes["version_deep"] = deep_version_mode
-                        
-                        new_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
-                        if new_name and new_name != old_name:
-                            changes["name"] = new_name
-                        
-                        new_build_val = plist_data.get("CFBundleVersion")
-                        if new_build_val and new_build_val != old_build:
-                            changes["build"] = new_build_val
-                        
-                        new_min_os = plist_data.get("MinimumOSVersion")
-                        if new_min_os and new_min_os != old_min_os:
-                            changes["min_os"] = new_min_os
-                        
-                        if changes.get("bundle_id"):
-                            color_print("\nВыберите способ замены Bundle ID:", 'cyan')
+                            color_print(f"\nОбнаружено изменение Bundle ID: {old_bundle_id} -> {new_bundle_id}", 'cyan')
                             print("1. Только Info.plist (безопасно)")
                             print("2. Глубокая замена (во всех файлах)")
                             mode = ask_input("Ваш выбор", "1")
@@ -662,8 +643,11 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                                 changes["bundle_deep"] = False
                                 color_print("Выбрана замена только в Info.plist", 'yellow')
                         
-                        if changes.get("version"):
-                            color_print("\nВыберите способ замены версии:", 'cyan')
+                        new_version = plist_data.get("CFBundleShortVersionString")
+                        if new_version and new_version != old_version:
+                            changes["version"] = new_version
+                            changes["version_deep"] = deep_version_mode
+                            color_print(f"\nОбнаружено изменение версии: {old_version} -> {new_version}", 'cyan')
                             print("1. Только Info.plist (безопасно)")
                             print("2. Глубокая замена (во всех файлах)")
                             mode = ask_input("Ваш выбор", "1")
@@ -675,6 +659,18 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                                 deep_version_mode = False
                                 changes["version_deep"] = False
                                 color_print("Выбрана замена только в Info.plist", 'yellow')
+                        
+                        new_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
+                        if new_name and new_name != old_name:
+                            changes["name"] = new_name
+                        
+                        new_build_val = plist_data.get("CFBundleVersion")
+                        if new_build_val and new_build_val != old_build:
+                            changes["build"] = new_build_val
+                        
+                        new_min_os = plist_data.get("MinimumOSVersion")
+                        if new_min_os and new_min_os != old_min_os:
+                            changes["min_os"] = new_min_os
                         
                         color_print("Info.plist обновлен из JSON.", 'green')
                     else:
