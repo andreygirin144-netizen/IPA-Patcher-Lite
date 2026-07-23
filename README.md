@@ -6,7 +6,7 @@
 
 [![Python 3.6+](https://img.shields.io/badge/Python-3.6+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Pythonista 3.4](https://img.shields.io/badge/Pythonista-3.4-FF6B35?style=flat-square)](http://omz-software.com/pythonista/)
-[![a-Shell mini](https://img.shields.io/badge/a-Shell mini-FF6B35?style=flat-square)]()
+[![a-shell mini](https://img.shields.io/badge/a--shell-mini-FF8C00?style=flat-square)](https://github.com/holzschu/a-shell)
 [![Platform](https://img.shields.io/badge/Platform-iOS/iPadOS%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)]()
 [![No Dependencies](https://img.shields.io/badge/Зависимости-0-22C55E?style=flat-square)]()
 [![Version](https://img.shields.io/badge/Версия-1.0.9-blue?style=flat-square)](https://apps.apple.com/us/app/a-shell-mini/id1543537943?l=ru)
