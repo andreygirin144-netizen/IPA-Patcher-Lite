@@ -209,7 +209,7 @@ python3 main.py
 1. Готовый файл появится в `~/Documents/IPA_Patcher_Patched/`.
 1. Ответь “да” на вопрос об установке через SideStore/AltStore — откроется системный Share Sheet, либо позже поделись файлом вручную.
 
-### macOS / Linux
+### macOS / Linux / Windows
 
 ```bash
 python3 main.py
