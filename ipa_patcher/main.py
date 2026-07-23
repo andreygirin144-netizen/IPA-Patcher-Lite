@@ -605,75 +605,75 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 if not new_json or not new_json.strip():
                     color_print("Файл не содержит JSON данных. Изменений не внесено.", 'yellow')
                     continue
-                if new_json.strip() != current_json.strip():
-                    new_data = json.loads(new_json)
-                    if isinstance(new_data, dict):
-                        old_bundle_id = plist_data.get("CFBundleIdentifier")
-                        old_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
-                        old_version = plist_data.get("CFBundleShortVersionString")
-                        old_build = plist_data.get("CFBundleVersion")
-                        old_min_os = plist_data.get("MinimumOSVersion")
-                        
-                        plist_data.clear()
-                        plist_data.update(new_data)
-                        modified = True
-                        changes["custom_edit"] = True
-                        
-                        info_plist_path = os.path.join(app_dir, "Info.plist")
-                        save_plist(plist_data, info_plist_path)
-                        color_print("[INFO] Info.plist сохранен на диск.", 'green')
-                        
-                        new_bundle_id = plist_data.get("CFBundleIdentifier")
-                        if new_bundle_id and new_bundle_id != old_bundle_id:
-                            changes["bundle_id"] = new_bundle_id
-                            changes["bundle_deep"] = deep_bundle_mode
-                            color_print(f"\nОбнаружено изменение Bundle ID: {old_bundle_id} -> {new_bundle_id}", 'cyan')
-                            print("1. Только Info.plist (безопасно)")
-                            print("2. Глубокая замена (во всех файлах)")
-                            mode = ask_input("Ваш выбор", "1")
-                            if mode == "2":
-                                deep_bundle_mode = True
-                                changes["bundle_deep"] = True
-                                color_print("Выбрана глубокая замена Bundle ID", 'yellow')
-                            else:
-                                deep_bundle_mode = False
-                                changes["bundle_deep"] = False
-                                color_print("Выбрана замена только в Info.plist", 'yellow')
-                        
-                        new_version = plist_data.get("CFBundleShortVersionString")
-                        if new_version and new_version != old_version:
-                            changes["version"] = new_version
-                            changes["version_deep"] = deep_version_mode
-                            color_print(f"\nОбнаружено изменение версии: {old_version} -> {new_version}", 'cyan')
-                            print("1. Только Info.plist (безопасно)")
-                            print("2. Глубокая замена (во всех файлах)")
-                            mode = ask_input("Ваш выбор", "1")
-                            if mode == "2":
-                                deep_version_mode = True
-                                changes["version_deep"] = True
-                                color_print("Выбрана глубокая замена версии", 'yellow')
-                            else:
-                                deep_version_mode = False
-                                changes["version_deep"] = False
-                                color_print("Выбрана замена только в Info.plist", 'yellow')
-                        
-                        new_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
-                        if new_name and new_name != old_name:
-                            changes["name"] = new_name
-                        
-                        new_build_val = plist_data.get("CFBundleVersion")
-                        if new_build_val and new_build_val != old_build:
-                            changes["build"] = new_build_val
-                        
-                        new_min_os = plist_data.get("MinimumOSVersion")
-                        if new_min_os and new_min_os != old_min_os:
-                            changes["min_os"] = new_min_os
-                        
-                        color_print("Info.plist обновлен из JSON.", 'green')
-                    else:
-                        color_print("Ошибка: JSON должен быть объектом (словарем).", 'red')
+                
+                # Полная замена plist на JSON
+                new_data = json.loads(new_json)
+                if isinstance(new_data, dict):
+                    old_bundle_id = plist_data.get("CFBundleIdentifier")
+                    old_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
+                    old_version = plist_data.get("CFBundleShortVersionString")
+                    old_build = plist_data.get("CFBundleVersion")
+                    old_min_os = plist_data.get("MinimumOSVersion")
+                    
+                    # Полностью заменяем plist
+                    plist_data.clear()
+                    plist_data.update(new_data)
+                    modified = True
+                    changes["custom_edit"] = True
+                    
+                    info_plist_path = os.path.join(app_dir, "Info.plist")
+                    save_plist(plist_data, info_plist_path)
+                    color_print("[INFO] Info.plist полностью обновлен из JSON.", 'green')
+                    
+                    new_bundle_id = plist_data.get("CFBundleIdentifier")
+                    if new_bundle_id and new_bundle_id != old_bundle_id:
+                        changes["bundle_id"] = new_bundle_id
+                        changes["bundle_deep"] = deep_bundle_mode
+                        color_print(f"\nОбнаружено изменение Bundle ID: {old_bundle_id} -> {new_bundle_id}", 'cyan')
+                        print("1. Только Info.plist (безопасно)")
+                        print("2. Глубокая замена (во всех файлах)")
+                        mode = ask_input("Ваш выбор", "1")
+                        if mode == "2":
+                            deep_bundle_mode = True
+                            changes["bundle_deep"] = True
+                            color_print("Выбрана глубокая замена Bundle ID", 'yellow')
+                        else:
+                            deep_bundle_mode = False
+                            changes["bundle_deep"] = False
+                            color_print("Выбрана замена только в Info.plist", 'yellow')
+                    
+                    new_version = plist_data.get("CFBundleShortVersionString")
+                    if new_version and new_version != old_version:
+                        changes["version"] = new_version
+                        changes["version_deep"] = deep_version_mode
+                        color_print(f"\nОбнаружено изменение версии: {old_version} -> {new_version}", 'cyan')
+                        print("1. Только Info.plist (безопасно)")
+                        print("2. Глубокая замена (во всех файлах)")
+                        mode = ask_input("Ваш выбор", "1")
+                        if mode == "2":
+                            deep_version_mode = True
+                            changes["version_deep"] = True
+                            color_print("Выбрана глубокая замена версии", 'yellow')
+                        else:
+                            deep_version_mode = False
+                            changes["version_deep"] = False
+                            color_print("Выбрана замена только в Info.plist", 'yellow')
+                    
+                    new_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
+                    if new_name and new_name != old_name:
+                        changes["name"] = new_name
+                    
+                    new_build_val = plist_data.get("CFBundleVersion")
+                    if new_build_val and new_build_val != old_build:
+                        changes["build"] = new_build_val
+                    
+                    new_min_os = plist_data.get("MinimumOSVersion")
+                    if new_min_os and new_min_os != old_min_os:
+                        changes["min_os"] = new_min_os
+                    
+                    color_print("Info.plist полностью обновлен из JSON.", 'green')
                 else:
-                    color_print("Изменений в JSON не обнаружено.", 'yellow')
+                    color_print("Ошибка: JSON должен быть объектом (словарем).", 'red')
             except json.JSONDecodeError as e:
                 color_print(f"Ошибка парсинга JSON: {e}", 'red')
             except Exception as e:
