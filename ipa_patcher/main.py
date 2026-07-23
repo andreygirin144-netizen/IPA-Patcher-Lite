@@ -41,7 +41,7 @@ except ImportError:
 try:
     import editor
     HAVE_EDITOR = True
-except ImportError:
+except (ImportError, AttributeError):
     HAVE_EDITOR = False
 
 try:
@@ -954,18 +954,13 @@ def main():
                 color_print(msg, 'red')
         
     finally:
-        tmp_dir = os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "tmp")
-        if os.path.exists(tmp_dir):
+        tmp_root = os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "tmp")
+        if os.path.exists(tmp_root):
             try:
-                for item in os.listdir(tmp_dir):
-                    item_path = os.path.join(tmp_dir, item)
-                    if os.path.isdir(item_path):
-                        shutil.rmtree(item_path)
-                    else:
-                        os.remove(item_path)
-                color_print("[INFO] Временные папки внутри tmp удалены", 'green')
+                shutil.rmtree(tmp_root)
+                color_print("[INFO] Папка tmp полностью удалена", 'green')
             except Exception as e:
-                color_print(f"[WARN] Не удалось очистить tmp: {e}", 'yellow')
+                color_print(f"[WARN] Не удалось удалить папку tmp: {e}", 'yellow')
         if os.path.exists(UNDO_LOG_FILE):
             try:
                 os.remove(UNDO_LOG_FILE)
