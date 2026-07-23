@@ -38,17 +38,19 @@ def sign_app_bundle_with_path(ipa_path, bundle_id):
         return False, "IPA не найден"
 
     color_print(f"[INFO] Сборка подготовлена: {os.path.basename(ipa_path)}", 'green')
-    color_print("[INFO] Вызываю системное меню iOS Share Sheet...", 'blue')
-    color_print("[INFO] Выберите 'SideStore' или 'AltStore' в появившемся списке приложений.", 'yellow')
     
     try:
         import console
-        console.open_in(ipa_path)
-        log_message("Системное меню Share Sheet успешно запущено", 'INFO')
-        return True, "Share Sheet открыт"
-    except ImportError:
-        color_print("[WARN] Скрипт запущен вне Pythonista iOS. Прямой импорт невозможен.", 'yellow')
-        return True, "Консольный режим: файл сохранен на диск"
+        if hasattr(console, 'open_in'):
+            console.open_in(ipa_path)
+            log_message("Системное меню Share Sheet успешно запущено", 'INFO')
+            return True, "Share Sheet открыт"
+        else:
+            raise ImportError
+    except (ImportError, AttributeError):
+        color_print("[INFO] Файл сохранён на диск. Используйте файловый менеджер для установки.", 'green')
+        log_message("Консольный режим: файл сохранён на диск", 'INFO')
+        return True, "Консольный режим: файл сохранён на диск"
     except Exception as e:
         log_message(f"Share Sheet error: {e}", 'ERROR')
         color_print(f"[ERROR] Ошибка вызова Share Sheet: {e}", 'red')
