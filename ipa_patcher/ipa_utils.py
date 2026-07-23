@@ -13,16 +13,19 @@ except ImportError:
     PYTHONISTA = False
 
 def get_tmp_dir():
-    docs = os.path.expanduser("~/Documents")
-    base = os.path.join(docs, "ipa_patcher")
-    if not os.path.exists(base):
-        os.makedirs(base, exist_ok=True)
-    tmp = os.path.join(base, "tmp")
-    os.makedirs(tmp, exist_ok=True)
-    return tmp
+    if not PYTHONISTA and sys.platform != 'win32' and sys.platform != 'darwin' and sys.platform != 'linux':
+        docs = os.path.expanduser("~/Documents")
+        base = os.path.join(docs, "ipa_patcher")
+        if not os.path.exists(base):
+            os.makedirs(base, exist_ok=True)
+        tmp = os.path.join(base, "tmp")
+        os.makedirs(tmp, exist_ok=True)
+        return tmp
+    else:
+        return tempfile.gettempdir()
 
 class ProgressBar:
-    def __init__(self, total, description="Progress", width=50):
+    def __init__(self, total, description="Progress", width=30):
         self.total = total
         self.description = description
         self.width = width
@@ -37,27 +40,25 @@ class ProgressBar:
         if percent != self.last_percent:
             self.last_percent = percent
             filled = int(self.width * percent / 100)
-            bar = '[' + '=' * filled + '>' + '.' * (self.width - filled - 1) + ']'
+            bar = '[' + '#' * filled + '-' * (self.width - filled) + ']'
             sys.stdout.write(f'\r{self.description}: {bar} {percent}%')
             sys.stdout.flush()
-            if percent == 100:
-                sys.stdout.write('\n')
 
     def close(self):
-        pass
+        if self.last_percent < 100 and self.total > 0:
+            self.update(0)
+        sys.stdout.write('\n')
 
-def extract_ipa_with_progress(ipa_path, dest_dir, delay=0.005):
+def extract_ipa_with_progress(ipa_path, dest_dir):
     with zipfile.ZipFile(ipa_path, 'r') as zf:
         files = zf.infolist()
         pb = ProgressBar(len(files), 'Распаковка')
         for member in files:
             zf.extract(member, dest_dir)
             pb.update()
-            if delay > 0:
-                time.sleep(delay)
         pb.close()
 
-def pack_ipa_with_progress(source_dir, output_path, delay=0.005):
+def pack_ipa_with_progress(source_dir, output_path):
     file_list = []
     for root, _, files in os.walk(source_dir):
         for f in files:
@@ -74,8 +75,6 @@ def pack_ipa_with_progress(source_dir, output_path, delay=0.005):
             with open(full, 'rb') as fh:
                 zf.writestr(info, fh.read())
             pb.update()
-            if delay > 0:
-                time.sleep(delay)
     pb.close()
 
 def make_temp_dir():
@@ -94,6 +93,8 @@ def find_app_dir(payload_path):
     return None
 
 def smart_find_in_tmp(extensions):
+    if PYTHONISTA or sys.platform in ('win32', 'darwin', 'linux'):
+        return []
     tmp_dir = get_tmp_dir()
     found = []
     if not os.path.isdir(tmp_dir):
@@ -113,6 +114,8 @@ def pick_ipa_file():
             path = dialogs.pick_document(types=["public.data"])
         except:
             path = None
+        if path is None:
+            return None
         if path:
             if not path.lower().endswith('.ipa'):
                 print("Ошибка: нужен .ipa файл.")
@@ -149,6 +152,8 @@ def pick_tweak_file():
             path = dialogs.pick_document(types=["public.data", "public.zip", "com.apple.dylib"])
         except:
             path = None
+        if path is None:
+            return None
         if path:
             ext = os.path.splitext(path)[1].lower()
             if ext not in ('.dylib', '.zip', '.deb', '.tar', '.lzma', '.xz', '.gz', '.tgz'):
@@ -186,6 +191,8 @@ def pick_icon_file():
             path = dialogs.pick_document(types=["public.png"])
         except:
             path = None
+        if path is None:
+            return None
         if path:
             if not path.lower().endswith('.png'):
                 print("Ошибка: нужен PNG файл.")
@@ -222,6 +229,8 @@ def pick_substrate_file():
             path = dialogs.pick_document(types=["com.apple.dylib"])
         except:
             path = None
+        if path is None:
+            return None
         if path:
             if not path.lower().endswith('.dylib'):
                 print("Ошибка: нужен .dylib файл.")
@@ -258,6 +267,8 @@ def pick_cert_zip():
             path = dialogs.pick_document(types=["public.zip"])
         except:
             path = None
+        if path is None:
+            return None
         if path:
             if not path.lower().endswith('.zip'):
                 print("Ошибка: нужен .zip архив.")
