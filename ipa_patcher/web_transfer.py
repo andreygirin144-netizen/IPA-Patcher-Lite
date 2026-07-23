@@ -38,7 +38,7 @@ CONFIG = {
     'MAX_CONNECTIONS': 10,
 }
 
-VERSION = '1.0.7'
+VERSION = '1.0.9'
 
 DOCS_DIR = os.path.expanduser('~/Documents')
 FILES_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Files')
