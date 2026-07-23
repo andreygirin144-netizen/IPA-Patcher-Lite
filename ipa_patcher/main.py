@@ -39,12 +39,6 @@ except ImportError:
     PYTHONISTA = False
 
 try:
-    import editor
-    HAVE_EDITOR = True
-except (ImportError, AttributeError):
-    HAVE_EDITOR = False
-
-try:
     from PIL import Image
     HAVE_PIL = True
 except ImportError:
@@ -507,11 +501,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         for file in files:
                             f.write(f"{rel_root}{file}\n")
                 color_print(f"Список файлов создан: {list_path}", 'blue')
-                if HAVE_EDITOR:
-                    editor.open_file(list_path)
-                    color_print("Редактор открыт. Закройте вкладку и нажмите Enter в консоли.", 'blue')
-                else:
-                    color_print("Откройте файл в текстовом редакторе.", 'yellow')
+                color_print("Откройте файл в любом текстовом редакторе.", 'yellow')
                 input("Нажмите Enter после просмотра...")
             except Exception as e:
                 color_print(f"Ошибка создания списка: {e}", 'red')
