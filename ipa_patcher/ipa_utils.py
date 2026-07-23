@@ -13,16 +13,13 @@ except ImportError:
     PYTHONISTA = False
 
 def get_tmp_dir():
-    if not PYTHONISTA and sys.platform != 'win32' and sys.platform != 'darwin' and sys.platform != 'linux':
-        docs = os.path.expanduser("~/Documents")
-        base = os.path.join(docs, "ipa_patcher")
-        if not os.path.exists(base):
-            os.makedirs(base, exist_ok=True)
-        tmp = os.path.join(base, "tmp")
-        os.makedirs(tmp, exist_ok=True)
-        return tmp
-    else:
-        return tempfile.gettempdir()
+    docs = os.path.expanduser("~/Documents")
+    base = os.path.join(docs, "ipa_patcher")
+    if not os.path.exists(base):
+        os.makedirs(base, exist_ok=True)
+    tmp = os.path.join(base, "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    return tmp
 
 class ProgressBar:
     def __init__(self, total, description="Progress", width=30):
@@ -79,7 +76,7 @@ def pack_ipa_with_progress(source_dir, output_path):
 
 def make_temp_dir():
     docs = os.path.expanduser("~/Documents")
-    base = os.path.join(docs, "ipa_patcher")
+    base = os.path.join(docs, "ipa_patcher", "tmp")
     if not os.path.exists(base):
         os.makedirs(base, exist_ok=True)
     return tempfile.mkdtemp(prefix="ipa_patch_", dir=base)
@@ -93,8 +90,6 @@ def find_app_dir(payload_path):
     return None
 
 def smart_find_in_tmp(extensions):
-    if PYTHONISTA or sys.platform in ('win32', 'darwin', 'linux'):
-        return []
     tmp_dir = get_tmp_dir()
     found = []
     if not os.path.isdir(tmp_dir):
@@ -114,8 +109,6 @@ def pick_ipa_file():
             path = dialogs.pick_document(types=["public.data"])
         except:
             path = None
-        if path is None:
-            return None
         if path:
             if not path.lower().endswith('.ipa'):
                 print("Ошибка: нужен .ipa файл.")
@@ -152,8 +145,6 @@ def pick_tweak_file():
             path = dialogs.pick_document(types=["public.data", "public.zip", "com.apple.dylib"])
         except:
             path = None
-        if path is None:
-            return None
         if path:
             ext = os.path.splitext(path)[1].lower()
             if ext not in ('.dylib', '.zip', '.deb', '.tar', '.lzma', '.xz', '.gz', '.tgz'):
@@ -191,8 +182,6 @@ def pick_icon_file():
             path = dialogs.pick_document(types=["public.png"])
         except:
             path = None
-        if path is None:
-            return None
         if path:
             if not path.lower().endswith('.png'):
                 print("Ошибка: нужен PNG файл.")
@@ -229,8 +218,6 @@ def pick_substrate_file():
             path = dialogs.pick_document(types=["com.apple.dylib"])
         except:
             path = None
-        if path is None:
-            return None
         if path:
             if not path.lower().endswith('.dylib'):
                 print("Ошибка: нужен .dylib файл.")
@@ -267,8 +254,6 @@ def pick_cert_zip():
             path = dialogs.pick_document(types=["public.zip"])
         except:
             path = None
-        if path is None:
-            return None
         if path:
             if not path.lower().endswith('.zip'):
                 print("Ошибка: нужен .zip архив.")
