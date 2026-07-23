@@ -954,13 +954,18 @@ def main():
                 color_print(msg, 'red')
         
     finally:
-        ipa_patcher_root = os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher")
-        if os.path.exists(ipa_patcher_root):
+        tmp_dir = os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "tmp")
+        if os.path.exists(tmp_dir):
             try:
-                shutil.rmtree(ipa_patcher_root)
-                color_print("[INFO] Папка ipa_patcher полностью удалена", 'green')
+                for item in os.listdir(tmp_dir):
+                    item_path = os.path.join(tmp_dir, item)
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                    else:
+                        os.remove(item_path)
+                color_print("[INFO] Временные папки внутри tmp удалены", 'green')
             except Exception as e:
-                color_print(f"[WARN] Не удалось удалить папку ipa_patcher: {e}", 'yellow')
+                color_print(f"[WARN] Не удалось очистить tmp: {e}", 'yellow')
         if os.path.exists(UNDO_LOG_FILE):
             try:
                 os.remove(UNDO_LOG_FILE)
