@@ -2,7 +2,7 @@
 
 # ⚙️ IPA Patcher Lite
 
-### Патчер iOS `.ipa`-файлов на чистом Python — без компилятора, без внешних зависимостей, прямо на iPhone/iPad
+### Патчер iOS `.ipa`-файлов на чистом Python — без компилятора, без внешних зависимостей, прямо на (iPhone/iPad/macOS), Windows/Linux
 
 [![Python 3.6+](https://img.shields.io/badge/Python-3.6+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Pythonista 3.4](https://img.shields.io/badge/Pythonista-3.4-FF6B35?style=flat-square)](http://omz-software.com/pythonista/)
