@@ -530,7 +530,7 @@ Pythonista 3 и a-Shell mini на iOS/iPadOS, а также нативный Pyt
 - Python 3.6+
 - Стандартная библиотека Python (`zipfile`, `plistlib`, `struct`, `shutil`, `tempfile`, `ctypes`, `http.server`, `mmap`, `tarfile`)
 - **Pillow** (опционально) — для качественного ресайза и оптимизации иконок; без неё используется прямое копирование
-- Для iOS/iPadOS: [Pythonista 3](https://apps.apple.com/app/pythonista-3/id1085978097) или [a-Shell mini](https://apps.apple.com/app/a-shell-mini/id1543537943) (оба — App Store, платные приложения)
+- Для iOS/iPadOS: [Pythonista 3](https://apps.apple.com/app/pythonista-3/id1085978097) или [a-Shell mini](https://apps.apple.com/app/a-shell-mini/id1543537943) (оба из App Store, Pythonista — платное приложение, a-Shell mini — бесплатный)
 - Для macOS/Linux: системная утилита `ar` для распаковки `.deb`-пакетов (обычно уже установлена)
 - Для инъекции твиков: расшифрованный IPA + `libsubstrate.dylib` (опционально, если выбран ручной/авто-режим субстрата)
 - Прямая установка через Share Sheet доступна только в Pythonista на iOS/iPadOS
