@@ -590,12 +590,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 f.write("--- Info.plist (JSON) ---\n")
                 f.write(current_json)
                 f.write("\n--- End ---\n")
-            color_print(f"\nФайл для редактирования: {json_path}", 'blue')
-            if HAVE_EDITOR:
-                editor.open_file(json_path)
-                color_print("Редактор открыт. Отредактируйте файл, закройте вкладку и нажмите Enter в консоли.", 'blue')
-            else:
-                color_print("Откройте файл в текстовом редакторе, отредактируйте и сохраните.", 'yellow')
+            color_print(f"\nФайл для редактирования создан: {json_path}", 'blue')
+            color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
             input("Нажмите Enter после завершения редактирования...")
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
