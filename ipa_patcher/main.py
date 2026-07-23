@@ -606,7 +606,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print("Файл не содержит JSON данных. Изменений не внесено.", 'yellow')
                     continue
                 
-                # Полная замена plist на JSON
+                
                 new_data = json.loads(new_json)
                 if isinstance(new_data, dict):
                     old_bundle_id = plist_data.get("CFBundleIdentifier")
@@ -615,7 +615,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     old_build = plist_data.get("CFBundleVersion")
                     old_min_os = plist_data.get("MinimumOSVersion")
                     
-                    # Полностью заменяем plist
+                    
                     plist_data.clear()
                     plist_data.update(new_data)
                     modified = True
