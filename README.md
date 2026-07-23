@@ -219,6 +219,15 @@ python3 main.py
 1. Готовый файл появится в `~/Documents/IPA_Patcher_Patched/`.
 1. Ответь “да” на вопрос об установке через SideStore/AltStore — откроется системный Share Sheet, либо позже поделись файлом вручную.
 
+### a-Shell mini (iOS/iPadOS)
+
+1. Открой a‑Shell mini, перейди в папку с проектом и запусти:
+python3 main.py
+1. Введи полный путь к .ipa файлу вручную (или предварительно скопируй его в ~/Documents/ipa_patcher/tmp/).
+1. Пройди по пунктам меню, используя цифровые клавиши и ввод.
+1. На a‑Shell mini нет диалоговых окон — все операции выполняются через консоль.
+1. Готовый IPA сохранится в ~/Documents/IPA_Patcher_Patched/.
+
 ### macOS / Linux / Windows
 
 ```bash
