@@ -41,7 +41,8 @@ def sign_app_bundle_with_path(ipa_path, bundle_id):
     
     try:
         import console
-        if hasattr(console, 'open_in'):
+        from ipa_utils import PYTHONISTA
+        if PYTHONISTA and hasattr(console, 'open_in'):
             console.open_in(ipa_path)
             log_message("Системное меню Share Sheet успешно запущено", 'INFO')
             return True, "Share Sheet открыт"
@@ -49,7 +50,6 @@ def sign_app_bundle_with_path(ipa_path, bundle_id):
             raise ImportError
     except (ImportError, AttributeError):
         color_print("[INFO] Файл сохранён на диск. Используйте файловый менеджер для установки.", 'green')
-        log_message("Консольный режим: файл сохранён на диск", 'INFO')
         return True, "Консольный режим: файл сохранён на диск"
     except Exception as e:
         log_message(f"Share Sheet error: {e}", 'ERROR')
