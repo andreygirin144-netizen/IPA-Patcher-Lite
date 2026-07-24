@@ -8,7 +8,7 @@
 [![Python 3.6+](https://img.shields.io/badge/Python-3.6+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Pythonista 3.4](https://img.shields.io/badge/Pythonista-3.4-FF6B35?style=flat-square)](http://omz-software.com/pythonista/)
 [![Platform](https://img.shields.io/badge/Platform-iOS%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)]()
-[![License MIT](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](LICENSE)
+[![License GPLv3](https://img.shields.io/badge/License-GPLv3-red?style=flat-square)](LICENSE)
 
 </div>
 
