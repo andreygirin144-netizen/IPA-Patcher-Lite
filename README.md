@@ -10,7 +10,7 @@
 [![Platform](https://img.shields.io/badge/Platform-iOS/iPadOS%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square)]()
 [![No Dependencies](https://img.shields.io/badge/Зависимости-0-22C55E?style=flat-square)]()
 [![Version](https://img.shields.io/badge/Версия-1.0.9-blue?style=flat-square)]()
-[![License GPLv3](https://img.shields.io/badge/License-GPLv3-blue?style=flat-square)](LICENSE)
+[![License GPLv3](https://img.shields.io/badge/License-GPLv3-red?style=flat-square)](LICENSE)
 
 **Распаковка → редактирование → инъекция твиков → расширенные патчи → пересборка `.ipa` — всё в одном скрипте**
 
