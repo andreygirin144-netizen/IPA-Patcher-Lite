@@ -12,15 +12,6 @@ try:
 except ImportError:
     PYTHONISTA = False
 
-def get_tmp_dir():
-    docs = os.path.expanduser("~/Documents")
-    base = os.path.join(docs, "ipa_patcher")
-    if not os.path.exists(base):
-        os.makedirs(base, exist_ok=True)
-    tmp = os.path.join(base, "tmp")
-    os.makedirs(tmp, exist_ok=True)
-    return tmp
-
 class ProgressBar:
     def __init__(self, total, description="Progress", width=50):
         self.total = total
@@ -90,7 +81,11 @@ def find_app_dir(payload_path):
     return None
 
 def smart_find_in_tmp(extensions):
-    tmp_dir = get_tmp_dir()
+    docs = os.path.expanduser("~/Documents")
+    base = os.path.join(docs, "temp_ipa")
+    if not os.path.exists(base):
+        os.makedirs(base, exist_ok=True)
+    tmp_dir = base
     found = []
     if not os.path.isdir(tmp_dir):
         return found
@@ -117,7 +112,7 @@ def pick_ipa_file():
 
     found = smart_find_in_tmp(['ipa'])
     if found:
-        print("\n--- Доступные IPA в tmp/ ---")
+        print("\n--- Доступные IPA в temp_ipa/ ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -133,7 +128,7 @@ def pick_ipa_file():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В tmp/ не найдено .ipa файлов.")
+        print("В temp_ipa/ не найдено .ipa файлов.")
 
     path = input("Введите полный путь к .ipa: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
@@ -154,7 +149,7 @@ def pick_tweak_file():
 
     found = smart_find_in_tmp(['dylib', 'zip', 'deb', 'tar', 'lzma', 'xz', 'gz', 'tgz'])
     if found:
-        print("\n--- Доступные твики в tmp/ ---")
+        print("\n--- Доступные твики в temp_ipa/ ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -170,7 +165,7 @@ def pick_tweak_file():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В tmp/ не найдено подходящих файлов твиков.")
+        print("В temp_ipa/ не найдено подходящих файлов твиков.")
 
     path = input("Введите полный путь к твику/архиву: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
@@ -190,7 +185,7 @@ def pick_icon_file():
 
     found = smart_find_in_tmp(['png'])
     if found:
-        print("\n--- Доступные PNG в tmp/ ---")
+        print("\n--- Доступные PNG в temp_ipa/ ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -206,7 +201,7 @@ def pick_icon_file():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В tmp/ не найдено PNG файлов.")
+        print("В temp_ipa/ не найдено PNG файлов.")
 
     path = input("Введите полный путь к PNG: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
@@ -226,7 +221,7 @@ def pick_substrate_file():
 
     found = smart_find_in_tmp(['dylib'])
     if found:
-        print("\n--- Доступные libsubstrate в tmp/ ---")
+        print("\n--- Доступные libsubstrate в temp_ipa/ ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -242,7 +237,7 @@ def pick_substrate_file():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В tmp/ не найдено .dylib для субстрата.")
+        print("В temp_ipa/ не найдено .dylib для субстрата.")
 
     path = input("Введите полный путь к libsubstrate.dylib: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
@@ -262,7 +257,7 @@ def pick_cert_zip():
 
     found = smart_find_in_tmp(['zip'])
     if found:
-        print("\n--- Доступные сертификаты в tmp/ ---")
+        print("\n--- Доступные сертификаты в temp_ipa/ ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -278,7 +273,7 @@ def pick_cert_zip():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В tmp/ не найдено .zip архивов.")
+        print("В temp_ipa/ не найдено .zip архивов.")
 
     path = input("Введите полный путь к .zip архиву с сертификатом: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
