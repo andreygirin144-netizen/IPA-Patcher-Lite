@@ -11,7 +11,7 @@ import plistlib
 from constants import UNWANTED_DIRS, PatchConfig
 from ipa_utils import (
     pick_ipa_file,
-    make_temp_dir,
+    make_temp_ipa_dir,
     extract_ipa_with_progress,
     pack_ipa_with_progress,
     find_app_dir,
@@ -501,7 +501,18 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         for file in files:
                             f.write(f"{rel_root}{file}\n")
                 color_print(f"Список файлов создан: {list_path}", 'blue')
-                color_print("Откройте файл в любом текстовом редакторе.", 'yellow')
+                if PYTHONISTA:
+                    try:
+                        import editor
+                        if hasattr(editor, 'open_file'):
+                            editor.open_file(list_path)
+                            color_print("Редактор открыт. Закройте вкладку и нажмите Enter в консоли.", 'blue')
+                        else:
+                            color_print("Откройте файл в текстовом редакторе.", 'yellow')
+                    except:
+                        color_print("Откройте файл в текстовом редакторе.", 'yellow')
+                else:
+                    color_print("Откройте файл в текстовом редакторе.", 'yellow')
                 input("Нажмите Enter после просмотра...")
             except Exception as e:
                 color_print(f"Ошибка создания списка: {e}", 'red')
@@ -588,7 +599,18 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 f.write(current_json)
                 f.write("\n--- End ---\n")
             color_print(f"\nФайл для редактирования создан: {json_path}", 'blue')
-            color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
+            if PYTHONISTA:
+                try:
+                    import editor
+                    if hasattr(editor, 'open_file'):
+                        editor.open_file(json_path)
+                        color_print("Редактор открыт. Закройте вкладку и нажмите Enter в консоли.", 'blue')
+                    else:
+                        color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
+                except:
+                    color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
+            else:
+                color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
             input("Нажмите Enter после завершения редактирования...")
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
@@ -605,75 +627,75 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 if not new_json or not new_json.strip():
                     color_print("Файл не содержит JSON данных. Изменений не внесено.", 'yellow')
                     continue
-                
-                
-                new_data = json.loads(new_json)
-                if isinstance(new_data, dict):
-                    old_bundle_id = plist_data.get("CFBundleIdentifier")
-                    old_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
-                    old_version = plist_data.get("CFBundleShortVersionString")
-                    old_build = plist_data.get("CFBundleVersion")
-                    old_min_os = plist_data.get("MinimumOSVersion")
-                    
-                    
-                    plist_data.clear()
-                    plist_data.update(new_data)
-                    modified = True
-                    changes["custom_edit"] = True
-                    
-                    info_plist_path = os.path.join(app_dir, "Info.plist")
-                    save_plist(plist_data, info_plist_path)
-                    color_print("[INFO] Info.plist полностью обновлен из JSON.", 'green')
-                    
-                    new_bundle_id = plist_data.get("CFBundleIdentifier")
-                    if new_bundle_id and new_bundle_id != old_bundle_id:
-                        changes["bundle_id"] = new_bundle_id
-                        changes["bundle_deep"] = deep_bundle_mode
-                        color_print(f"\nОбнаружено изменение Bundle ID: {old_bundle_id} -> {new_bundle_id}", 'cyan')
-                        print("1. Только Info.plist (безопасно)")
-                        print("2. Глубокая замена (во всех файлах)")
-                        mode = ask_input("Ваш выбор", "1")
-                        if mode == "2":
-                            deep_bundle_mode = True
-                            changes["bundle_deep"] = True
-                            color_print("Выбрана глубокая замена Bundle ID", 'yellow')
-                        else:
-                            deep_bundle_mode = False
-                            changes["bundle_deep"] = False
-                            color_print("Выбрана замена только в Info.plist", 'yellow')
-                    
-                    new_version = plist_data.get("CFBundleShortVersionString")
-                    if new_version and new_version != old_version:
-                        changes["version"] = new_version
-                        changes["version_deep"] = deep_version_mode
-                        color_print(f"\nОбнаружено изменение версии: {old_version} -> {new_version}", 'cyan')
-                        print("1. Только Info.plist (безопасно)")
-                        print("2. Глубокая замена (во всех файлах)")
-                        mode = ask_input("Ваш выбор", "1")
-                        if mode == "2":
-                            deep_version_mode = True
-                            changes["version_deep"] = True
-                            color_print("Выбрана глубокая замена версии", 'yellow')
-                        else:
-                            deep_version_mode = False
-                            changes["version_deep"] = False
-                            color_print("Выбрана замена только в Info.plist", 'yellow')
-                    
-                    new_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
-                    if new_name and new_name != old_name:
-                        changes["name"] = new_name
-                    
-                    new_build_val = plist_data.get("CFBundleVersion")
-                    if new_build_val and new_build_val != old_build:
-                        changes["build"] = new_build_val
-                    
-                    new_min_os = plist_data.get("MinimumOSVersion")
-                    if new_min_os and new_min_os != old_min_os:
-                        changes["min_os"] = new_min_os
-                    
-                    color_print("Info.plist полностью обновлен из JSON.", 'green')
+                if new_json.strip() != current_json.strip():
+                    new_data = json.loads(new_json)
+                    if isinstance(new_data, dict):
+                        old_bundle_id = plist_data.get("CFBundleIdentifier")
+                        old_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
+                        old_version = plist_data.get("CFBundleShortVersionString")
+                        old_build = plist_data.get("CFBundleVersion")
+                        old_min_os = plist_data.get("MinimumOSVersion")
+                        
+                        plist_data.clear()
+                        plist_data.update(new_data)
+                        modified = True
+                        changes["custom_edit"] = True
+                        
+                        info_plist_path = os.path.join(app_dir, "Info.plist")
+                        save_plist(plist_data, info_plist_path)
+                        color_print("[INFO] Info.plist сохранен на диск.", 'green')
+                        
+                        new_bundle_id = plist_data.get("CFBundleIdentifier")
+                        if new_bundle_id and new_bundle_id != old_bundle_id:
+                            changes["bundle_id"] = new_bundle_id
+                            changes["bundle_deep"] = deep_bundle_mode
+                            color_print(f"\nОбнаружено изменение Bundle ID: {old_bundle_id} -> {new_bundle_id}", 'cyan')
+                            print("1. Только Info.plist (безопасно)")
+                            print("2. Глубокая замена (во всех файлах)")
+                            mode = ask_input("Ваш выбор", "1")
+                            if mode == "2":
+                                deep_bundle_mode = True
+                                changes["bundle_deep"] = True
+                                color_print("Выбрана глубокая замена Bundle ID", 'yellow')
+                            else:
+                                deep_bundle_mode = False
+                                changes["bundle_deep"] = False
+                                color_print("Выбрана замена только в Info.plist", 'yellow')
+                        
+                        new_version = plist_data.get("CFBundleShortVersionString")
+                        if new_version and new_version != old_version:
+                            changes["version"] = new_version
+                            changes["version_deep"] = deep_version_mode
+                            color_print(f"\nОбнаружено изменение версии: {old_version} -> {new_version}", 'cyan')
+                            print("1. Только Info.plist (безопасно)")
+                            print("2. Глубокая замена (во всех файлах)")
+                            mode = ask_input("Ваш выбор", "1")
+                            if mode == "2":
+                                deep_version_mode = True
+                                changes["version_deep"] = True
+                                color_print("Выбрана глубокая замена версии", 'yellow')
+                            else:
+                                deep_version_mode = False
+                                changes["version_deep"] = False
+                                color_print("Выбрана замена только в Info.plist", 'yellow')
+                        
+                        new_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName")
+                        if new_name and new_name != old_name:
+                            changes["name"] = new_name
+                        
+                        new_build_val = plist_data.get("CFBundleVersion")
+                        if new_build_val and new_build_val != old_build:
+                            changes["build"] = new_build_val
+                        
+                        new_min_os = plist_data.get("MinimumOSVersion")
+                        if new_min_os and new_min_os != old_min_os:
+                            changes["min_os"] = new_min_os
+                        
+                        color_print("Info.plist обновлен из JSON.", 'green')
+                    else:
+                        color_print("Ошибка: JSON должен быть объектом (словарем).", 'red')
                 else:
-                    color_print("Ошибка: JSON должен быть объектом (словарем).", 'red')
+                    color_print("Изменений в JSON не обнаружено.", 'yellow')
             except json.JSONDecodeError as e:
                 color_print(f"Ошибка парсинга JSON: {e}", 'red')
             except Exception as e:
@@ -795,7 +817,7 @@ def main():
         color_print("Файл не найден или выбор отменён", 'red')
         sys.exit(1)
     
-    temp_dir = make_temp_dir()
+    temp_dir = make_temp_ipa_dir()
     log.info("Временная папка: %s", temp_dir)
     delay = get_adaptive_delay(ipa_path)
     if delay > 0:
@@ -943,13 +965,13 @@ def main():
                 color_print(msg, 'red')
         
     finally:
-        tmp_root = os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "tmp")
-        if os.path.exists(tmp_root):
+        temp_ipa_root = os.path.join(os.path.expanduser("~/Documents"), "temp_ipa")
+        if os.path.exists(temp_ipa_root):
             try:
-                shutil.rmtree(tmp_root)
-                color_print("[INFO] Папка tmp полностью удалена", 'green')
+                shutil.rmtree(temp_ipa_root)
+                color_print("[INFO] Папка temp_ipa полностью удалена", 'green')
             except Exception as e:
-                color_print(f"[WARN] Не удалось удалить папку tmp: {e}", 'yellow')
+                color_print(f"[WARN] Не удалось удалить папку temp_ipa: {e}", 'yellow')
         if os.path.exists(UNDO_LOG_FILE):
             try:
                 os.remove(UNDO_LOG_FILE)
