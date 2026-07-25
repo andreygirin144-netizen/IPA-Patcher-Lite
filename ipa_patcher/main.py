@@ -11,6 +11,7 @@ import plistlib
 from constants import UNWANTED_DIRS, PatchConfig
 from ipa_utils import (
     pick_ipa_file,
+    get_platform_temp_dir,
     make_temp_ipa_dir,
     extract_ipa_with_progress,
     pack_ipa_with_progress,
@@ -965,13 +966,19 @@ def main():
                 color_print(msg, 'red')
         
     finally:
-        temp_ipa_root = os.path.join(os.path.expanduser("~/Documents"), "temp_ipa")
-        if os.path.exists(temp_ipa_root):
+        temp_root = get_platform_temp_dir()
+        if os.path.exists(temp_root):
             try:
-                shutil.rmtree(temp_ipa_root)
-                color_print("[INFO] Папка temp_ipa полностью удалена", 'green')
+                for item in os.listdir(temp_root):
+                    item_path = os.path.join(temp_root, item)
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path, ignore_errors=True)
+                    else:
+                        os.remove(item_path)
+                os.rmdir(temp_root)
+                color_print(f"[INFO] Папка {temp_root} полностью удалена", 'green')
             except Exception as e:
-                color_print(f"[WARN] Не удалось удалить папку temp_ipa: {e}", 'yellow')
+                color_print(f"[WARN] Не удалось удалить папку {temp_root}: {e}", 'yellow')
         if os.path.exists(UNDO_LOG_FILE):
             try:
                 os.remove(UNDO_LOG_FILE)
