@@ -22,7 +22,7 @@ def get_tmp_dir():
     return tmp
 
 class ProgressBar:
-    def __init__(self, total, description="Progress", width=30):
+    def __init__(self, total, description="Progress", width=50):
         self.total = total
         self.description = description
         self.width = width
@@ -37,14 +37,14 @@ class ProgressBar:
         if percent != self.last_percent:
             self.last_percent = percent
             filled = int(self.width * percent / 100)
-            bar = '[' + '#' * filled + '-' * (self.width - filled) + ']'
+            bar = '[' + '=' * filled + '>' + '.' * (self.width - filled - 1) + ']'
             sys.stdout.write(f'\r{self.description}: {bar} {percent}%')
             sys.stdout.flush()
+            if percent == 100:
+                sys.stdout.write('\n')
 
     def close(self):
-        if self.last_percent < 100 and self.total > 0:
-            self.update(0)
-        sys.stdout.write('\n')
+        pass
 
 def extract_ipa_with_progress(ipa_path, dest_dir):
     with zipfile.ZipFile(ipa_path, 'r') as zf:
@@ -74,12 +74,12 @@ def pack_ipa_with_progress(source_dir, output_path):
             pb.update()
     pb.close()
 
-def make_temp_dir():
+def make_temp_ipa_dir():
     docs = os.path.expanduser("~/Documents")
-    base = os.path.join(docs, "ipa_patcher", "tmp")
-    if not os.path.exists(base):
-        os.makedirs(base, exist_ok=True)
-    return tempfile.mkdtemp(prefix="ipa_patch_", dir=base)
+    temp_dir = os.path.join(docs, "temp_ipa")
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir, exist_ok=True)
+    return tempfile.mkdtemp(prefix="ipa_patch_", dir=temp_dir)
 
 def find_app_dir(payload_path):
     if not os.path.isdir(payload_path):
