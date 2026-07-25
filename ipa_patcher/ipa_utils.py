@@ -65,12 +65,21 @@ def pack_ipa_with_progress(source_dir, output_path):
             pb.update()
     pb.close()
 
-def make_temp_ipa_dir():
+def get_platform_temp_dir():
     docs = os.path.expanduser("~/Documents")
-    temp_dir = os.path.join(docs, "temp_ipa")
-    if not os.path.exists(temp_dir):
-        os.makedirs(temp_dir, exist_ok=True)
-    return tempfile.mkdtemp(prefix="ipa_patch_", dir=temp_dir)
+    if not PYTHONISTA and sys.platform not in ('win32', 'darwin', 'linux'):
+        base = os.path.join(docs, "ipa_patcher", "tmp")
+        if not os.path.exists(base):
+            os.makedirs(base, exist_ok=True)
+        return base
+    else:
+        base = os.path.join(docs, "temp_ipa")
+        if not os.path.exists(base):
+            os.makedirs(base, exist_ok=True)
+        return base
+
+def make_temp_ipa_dir():
+    return tempfile.mkdtemp(prefix="ipa_patch_", dir=get_platform_temp_dir())
 
 def find_app_dir(payload_path):
     if not os.path.isdir(payload_path):
@@ -81,11 +90,7 @@ def find_app_dir(payload_path):
     return None
 
 def smart_find_in_tmp(extensions):
-    docs = os.path.expanduser("~/Documents")
-    base = os.path.join(docs, "temp_ipa")
-    if not os.path.exists(base):
-        os.makedirs(base, exist_ok=True)
-    tmp_dir = base
+    tmp_dir = get_platform_temp_dir()
     found = []
     if not os.path.isdir(tmp_dir):
         return found
@@ -112,7 +117,7 @@ def pick_ipa_file():
 
     found = smart_find_in_tmp(['ipa'])
     if found:
-        print("\n--- Доступные IPA в temp_ipa/ ---")
+        print(f"\n--- Доступные IPA в {get_platform_temp_dir()} ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -128,7 +133,7 @@ def pick_ipa_file():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В temp_ipa/ не найдено .ipa файлов.")
+        print(f"В {get_platform_temp_dir()} не найдено .ipa файлов.")
 
     path = input("Введите полный путь к .ipa: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
@@ -149,7 +154,7 @@ def pick_tweak_file():
 
     found = smart_find_in_tmp(['dylib', 'zip', 'deb', 'tar', 'lzma', 'xz', 'gz', 'tgz'])
     if found:
-        print("\n--- Доступные твики в temp_ipa/ ---")
+        print(f"\n--- Доступные твики в {get_platform_temp_dir()} ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -165,7 +170,7 @@ def pick_tweak_file():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В temp_ipa/ не найдено подходящих файлов твиков.")
+        print(f"В {get_platform_temp_dir()} не найдено подходящих файлов твиков.")
 
     path = input("Введите полный путь к твику/архиву: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
@@ -185,7 +190,7 @@ def pick_icon_file():
 
     found = smart_find_in_tmp(['png'])
     if found:
-        print("\n--- Доступные PNG в temp_ipa/ ---")
+        print(f"\n--- Доступные PNG в {get_platform_temp_dir()} ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -201,7 +206,7 @@ def pick_icon_file():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В temp_ipa/ не найдено PNG файлов.")
+        print(f"В {get_platform_temp_dir()} не найдено PNG файлов.")
 
     path = input("Введите полный путь к PNG: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
@@ -221,7 +226,7 @@ def pick_substrate_file():
 
     found = smart_find_in_tmp(['dylib'])
     if found:
-        print("\n--- Доступные libsubstrate в temp_ipa/ ---")
+        print(f"\n--- Доступные libsubstrate в {get_platform_temp_dir()} ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -237,7 +242,7 @@ def pick_substrate_file():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В temp_ipa/ не найдено .dylib для субстрата.")
+        print(f"В {get_platform_temp_dir()} не найдено .dylib для субстрата.")
 
     path = input("Введите полный путь к libsubstrate.dylib: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
@@ -257,7 +262,7 @@ def pick_cert_zip():
 
     found = smart_find_in_tmp(['zip'])
     if found:
-        print("\n--- Доступные сертификаты в temp_ipa/ ---")
+        print(f"\n--- Доступные сертификаты в {get_platform_temp_dir()} ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
@@ -273,7 +278,7 @@ def pick_cert_zip():
             except ValueError:
                 print("Введите число.")
     else:
-        print("В temp_ipa/ не найдено .zip архивов.")
+        print(f"В {get_platform_temp_dir()} не найдено .zip архивов.")
 
     path = input("Введите полный путь к .zip архиву с сертификатом: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
