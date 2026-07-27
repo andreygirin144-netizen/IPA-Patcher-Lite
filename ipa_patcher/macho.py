@@ -4,7 +4,7 @@ import os
 from constants import (
     MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32,
     FAT_MAGIC, FAT_CIGAM, LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_RPATH,
-    LC_CODE_SIGNATURE
+    LC_CODE_SIGNATURE, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB
 )
 from utils import log_message
 
@@ -713,3 +713,95 @@ def is_ipa_encrypted(app_dir, plist_data):
     except Exception as e:
         log_message(f"Failed to check IPA encryption: {e}", 'ERROR')
         return None
+
+def get_load_dylibs(binary_path):
+    try:
+        with open(binary_path, 'rb') as f:
+            data = bytearray(f.read())
+    except Exception as e:
+        log_message(f"Failed to read binary: {e}", 'ERROR')
+        return []
+
+    if len(data) < 4:
+        return []
+
+    magic_be = struct.unpack_from('>I', data, 0)[0]
+    if magic_be in (FAT_MAGIC, FAT_CIGAM):
+        slices = get_arch_slices(data)
+        if not slices:
+            return []
+        target_slices = [s for s in slices if is_arm64_slice(s['cputype'], s['cpusubtype'])]
+        if not target_slices:
+            return []
+        s = target_slices[0]
+        offset = s['offset']
+    else:
+        offset = 0
+
+    if offset + 4 > len(data):
+        return []
+
+    magic = struct.unpack_from('<I', data, offset)[0]
+    endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
+    is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
+    header_size = 32 if is_64 else 28
+
+    if offset + header_size > len(data):
+        return []
+
+    ncmds = struct.unpack_from(endian + 'I', data, offset + 16)[0]
+    if ncmds > 1000:
+        return []
+
+    sizeofcmds = struct.unpack_from(endian + 'I', data, offset + 20)[0]
+    cmd_offset = offset + header_size
+    max_offset = len(data)
+    dylibs = []
+
+    for _ in range(ncmds):
+        if cmd_offset + 8 > offset + header_size + sizeofcmds:
+            break
+        if cmd_offset + 8 > max_offset:
+            break
+        cmd, cmdsize = struct.unpack_from(endian + 'II', data, cmd_offset)
+        if cmdsize < 8 or cmd_offset + cmdsize > offset + header_size + sizeofcmds:
+            break
+
+        if cmd in (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB):
+            if cmd_offset + 12 > max_offset:
+                break
+            name_offset = struct.unpack_from(endian + 'I', data, cmd_offset + 8)[0]
+            name_start = cmd_offset + name_offset
+            if name_start >= max_offset:
+                break
+            name_end = name_start
+            while name_end < cmd_offset + cmdsize and name_end < max_offset and data[name_end] != 0:
+                name_end += 1
+            if name_start < max_offset and name_end <= max_offset and name_end > name_start:
+                dylib_path = data[name_start:name_end].decode('utf-8', errors='replace')
+                dylibs.append(dylib_path)
+
+        cmd_offset += cmdsize
+
+    return dylibs
+
+def get_macho_summary(binary_path):
+    info = {
+        'size': 0,
+        'is_fat': False,
+        'archs': [],
+        'dylibs_count': 0,
+        'all_archs': [],
+    }
+    try:
+        info['size'] = os.path.getsize(binary_path)
+        archs = list_all_archs(binary_path)
+        if archs:
+            info['archs'] = archs
+            info['is_fat'] = len(archs) > 1
+            info['all_archs'] = archs
+        dylibs = get_load_dylibs(binary_path)
+        info['dylibs_count'] = len(dylibs)
+    except Exception as e:
+        log_message(f"Failed to get Mach-O summary: {e}", 'WARN')
+    return info
