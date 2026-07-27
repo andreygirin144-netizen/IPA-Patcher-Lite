@@ -16,6 +16,7 @@ LOGS_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Logs')
 LOG_FILE = os.path.join(LOGS_DIR, 'patcher.log')
 PATCHED_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Patched')
 
+
 def ensure_directories():
     for dir_path in [LOGS_DIR, PATCHED_DIR]:
         if not os.path.exists(dir_path):
@@ -23,6 +24,7 @@ def ensure_directories():
                 os.makedirs(dir_path)
             except:
                 pass
+
 
 def color_print(text, color='white'):
     if HAVE_CONSOLE:
@@ -65,6 +67,7 @@ def color_print(text, color='white'):
     code = ansi_colors.get(color, '\033[97m')
     print(f"{code}{text}{reset}")
 
+
 def log_message(msg, level='INFO'):
     ensure_directories()
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -86,6 +89,7 @@ def log_message(msg, level='INFO'):
                 'yellow' if level == 'WARN' else 
                 'red' if level == 'ERROR' else 'white')
 
+
 def ask_input(prompt, default=""):
     try:
         if default:
@@ -98,6 +102,7 @@ def ask_input(prompt, default=""):
     except KeyboardInterrupt:
         print("\nПрервано.")
         sys.exit(0)
+
 
 def ask_yes_no(prompt, default=False):
     try:
@@ -118,6 +123,7 @@ def ask_yes_no(prompt, default=False):
         print("\nПрервано.")
         sys.exit(0)
 
+
 def clear_screen():
     if HAVE_CONSOLE:
         try:
@@ -126,3 +132,13 @@ def clear_screen():
             os.system('clear')
     else:
         os.system('clear')
+
+
+def format_file_size(size: int) -> str:
+    if size == 0:
+        return "0 B"
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024.0:
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} TB"
