@@ -8,6 +8,7 @@ from ..analyzers.search import MaskSearcher
 from ..analyzers.macho import MachOAnalyzer
 from ..managers.backup import BackupManager
 from ..managers.undo import UndoManager
+from utils import color_print, log_message
 
 
 class PatchEngine:
@@ -15,17 +16,56 @@ class PatchEngine:
         self.backup_mgr = BackupManager()
         self.undo_mgr = UndoManager()
         self.last_changes: List[Dict[str, Any]] = []
+        self.app_dir: str = ""
 
-    def get_main_binary_path(self, app_dir: str) -> str:
+    def set_app_dir(self, app_dir: str) -> None:
+        self.app_dir = app_dir
+
+    def get_main_binary_path(self, app_dir: str = None) -> str:
+        if app_dir is None:
+            app_dir = self.app_dir
+        if not app_dir:
+            return ""
+        
         info_path = os.path.join(app_dir, "Info.plist")
         if os.path.isfile(info_path):
             try:
                 import plistlib
                 with open(info_path, 'rb') as f:
                     pl = plistlib.load(f)
-                    return os.path.join(app_dir, pl.get('CFBundleExecutable', ''))
+                    binary_name = pl.get('CFBundleExecutable', '')
+                    if binary_name:
+                        binary_path = os.path.join(app_dir, binary_name)
+                        if os.path.isfile(binary_path):
+                            return binary_path
             except Exception:
                 pass
+        
+        for f in os.listdir(app_dir):
+            file_path = os.path.join(app_dir, f)
+            if os.path.isfile(file_path):
+                try:
+                    with open(file_path, 'rb') as fp:
+                        magic = fp.read(4)
+                        if magic in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', 
+                                     b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'):
+                            if not f.endswith('.dylib') and '.framework' not in f:
+                                return file_path
+                except:
+                    continue
+        
+        for f in os.listdir(app_dir):
+            file_path = os.path.join(app_dir, f)
+            if os.path.isfile(file_path):
+                try:
+                    if os.access(file_path, os.X_OK):
+                        with open(file_path, 'rb') as fp:
+                            magic = fp.read(4)
+                            if magic in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf'):
+                                return file_path
+                except:
+                    continue
+        
         return ""
 
     def preview_context(self, file_path: str, offset: int, match_len: int, context: int = 16) -> str:
@@ -216,8 +256,7 @@ class PatchEngine:
             raise MachOError("VA not found in any segment")
         return self.apply_offset(file_path, file_offset, bytes_hex, dry_run)
 
-    def apply_json_patches(self, app_dir: str, patch_path: str,
-                           dry_run: bool = False, stop_on_error: bool = False) -> bool:
+    def apply_json_patches(self, patch_path: str, dry_run: bool = False, stop_on_error: bool = False) -> bool:
         from ..json_patcher import JsonPatcher
         
         data = JsonPatcher.load(patch_path)
@@ -236,14 +275,39 @@ class PatchEngine:
             
             if file_target not in file_cache:
                 if file_target == "Executable":
-                    target_file = self.get_main_binary_path(app_dir)
+                    target_file = self.get_main_binary_path()
                 else:
-                    target_file = os.path.join(app_dir, file_target)
+                    if os.path.isabs(file_target):
+                        target_file = file_target
+                    else:
+                        target_file = os.path.join(self.app_dir, file_target)
+                        if not os.path.isfile(target_file):
+                            found = False
+                            for root, dirs, files in os.walk(self.app_dir):
+                                if file_target in files:
+                                    target_file = os.path.join(root, file_target)
+                                    found = True
+                                    break
+                            if not found:
+                                base_name = os.path.splitext(file_target)[0]
+                                for root, dirs, files in os.walk(self.app_dir):
+                                    for f in files:
+                                        if f == base_name or f.startswith(base_name + '.'):
+                                            target_file = os.path.join(root, f)
+                                            found = True
+                                            break
+                                    if found:
+                                        break
+                                if not found:
+                                    color_print(f"[WARN] Файл не найден: {file_target}", 'yellow')
+                                    continue
                 
                 if not target_file or not os.path.isfile(target_file):
-                    raise PatchError(f"File not found: {file_target}")
-                
-                file_cache[file_target] = target_file
+                    color_print(f"[WARN] Файл не найден: {file_target}", 'yellow')
+                    continue
+            
+            file_cache[file_target] = target_file
+            color_print(f"[INFO] Применяем патч к файлу: {os.path.basename(target_file)}", 'blue')
 
             target_file = file_cache[file_target]
             ptype = patch.get("type", "hex")
@@ -286,10 +350,12 @@ class PatchEngine:
 
                 if not dry_run and changes:
                     all_changes.append({"file": target_file, "changes": changes})
+                    color_print(f"[SUCCESS] Патч применён к {os.path.basename(target_file)}", 'green')
 
             except PatchError as e:
                 if stop_on_error:
                     raise
+                color_print(f"[WARN] Ошибка применения патча: {e}", 'yellow')
                 continue
 
         if not dry_run and all_changes:
