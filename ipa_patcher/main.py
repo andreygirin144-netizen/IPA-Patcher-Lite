@@ -340,7 +340,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 changes["file_support"] = "hybrid"
                 color_print("Файловый шеринг: ГИБРИДНЫЙ режим (рекомендуется)", 'green')
             
-            # КРИТИЧЕСКИ ВАЖНЫЙ КЛЮЧ: Включает системный браузер документов
+             
             plist_data["UISupportsDocumentBrowser"] = True
             
             modified = True
