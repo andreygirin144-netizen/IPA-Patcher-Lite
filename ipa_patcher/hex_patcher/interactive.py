@@ -348,6 +348,7 @@ class InteractiveCli:
                                 block_counter = 0
                                 f.seek(offset)
                                 mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                                color_print(f"  Переход к строке {target_row} (смещение 0x{offset:08X})", 'green')
                                 color_print("  " + "=" * 70, 'yellow')
                                 continue
                             else:
@@ -402,9 +403,8 @@ class InteractiveCli:
                             color_print("  Неверный HEX формат", 'red')
                         continue
                     elif nav.lower() == "r":
-                        current_offset = offset
-                        self._edit_at_offset_from_dump(current_offset)
-                        f.seek(current_offset)
+                        self._edit_at_offset_from_dump(offset)
+                        f.seek(offset)
                         mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
                         continue
                     elif nav.lower() == "n":
