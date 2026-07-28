@@ -265,33 +265,54 @@ class InteractiveCli:
         color_print(f"\nДамп: {os.path.basename(self.selected_file)} ({size_mb:.2f} MB)", 'cyan')
         print("")
         
-        step = ask_input("Интервал [32]: ", "32")
-        try:
-            step = int(step)
-            if step < 1:
-                step = 32
-        except:
-            step = 32
+        color_print("Выберите количество байт в строке:", 'cyan')
+        print("  1) 16 байт (стандарт)")
+        print("  2) 32 байта (средний)")
+        print("  3) 64 байта (для длинных строк)")
+        print("  4) 128 байт (максимум)")
+        print("  5) Свой вариант")
         
-        rows_per_page = ask_input("Строк на страницу [25]: ", "25")
+        byte_choice = ask_input("Ваш выбор", "3")
+        if byte_choice == "1":
+            step = 16
+        elif byte_choice == "2":
+            step = 32
+        elif byte_choice == "3":
+            step = 64
+        elif byte_choice == "4":
+            step = 128
+        elif byte_choice == "5":
+            try:
+                step = int(ask_input("Введите количество байт", "64"))
+                if step < 1:
+                    step = 64
+            except:
+                step = 64
+        else:
+            step = 64
+        
+        rows_per_page = ask_input("Строк на страницу [15]: ", "15")
         try:
             rows_per_page = int(rows_per_page)
             if rows_per_page < 1:
-                rows_per_page = 25
+                rows_per_page = 15
         except:
-            rows_per_page = 25
+            rows_per_page = 15
         
-        block_size = ask_input("Разделитель каждые N строк [16]: ", "16")
+        block_size = ask_input("Разделитель каждые N строк [8]: ", "8")
         try:
             block_size = int(block_size)
             if block_size < 1:
-                block_size = 16
+                block_size = 8
         except:
-            block_size = 16
+            block_size = 8
         
         print("")
-        color_print("  #     Offset    0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F   ASCII", 'cyan')
-        color_print("  " + "=" * 80, 'cyan')
+        hex_header = ""
+        for i in range(step):
+            hex_header += f" {i:02X}"
+        color_print(f"  #     Offset    {hex_header}  ASCII", 'cyan')
+        color_print("  " + "=" * (12 + step * 3 + 10), 'cyan')
         
         with open(self.selected_file, 'rb') as f:
             mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
@@ -305,7 +326,7 @@ class InteractiveCli:
             
             while offset < max_dump:
                 if total_rows >= rows_per_page:
-                    color_print("  " + "=" * 80, 'yellow')
+                    color_print("  " + "=" * (12 + step * 3 + 10), 'yellow')
                     color_print(f"  Страница {current_page}/{total_pages}. Строки {row_num - rows_per_page}-{row_num-1} из {total_rows_all}", 'cyan')
                     print("")
                     color_print("  [n] следующая страница  [p] предыдущая  [g] перейти к строке и редактировать", 'blue')
@@ -326,7 +347,7 @@ class InteractiveCli:
                             block_counter = 0
                             f.seek(offset)
                             mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-                            color_print("  " + "=" * 80, 'yellow')
+                            color_print("  " + "=" * (12 + step * 3 + 10), 'yellow')
                             continue
                         else:
                             color_print("  Это первая страница", 'yellow')
@@ -343,7 +364,7 @@ class InteractiveCli:
                                 row_num = target_row
                                 total_rows = (target_row - 1) % rows_per_page
                                 block_counter = 0
-                                color_print("  " + "=" * 80, 'yellow')
+                                color_print("  " + "=" * (12 + step * 3 + 10), 'yellow')
                                 continue
                             else:
                                 color_print(f"  Номер строки должен быть от 1 до {total_rows_all}", 'yellow')
@@ -366,7 +387,7 @@ class InteractiveCli:
                                 row_num = target_row
                                 total_rows = (target_row - 1) % rows_per_page
                                 block_counter = 0
-                                color_print("  " + "=" * 80, 'yellow')
+                                color_print("  " + "=" * (12 + step * 3 + 10), 'yellow')
                                 continue
                             else:
                                 color_print(f"  Смещение вне диапазона (0-{max_dump-1})", 'yellow')
@@ -389,7 +410,7 @@ class InteractiveCli:
                                 f.seek(offset)
                                 mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
                                 color_print(f"  Найден HEX 0x{pos:08X} (строка {target_row})", 'green')
-                                color_print("  " + "=" * 80, 'yellow')
+                                color_print("  " + "=" * (12 + step * 3 + 10), 'yellow')
                                 continue
                             else:
                                 color_print("  HEX не найден", 'yellow')
@@ -405,7 +426,7 @@ class InteractiveCli:
                             block_counter = 0
                             f.seek(offset)
                             mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-                            color_print("  " + "=" * 80, 'yellow')
+                            color_print("  " + "=" * (12 + step * 3 + 10), 'yellow')
                             continue
                         else:
                             color_print("  Это последняя страница", 'yellow')
@@ -425,12 +446,12 @@ class InteractiveCli:
                 block_counter += 1
                 
                 if block_counter >= block_size and offset < max_dump:
-                    color_print("  " + "=" * 80, 'yellow')
+                    color_print("  " + "=" * (12 + step * 3 + 10), 'yellow')
                     block_counter = 0
             
             mm.close()
         
-        color_print("  " + "=" * 80, 'cyan')
+        color_print("  " + "=" * (12 + step * 3 + 10), 'cyan')
         color_print(f"  Конец дампа. Всего строк: {total_rows_all}", 'cyan')
 
     def _edit_at_offset_from_dump(self, offset: int) -> None:
@@ -439,7 +460,7 @@ class InteractiveCli:
             color_print(f"Смещение {offset} >= {file_size}", 'red')
             return
         
-        step = 32
+        step = 64
         with open(self.selected_file, 'rb') as f:
             mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
             current_bytes = mm[offset:min(offset + step, file_size)]
