@@ -402,8 +402,9 @@ class InteractiveCli:
                             color_print("  Неверный HEX формат", 'red')
                         continue
                     elif nav.lower() == "r":
-                        self._edit_at_offset_from_dump(offset)
-                        f.seek(offset)
+                        current_offset = offset
+                        self._edit_at_offset_from_dump(current_offset)
+                        f.seek(current_offset)
                         mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
                         continue
                     elif nav.lower() == "n":
