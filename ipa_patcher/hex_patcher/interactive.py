@@ -342,7 +342,8 @@ class InteractiveCli:
                             target_row = int(ask_input("Введите номер строки"))
                             if 1 <= target_row <= total_rows_all:
                                 current_page = (target_row - 1) // rows_per_page + 1
-                                offset = (target_row - 1) * step
+                                target_offset = (target_row - 1) * step
+                                offset = target_offset
                                 row_num = target_row
                                 total_rows = (target_row - 1) % rows_per_page
                                 block_counter = 0
@@ -403,9 +404,13 @@ class InteractiveCli:
                             color_print("  Неверный HEX формат", 'red')
                         continue
                     elif nav.lower() == "r":
-                        self._edit_at_offset_from_dump(offset)
-                        f.seek(offset)
+                        current_offset = offset
+                        self._edit_at_offset_from_dump(current_offset)
+                        f.seek(current_offset)
                         mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                        color_print("  " + "=" * 70, 'yellow')
+                        total_rows = 0
+                        block_counter = 0
                         continue
                     elif nav.lower() == "n":
                         pass
