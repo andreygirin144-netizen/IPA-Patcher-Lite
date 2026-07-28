@@ -265,21 +265,21 @@ class InteractiveCli:
         color_print(f"\nДамп: {os.path.basename(self.selected_file)} ({size_mb:.2f} MB)", 'cyan')
         print("")
         
-        step = ask_input("Интервал [16]: ", "16")
+        step = ask_input("Интервал [32]: ", "32")
         try:
             step = int(step)
             if step < 1:
-                step = 16
+                step = 32
         except:
-            step = 16
+            step = 32
         
-        rows_per_page = ask_input("Строк на страницу [50]: ", "50")
+        rows_per_page = ask_input("Строк на страницу [25]: ", "25")
         try:
             rows_per_page = int(rows_per_page)
             if rows_per_page < 1:
-                rows_per_page = 50
+                rows_per_page = 25
         except:
-            rows_per_page = 50
+            rows_per_page = 25
         
         block_size = ask_input("Разделитель каждые N строк [16]: ", "16")
         try:
