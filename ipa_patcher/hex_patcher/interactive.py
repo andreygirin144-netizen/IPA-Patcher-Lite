@@ -404,9 +404,9 @@ class InteractiveCli:
                             color_print("  Неверный HEX формат", 'red')
                         continue
                     elif nav.lower() == "r":
-                        current_offset = offset
-                        self._edit_at_offset_from_dump(current_offset)
-                        f.seek(current_offset)
+                        edit_offset = offset
+                        self._edit_at_offset_from_dump(edit_offset)
+                        f.seek(edit_offset)
                         mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
                         color_print("  " + "=" * 70, 'yellow')
                         total_rows = 0
