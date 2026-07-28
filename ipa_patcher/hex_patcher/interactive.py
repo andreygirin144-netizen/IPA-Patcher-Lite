@@ -439,9 +439,10 @@ class InteractiveCli:
             color_print(f"Смещение {offset} >= {file_size}", 'red')
             return
         
+        step = 32
         with open(self.selected_file, 'rb') as f:
             mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            current_bytes = mm[offset:min(offset + 16, file_size)]
+            current_bytes = mm[offset:min(offset + step, file_size)]
             mm.close()
         
         color_print(f"\nРедактирование по смещению 0x{offset:08X}:", 'cyan')
@@ -487,7 +488,7 @@ class InteractiveCli:
         
         with open(self.selected_file, 'rb') as f:
             mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            new_current = mm[offset:min(offset + 16, file_size)]
+            new_current = mm[offset:min(offset + step, file_size)]
             mm.close()
         
         color_print(f"\nНовые байты 0x{offset:08X}:", 'green')
