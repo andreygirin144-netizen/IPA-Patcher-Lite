@@ -377,7 +377,7 @@ class InteractiveCli:
                         try:
                             hex_str = ask_input("Введите HEX для поиска и редактирования (например: 41 70 70)")
                             search_bytes = HexUtils.hex_to_bytes(hex_str)
-                            pos = mm.find(search_bytes, offset)
+                            pos = mm.find(search_bytes, 0)
                             if pos != -1:
                                 self._edit_at_offset_from_dump(pos)
                                 target_row = pos // step + 1
