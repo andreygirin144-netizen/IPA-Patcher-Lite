@@ -8,8 +8,9 @@ import json
 import zipfile
 import time
 import plistlib
-from constants import UNWANTED_DIRS, PatchConfig, VERSION
-from ipa_utils import (
+
+from core.constants import UNWANTED_DIRS, PatchConfig, VERSION
+from core.ipa_utils import (
     pick_ipa_file,
     get_platform_temp_dir,
     make_temp_ipa_dir,
@@ -20,20 +21,15 @@ from ipa_utils import (
     pick_substrate_file,
     pick_tweak_file
 )
-from plist_editor import load_plist, save_plist, add_file_support, update_version_in_extensions
-from signature import clean_signature_files, sign_app_bundle_with_path
-from macho import is_ipa_encrypted, is_macho_binary, is_fat_binary, thin_binary_to_arm64
-from tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak, get_main_executable
-from entitlements import generate_custom_entitlements
-from advanced_patches import apply_advanced_patches, check_patch_availability
-from patch_strings import patch_strings_in_binary
+from core.plist_editor import load_plist, save_plist, add_file_support, update_version_in_extensions
+from core.signature import clean_signature_files, sign_app_bundle_with_path
+from core.macho import is_ipa_encrypted, is_macho_binary, get_main_executable, is_fat_binary, list_all_archs, thin_binary_to_arm64, get_macho_summary
+from core.tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak
+from core.entitlements import generate_custom_entitlements
+from core.advanced_patches import apply_advanced_patches, check_patch_availability
+from core.patch_strings import patch_strings_in_binary
 from utils import color_print, log_message, clear_screen, ensure_directories, PATCHED_DIR, ask_input, ask_yes_no, format_file_size
-from icon_tools import (
-    replace_icon_with_priority,
-    replace_icon_standard,
-    replace_icon_loose_method,
-    analyze_boms
-)
+from icon_tools import replace_icon_with_priority
 from hex_patcher import start_hex_patcher
 from file_explorer import start_interactive_explorer
 from file_explorer.backups import cleanup_backups
@@ -217,7 +213,7 @@ def deep_patch_version(app_dir, old_version, new_version):
 
 
 def check_binary_header_space(app_dir, plist_data, estimated_tweaks=1):
-    from constants import MIN_HEADER_PADDING
+    from core.constants import MIN_HEADER_PADDING
     main_executable = get_main_executable(app_dir, plist_data)
     if not main_executable or not is_macho_binary(main_executable):
         return True
@@ -266,6 +262,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print("13. Настроить права (Entitlements)")
         print("14. Расширенные патчи (понижение iOS, удаление плагинов и ограничений)")
         print("15. Hex патчер (замена строк/HEX)")
+        print("16. Прореживание бинарника (удаление 32-битных архитектур)")
         print("0. Выход без сохранения")
         print("=" * 50)
         choice = ask_input("Ваш выбор", "9")
@@ -361,7 +358,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Файловый шеринг: ГИБРИДНЫЙ режим (рекомендуется)", 'green')
             
             plist_data["UISupportsDocumentBrowser"] = True
-            
             modified = True
                 
         elif choice == "6":
@@ -389,18 +385,22 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     success = replace_icon_with_priority(app_dir, img_path, remove_assets, auto_increment)
                 elif method == "2":
                     color_print("[INFO] Выбрана маскировка Assets.car", 'blue')
+                    from icon_tools import patch_boms_icon
                     success = patch_boms_icon(os.path.join(app_dir, "Assets.car"))
                     if success:
                         color_print("[SUCCESS] Токены иконок замаскированы", 'green')
                 elif method == "3":
                     color_print("[INFO] Выбран метод loose-иконок", 'blue')
+                    from icon_tools import replace_icon_loose_method
                     success = replace_icon_loose_method(app_dir, img_path, auto_increment)
                 elif method == "4":
                     color_print("[INFO] Выбрана стандартная замена", 'blue')
+                    from icon_tools import replace_icon_standard
                     success = replace_icon_standard(app_dir, img_path, False, auto_increment)
                 elif method == "5":
                     color_print("[WARN] Выбрано удаление Assets.car (ОПАСНО!)", 'red')
                     if ask_yes_no("Подтвердить удаление Assets.car?", default=False):
+                        from icon_tools import replace_icon_standard
                         success = replace_icon_standard(app_dir, img_path, True, auto_increment)
                     else:
                         continue
@@ -507,6 +507,16 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Ошибка: " + msg, 'red')
                 
         elif choice == "8":
+            # Сохраняем текущие изменения в Info.plist перед входом в файловый менеджер
+            if modified:
+                try:
+                    import plistlib
+                    with open(info_plist_path, 'wb') as f:
+                        plistlib.dump(plist_data, f, fmt=plistlib.FMT_BINARY)
+                    color_print("[INFO] Info.plist сохранен на диск перед входом в файловый менеджер", 'green')
+                except Exception as e:
+                    log_message(f"Failed to save plist before file manager: {e}", 'WARN')
+            
             color_print("\nВыберите режим просмотра файлов .app:", 'cyan')
             print("  1) Простой список файлов (текстовый файл)")
             print("  2) Интерактивный файловый менеджер")
@@ -593,10 +603,16 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         
                         old_version = original.get("CFBundleShortVersionString", "1.0")
                         old_bundle = original.get("CFBundleIdentifier", "")
+                        old_name = original.get("CFBundleDisplayName") or original.get("CFBundleName", "")
+                        old_build = original.get("CFBundleVersion", "1")
                         
-                        if current_plist.get("CFBundleShortVersionString") != old_version:
+                        new_version = current_plist.get("CFBundleShortVersionString")
+                        new_bundle = current_plist.get("CFBundleIdentifier")
+                        new_name = current_plist.get("CFBundleDisplayName") or current_plist.get("CFBundleName")
+                        new_build = current_plist.get("CFBundleVersion")
+                        
+                        if new_version and new_version != old_version:
                             if "version" not in changes:
-                                new_version = current_plist.get("CFBundleShortVersionString")
                                 changes["version"] = new_version
                                 changes["version_old"] = old_version
                                 color_print(f"\n[INFO] Обнаружено изменение версии: {old_version} -> {new_version}", 'cyan')
@@ -607,10 +623,12 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                                 else:
                                     deep_version_mode = False
                                     changes["version_deep"] = False
+                            plist_data["CFBundleShortVersionString"] = new_version
+                            original["CFBundleShortVersionString"] = new_version
+                            modified = True
                         
-                        if current_plist.get("CFBundleIdentifier") != old_bundle:
+                        if new_bundle and new_bundle != old_bundle:
                             if "bundle_id" not in changes:
-                                new_bundle = current_plist.get("CFBundleIdentifier")
                                 changes["bundle_id"] = new_bundle
                                 changes["bundle_old"] = old_bundle
                                 color_print(f"\n[INFO] Обнаружено изменение Bundle ID: {old_bundle} -> {new_bundle}", 'cyan')
@@ -621,19 +639,27 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                                 else:
                                     deep_bundle_mode = False
                                     changes["bundle_deep"] = False
+                            plist_data["CFBundleIdentifier"] = new_bundle
+                            original["CFBundleIdentifier"] = new_bundle
+                            modified = True
                         
-                        if current_plist.get("CFBundleDisplayName") != original.get("CFBundleDisplayName"):
+                        if new_name and new_name != old_name:
                             if "name" not in changes:
-                                changes["name"] = current_plist.get("CFBundleDisplayName")
-                                color_print(f"\n[INFO] Обнаружено изменение имени: {original.get('CFBundleDisplayName')} -> {changes['name']}", 'cyan')
+                                changes["name"] = new_name
+                                color_print(f"\n[INFO] Обнаружено изменение имени: {old_name} -> {new_name}", 'cyan')
+                            plist_data["CFBundleDisplayName"] = new_name
+                            plist_data["CFBundleName"] = new_name
+                            original["CFBundleDisplayName"] = new_name
+                            original["CFBundleName"] = new_name
+                            modified = True
                         
-                        if current_plist.get("CFBundleVersion") != original.get("CFBundleVersion"):
+                        if new_build and new_build != old_build:
                             if "build" not in changes:
-                                changes["build"] = current_plist.get("CFBundleVersion")
-                                color_print(f"\n[INFO] Обнаружено изменение номера сборки: {original.get('CFBundleVersion')} -> {changes['build']}", 'cyan')
-                        
-                        plist_data = current_plist
-                        original.update(plist_data)
+                                changes["build"] = new_build
+                                color_print(f"\n[INFO] Обнаружено изменение номера сборки: {old_build} -> {new_build}", 'cyan')
+                            plist_data["CFBundleVersion"] = new_build
+                            original["CFBundleVersion"] = new_build
+                            modified = True
                         
                     except Exception as e:
                         log_message(f"Failed to check plist changes: {e}", 'WARN')
@@ -926,6 +952,127 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA.", 'red')
                 
+        elif choice == "16":
+            color_print("\n--- ПРОРЕЖИВАНИЕ БИНАРНИКА ---", 'cyan')
+            print("=" * 50)
+            color_print("Эта операция удаляет 32-битные архитектуры (ARMv7/v7s)", 'yellow')
+            color_print("из FAT бинарника, оставляя только ARM64/ARM64e.", 'yellow')
+            color_print("Это освобождает место в заголовке для инъекций твиков.", 'yellow')
+            print("")
+            
+            if not app_dir or not os.path.exists(app_dir):
+                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA.", 'red')
+                continue
+            
+            main_executable = get_main_executable(app_dir, plist_data)
+            if not main_executable:
+                color_print("[ERROR] Не удалось найти основной бинарник!", 'red')
+                continue
+            
+            if not is_macho_binary(main_executable):
+                color_print("[ERROR] Файл не является Mach-O бинарником!", 'red')
+                continue
+            
+            if not is_fat_binary(main_executable):
+                color_print("[INFO] Бинарник уже является тонким (не FAT). Прореживание не требуется.", 'green')
+                continue
+            
+            color_print(f"[INFO] Бинарник: {os.path.basename(main_executable)}", 'blue')
+            
+            try:
+                archs = list_all_archs(main_executable)
+                color_print(f"[INFO] Текущие архитектуры: {', '.join(archs)}", 'blue')
+                
+                has_arm64 = any('arm64' in a.lower() for a in archs)
+                if not has_arm64:
+                    color_print("[ERROR] В бинарнике нет ARM64 архитектуры! Прореживание невозможно.", 'red')
+                    continue
+                
+                has_32bit = False
+                for a in archs:
+                    a_lower = a.lower()
+                    if 'armv7' in a_lower or '32-bit' in a_lower or 'cputype_12' in a_lower:
+                        has_32bit = True
+                        break
+                
+                if not has_32bit:
+                    color_print("[INFO] 32-битные архитектуры не найдены. Прореживание не требуется.", 'green')
+                    if ask_yes_no("Показать информацию о архитектурах?", default=False):
+                        try:
+                            summary = get_macho_summary(main_executable)
+                            color_print(f"\n[INFO] Информация о бинарнике:", 'blue')
+                            color_print(f"  Тип: {'FAT' if summary.get('is_fat') else 'Тонкий'}", 'white')
+                            color_print(f"  Архитектуры: {', '.join(summary.get('archs', []))}", 'white')
+                            color_print(f"  Размер: {format_file_size(summary.get('size', 0))}", 'white')
+                        except:
+                            pass
+                    continue
+                    
+            except Exception as e:
+                color_print(f"[ERROR] Не удалось проверить архитектуры: {e}", 'red')
+                continue
+            
+            color_print("\n[WARN] ВНИМАНИЕ:", 'red')
+            color_print("  - Удаление 32-битных архитектур может сделать приложение", 'yellow')
+            color_print("    несовместимым со старыми 32-битными устройствами.", 'yellow')
+            color_print("  - Операция необратима без резервной копии.", 'yellow')
+            print("")
+            
+            if not ask_yes_no("Выполнить прореживание бинарника?", default=False):
+                color_print("[INFO] Прореживание отменено.", 'yellow')
+                continue
+            
+            backup_path = os.path.join(app_dir, f"{os.path.basename(main_executable)}.bak_thin")
+            try:
+                shutil.copy2(main_executable, backup_path)
+                color_print(f"[INFO] Бэкап создан: {os.path.basename(backup_path)}", 'green')
+            except Exception as e:
+                color_print(f"[WARN] Не удалось создать бэкап: {e}", 'yellow')
+                if not ask_yes_no("Продолжить без бэкапа?", default=False):
+                    continue
+            
+            color_print("\n[INFO] Выполнение прореживания...", 'blue')
+            
+            if thin_binary_to_arm64(main_executable):
+                color_print("[SUCCESS] Бинарник успешно прорежен! Оставлена только ARM64 архитектура.", 'green')
+                
+                try:
+                    new_archs = list_all_archs(main_executable)
+                    color_print(f"[INFO] Архитектуры после прореживания: {', '.join(new_archs)}", 'blue')
+                    
+                    old_size = os.path.getsize(backup_path) if os.path.exists(backup_path) else 0
+                    new_size = os.path.getsize(main_executable)
+                    if old_size > 0 and new_size > 0:
+                        saved_mb = (old_size - new_size) / (1024 * 1024)
+                        if saved_mb > 0:
+                            color_print(f"[INFO] Освобождено: {saved_mb:.2f} MB", 'green')
+                except:
+                    pass
+                
+                if os.path.exists(backup_path):
+                    if ask_yes_no("Удалить бэкап? (рекомендуется оставить на случай проблем)", default=False):
+                        try:
+                            os.remove(backup_path)
+                            color_print("[INFO] Бэкап удален.", 'green')
+                        except:
+                            pass
+                    else:
+                        color_print(f"[INFO] Бэкап сохранен: {backup_path}", 'green')
+                
+                modified = True
+                changes["thinned"] = True
+                
+            else:
+                color_print("[ERROR] Не удалось выполнить прореживание!", 'red')
+                if os.path.exists(backup_path):
+                    if ask_yes_no("Восстановить бэкап?", default=True):
+                        try:
+                            shutil.copy2(backup_path, main_executable)
+                            os.remove(backup_path)
+                            color_print("[INFO] Бэкап восстановлен.", 'green')
+                        except Exception as e:
+                            color_print(f"[ERROR] Не удалось восстановить бэкап: {e}", 'red')
+                
         elif choice == "0":
             if modified:
                 color_print("\n--- СВОДКА ИЗМЕНЕНИЙ ---", 'cyan')
@@ -956,6 +1103,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print("  Hex патчер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
                 if "file_manager_changes" in changes:
                     color_print("  Файловый менеджер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
+                if "thinned" in changes:
+                    color_print("  Прореживание бинарника: ВЫПОЛНЕНО", 'green')
                 color_print("=" * 50, 'cyan')
                 if not ask_yes_no("Выйти без сохранения?", default=False):
                     continue
