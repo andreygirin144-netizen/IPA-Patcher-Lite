@@ -397,7 +397,19 @@ class InteractiveCli:
                             color_print("  Неверный HEX формат", 'red')
                         continue
                     elif nav.lower() == "n":
-                        pass
+                        if current_page < total_pages:
+                            current_page += 1
+                            offset = (current_page - 1) * rows_per_page * step
+                            row_num = (current_page - 1) * rows_per_page + 1
+                            total_rows = 0
+                            block_counter = 0
+                            f.seek(offset)
+                            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                            color_print("  " + "=" * 70, 'yellow')
+                            continue
+                        else:
+                            color_print("  Это последняя страница", 'yellow')
+                            continue
                     else:
                         color_print("  Неверная команда", 'yellow')
                         continue
