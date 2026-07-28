@@ -315,7 +315,7 @@ class InteractiveCli:
                     color_print(f"  Страница {current_page}/{total_pages}. Строки {row_num - rows_per_page}-{row_num-1} из {total_rows_all}", 'cyan')
                     print("")
                     color_print("  [n] следующая страница  [p] предыдущая  [g] перейти к строке", 'blue')
-                    color_print("  [o] перейти по смещению  [h] перейти по HEX  [r] редактировать строку", 'blue')
+                    color_print("  [o] перейти по смещению  [h] перейти по HEX  [e] редактировать текущую строку", 'blue')
                     color_print("  [q] выйти из дампа", 'blue')
                     print("")
                     
@@ -403,14 +403,12 @@ class InteractiveCli:
                         except:
                             color_print("  Неверный HEX формат", 'red')
                         continue
-                    elif nav.lower() == "r":
+                    elif nav.lower() == "e":
                         edit_offset = offset
                         self._edit_at_offset_from_dump(edit_offset)
                         f.seek(edit_offset)
                         mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
                         color_print("  " + "=" * 70, 'yellow')
-                        total_rows = 0
-                        block_counter = 0
                         continue
                     elif nav.lower() == "n":
                         pass
