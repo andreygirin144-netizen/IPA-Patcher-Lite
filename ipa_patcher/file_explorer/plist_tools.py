@@ -77,9 +77,10 @@ def edit_plist_file(file_path: str) -> None:
                         type_str = type(value).__name__
                     color_print(f"  {idx:>3}) {key} [{type_str}] = {value_str}", 'white')
                 print("")
-                print("  Введите номера через пробел (например: 1 5 10)")
-                print("  Или диапазон: 1-5")
-                print("  0) Отмена")
+                color_print("  Введите номера через пробел", 'cyan')
+                color_print("  Например: 1 5 10", 'green')
+                color_print("  Или диапазон: 1-5", 'green')
+                color_print("  0) Отмена", 'red')
                 
                 key_input = ask_input("Введите номера ключей", "0")
                 if key_input == "0":
@@ -100,7 +101,7 @@ def edit_plist_file(file_path: str) -> None:
                             else:
                                 color_print(f"Диапазон {part} вне допустимых значений (1-{len(keys)})", 'yellow')
                         except ValueError:
-                            color_print(f"Неверный формат диапазона: {part}", 'yellow')
+                            color_print(f"Неверный формат диапазона: {part}", 'red')
                     else:
                         try:
                             idx = int(part) - 1
@@ -110,7 +111,7 @@ def edit_plist_file(file_path: str) -> None:
                             else:
                                 color_print(f"Номер {part} вне диапазона (1-{len(keys)})", 'yellow')
                         except ValueError:
-                            color_print(f"Неверный номер: {part}", 'yellow')
+                            color_print(f"Неверный номер: {part}", 'red')
                 
                 if not selected_indices:
                     color_print("Не выбрано ни одного ключа.", 'yellow')
@@ -191,9 +192,10 @@ def edit_plist_file(file_path: str) -> None:
                         value_str = value_str[:50] + "..."
                     color_print(f"  {idx:>3}) {key} = {value_str}", 'white')
                 print("")
-                print("  Введите номера через пробел (например: 1 5 10)")
-                print("  Или диапазон: 1-5")
-                print("  0) Отмена")
+                color_print("  Введите номера через пробел", 'cyan')
+                color_print("  Например: 1 5 10", 'green')
+                color_print("  Или диапазон: 1-5", 'green')
+                color_print("  0) Отмена", 'red')
                 
                 key_input = ask_input("Введите номера ключей для удаления", "0")
                 if key_input == "0":
@@ -214,7 +216,7 @@ def edit_plist_file(file_path: str) -> None:
                             else:
                                 color_print(f"Диапазон {part} вне допустимых значений (1-{len(keys)})", 'yellow')
                         except ValueError:
-                            color_print(f"Неверный формат диапазона: {part}", 'yellow')
+                            color_print(f"Неверный формат диапазона: {part}", 'red')
                     else:
                         try:
                             idx = int(part) - 1
@@ -224,7 +226,7 @@ def edit_plist_file(file_path: str) -> None:
                             else:
                                 color_print(f"Номер {part} вне диапазона (1-{len(keys)})", 'yellow')
                         except ValueError:
-                            color_print(f"Неверный номер: {part}", 'yellow')
+                            color_print(f"Неверный номер: {part}", 'red')
                 
                 if not selected_indices:
                     color_print("Не выбрано ни одного ключа.", 'yellow')
