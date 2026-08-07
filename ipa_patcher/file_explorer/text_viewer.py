@@ -134,23 +134,23 @@ def safe_read_file_content(file_path: str, max_bytes: int = _MAX_CONSOLE_OUTPUT_
         is_truncated = file_size > max_bytes
     except OSError as e:
         log_message(f"Failed to get file size: {e}", 'ERROR')
-        return "[ERROR] Не удалось получить размер файла."
+        return "[ERROR] Не удалось получить размер файла."
 
     try:
         with open(file_path, 'rb') as f:
             raw = f.read(max_bytes)
     except Exception as e:
         log_message(f"Failed to read file: {e}", 'ERROR')
-        return f"[ERROR] Не удалось прочитать файл: {e}"
+        return f"[ERROR] Не удалось прочитать файл: {e}"
 
     if not raw:
-        return "[INFO] Файл пуст."
+        return "[INFO] Файл пуст."
 
     prefix = ""
     if is_truncated:
         percent = (max_bytes / file_size) * 100
         prefix = (
-            f"[WARN] Файл слишком велик ({format_file_size(file_size)}).\n"
+            f"[WARN] Файл слишком велик ({format_file_size(file_size)}).\n"
             f"Показано: {format_file_size(max_bytes)} ({percent:.1f}%)\n\n"
             "-" * 40 + "\n\n"
         )
@@ -160,17 +160,17 @@ def safe_read_file_content(file_path: str, max_bytes: int = _MAX_CONSOLE_OUTPUT_
     if is_text:
         text = _decode_text_content(raw)
         if is_truncated:
-            text += "\n\n... (файл обрезан)"
+            text += "\n\n... (файл обрезан)"
         return prefix + text
 
     if len(raw) < 1024:
         try:
             from hex_patcher.utils.hex_utils import HexUtils
             hex_view = HexUtils.bytes_to_hex(raw)
-            return prefix + f"Бинарный файл (HEX):\n{hex_view}"
+            return prefix + f"Бинарный файл (HEX):\n{hex_view}"
         except (ImportError, ModuleNotFoundError) as e:
             log_message(f"HexUtils not available: {e}", 'DEBUG')
-            return prefix + f"Бинарный файл (HEX):\n{hex_dump_fallback(raw)}"
+            return prefix + f"Бинарный файл (HEX):\n{hex_dump_fallback(raw)}"
     else:
         preview = raw[:256]
         try:
@@ -179,7 +179,7 @@ def safe_read_file_content(file_path: str, max_bytes: int = _MAX_CONSOLE_OUTPUT_
         except (ImportError, ModuleNotFoundError) as e:
             log_message(f"HexUtils not available: {e}", 'DEBUG')
             hex_view = hex_dump_fallback(preview)
-        return prefix + f"Бинарный файл ({format_file_size(file_size)}) - показаны первые 256 байт:\n{hex_view}\n... (файл обрезан)"
+        return prefix + f"Бинарный файл ({format_file_size(file_size)}) - показаны первые 256 байт:\n{hex_view}\n... (файл обрезан)"
 
 
 def view_file_content(file_path: str) -> None:
