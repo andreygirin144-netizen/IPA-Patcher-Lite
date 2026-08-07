@@ -33,8 +33,11 @@ from .ipa_utils import (
     pick_substrate_file,
     pick_cert_zip,
     ProgressBar,
+    is_tipa_file,
+    extract_tipa_with_progress,
+    pack_tipa_with_progress,
 )
-from .signature import clean_signature_files, sign_app_bundle_with_path
+from .signature import clean_signature_files, sign_app_bundle_with_path, open_tipa_with_trollstore, prepare_tipa_entitlements, merge_tipa_entitlements
 from .constants import (
     MIN_HEADER_PADDING,
     LC_LOAD_DYLIB,
@@ -47,7 +50,6 @@ from .constants import (
     FAT_MAGIC,
     FAT_CIGAM,
     VERSION,
-    PatchConfig,
 )
 
 __all__ = [
@@ -92,8 +94,14 @@ __all__ = [
     'pick_substrate_file',
     'pick_cert_zip',
     'ProgressBar',
+    'is_tipa_file',
+    'extract_tipa_with_progress',
+    'pack_tipa_with_progress',
     'clean_signature_files',
     'sign_app_bundle_with_path',
+    'open_tipa_with_trollstore',
+    'prepare_tipa_entitlements',
+    'merge_tipa_entitlements',
     'MIN_HEADER_PADDING',
     'LC_LOAD_DYLIB',
     'LC_RPATH',
@@ -105,5 +113,4 @@ __all__ = [
     'FAT_MAGIC',
     'FAT_CIGAM',
     'VERSION',
-    'PatchConfig',
 ]
