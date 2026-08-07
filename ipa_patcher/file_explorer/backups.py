@@ -77,7 +77,7 @@ def has_enough_space(file_path: Union[str, Path], multiplier: float = 2.0) -> bo
 
 def backup_file(file_path: Union[str, Path], max_backups: int = 5) -> Optional[BackupInfo]:
     if not has_enough_space(file_path):
-        color_print("[WARN] Недостаточно свободного места для резервной копии!", 'yellow')
+        color_print("[WARN] Недостаточно свободного места для резервной копии!", 'yellow')
         if not ask_yes_no("Продолжить без бэкапа?", default=False):
             return None
     
