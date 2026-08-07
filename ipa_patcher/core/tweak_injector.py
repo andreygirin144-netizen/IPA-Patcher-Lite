@@ -15,53 +15,275 @@ from .macho import (
 )
 from .substrate import inject_substrate, patch_tweak_substrate_dependencies
 from .constants import MIN_HEADER_PADDING, MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32, FAT_MAGIC, FAT_CIGAM
+from .plist_editor import load_plist
 from utils import color_print, log_message, ask_yes_no
 
 ARM64_CPUTYPE = 0x0100000C
 
+TWEAK_PATTERNS = {
+    'ellekit': {
+        'files': ['libellekit.dylib', 'libinjector.dylib', 'libblackjack.dylib'],
+        'frameworks': [],
+        'substrate_required': True,
+        'substrate_name': 'sb.dylib',
+        'search_paths': ['usr/lib/', 'usr/lib/ellekit/', 'Library/MobileSubstrate/DynamicLibraries/']
+    },
+    'libhooker': {
+        'files': ['libhooker.dylib', 'TweakInject.dylib', 'TweakLoader.dylib'],
+        'frameworks': [],
+        'substrate_required': False,
+        'substrate_name': 'libhooker.dylib',
+        'search_paths': ['usr/lib/', 'usr/local/lib/', 'Library/MobileSubstrate/DynamicLibraries/']
+    },
+    'substrate': {
+        'files': ['libsubstrate.dylib'],
+        'frameworks': [],
+        'substrate_required': True,
+        'substrate_name': 'sb.dylib',
+        'search_paths': ['usr/lib/', 'Library/MobileSubstrate/DynamicLibraries/']
+    },
+    'classic': {
+        'files': ['MobileSafety.dylib', 'pspawn.dylib'],
+        'frameworks': [],
+        'substrate_required': True,
+        'substrate_name': 'sb.dylib',
+        'search_paths': ['Library/MobileSubstrate/DynamicLibraries/', 'usr/lib/']
+    },
+    'roothide': {
+        'files': ['libroothide.dylib', 'libellekit.dylib'],
+        'frameworks': [],
+        'substrate_required': True,
+        'substrate_name': 'sb.dylib',
+        'search_paths': ['usr/lib/', 'usr/local/lib/', 'Library/MobileSubstrate/DynamicLibraries/'],
+        'roothide': True
+    },
+    'chimera': {
+        'files': ['libhooker.dylib', 'libellekit.dylib'],
+        'frameworks': ['libhooker.framework'],
+        'substrate_required': False,
+        'substrate_name': 'libhooker.dylib',
+        'search_paths': ['usr/lib/', 'usr/local/lib/', 'Library/MobileSubstrate/DynamicLibraries/']
+    },
+    'odyssey': {
+        'files': ['libhooker.dylib', 'libellekit.dylib', 'libinjector.dylib'],
+        'frameworks': ['libhooker.framework'],
+        'substrate_required': False,
+        'substrate_name': 'libhooker.dylib',
+        'search_paths': ['usr/lib/', 'usr/local/lib/', 'Library/MobileSubstrate/DynamicLibraries/']
+    }
+}
+
+
+def detect_tweak_type(source_root):
+    detected = []
+    for root, dirs, files in os.walk(source_root):
+        for f in files:
+            if f == 'libellekit.dylib':
+                detected.append('ellekit')
+            elif f == 'libhooker.dylib':
+                detected.append('libhooker')
+            elif f == 'libsubstrate.dylib':
+                detected.append('substrate')
+            elif f == 'libroothide.dylib':
+                detected.append('roothide')
+            elif f == 'MobileSafety.dylib' or f == 'pspawn.dylib':
+                detected.append('classic')
+    
+    detected = list(set(detected))
+    
+    if 'libhooker' in detected and 'libellekit' in detected:
+        for root, dirs, files in os.walk(source_root):
+            for d in dirs:
+                if d == 'libhooker.framework':
+                    return 'odyssey'
+        return 'chimera'
+    
+    if 'libroothide' in detected:
+        return 'roothide'
+    
+    priority = ['ellekit', 'libhooker', 'substrate', 'classic']
+    for p in priority:
+        if p in detected:
+            return p
+    
+    return 'classic'
+
+
+def get_tweak_config(tweak_type):
+    return TWEAK_PATTERNS.get(tweak_type, TWEAK_PATTERNS['classic'])
+
+
+def find_dylibs_in_archive(source_root):
+    found = []
+    for root, _, files in os.walk(source_root):
+        for f in files:
+            if f.endswith('.dylib'):
+                full_path = os.path.join(root, f)
+                rel_path = os.path.relpath(full_path, source_root)
+                found.append((f, full_path, rel_path))
+    return found
+
+
+def find_frameworks_in_archive(source_root):
+    found = []
+    for root, dirs, files in os.walk(source_root):
+        for d in dirs:
+            if d.endswith('.framework'):
+                full_path = os.path.join(root, d)
+                rel_path = os.path.relpath(full_path, source_root)
+                binary_name = d.replace('.framework', '')
+                binary_path = os.path.join(full_path, binary_name)
+                found.append((d, full_path, rel_path, binary_path))
+    return found
+
+
+def copy_modern_tweak_files(source_root, frameworks_dir, tweak_type, copied_dylibs, copied_frameworks):
+    config = get_tweak_config(tweak_type)
+    copied_count = 0
+    
+    dylibs = find_dylibs_in_archive(source_root)
+    for name, src, rel_path in dylibs:
+        dst = os.path.join(frameworks_dir, name)
+        if not os.path.exists(dst):
+            try:
+                if os.path.exists(src) and os.path.isfile(src):
+                    try:
+                        with open(src, 'rb') as f:
+                            magic = f.read(4)
+                        valid_magic = (
+                            b'\xcf\xfa\xed\xfe',
+                            b'\xfe\xed\xfa\xcf',
+                            b'\xca\xfe\xba\xbe',
+                            b'\xbe\xba\xfe\xca'
+                        )
+                        if magic not in valid_magic:
+                            color_print(f"  Skipped (not a valid Mach-O): {name}", 'yellow')
+                            continue
+                    except:
+                        continue
+                    shutil.copy2(src, dst)
+                    patch_tweak_substrate_dependencies(dst)
+                    copied_dylibs.append((name, dst))
+                    color_print(f"Copied .dylib: {name} (from: {rel_path})", 'hotpink')
+                    copied_count += 1
+                else:
+                    color_print(f"  Skipped (not a file): {name}", 'yellow')
+            except Exception as e:
+                color_print(f"  Failed to copy {name}: {e}", 'yellow')
+                continue
+    
+    frameworks = find_frameworks_in_archive(source_root)
+    if frameworks:
+        color_print(f"Found {len(frameworks)} framework(s) in archive:", 'cyan')
+    
+    for name, src, rel_path, binary_path in frameworks:
+        dst = os.path.join(frameworks_dir, name)
+        if os.path.isdir(src) and not os.path.exists(dst):
+            try:
+                has_binary = os.path.isfile(binary_path)
+                
+                if has_binary:
+                    try:
+                        with open(binary_path, 'rb') as f:
+                            magic = f.read(4)
+                        valid_magic = (
+                            b'\xcf\xfa\xed\xfe',
+                            b'\xfe\xed\xfa\xcf',
+                            b'\xca\xfe\xba\xbe',
+                            b'\xbe\xba\xfe\xca'
+                        )
+                        if magic not in valid_magic:
+                            color_print(f"  Framework {name} has invalid binary, copying anyway...", 'yellow')
+                            has_binary = False
+                    except:
+                        has_binary = False
+                else:
+                    color_print(f"  Framework {name} has no binary, copying anyway...", 'yellow')
+                
+                shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
+                
+                if has_binary:
+                    for root2, _, files2 in os.walk(dst):
+                        for f2 in files2:
+                            if f2 == name.replace('.framework', ''):
+                                fw_bin = os.path.join(root2, f2)
+                                if os.path.isfile(fw_bin) and is_macho_binary(fw_bin):
+                                    patch_tweak_substrate_dependencies(fw_bin)
+                
+                copied_frameworks.append((name, dst))
+                color_print(f"Copied .framework: {name} (from: {rel_path})", 'hotpink')
+                copied_count += 1
+            except Exception as e:
+                color_print(f"  Failed to copy framework {name}: {e}", 'yellow')
+                continue
+    
+    return copied_count
+
+
+def inject_into_appex(app_dir, tweak_path, plist_data, config=None):
+    if config is None:
+        from .constants import PatchConfig
+        config = PatchConfig()
+    
+    plugins_path = os.path.join(app_dir, "PlugIns")
+    if not os.path.isdir(plugins_path):
+        return []
+    
+    injected = []
+    for appex in os.listdir(plugins_path):
+        if appex.endswith('.appex'):
+            appex_path = os.path.join(plugins_path, appex)
+            appex_plist_path = os.path.join(appex_path, "Info.plist")
+            if os.path.isfile(appex_plist_path):
+                try:
+                    appex_plist_data = load_plist(appex_plist_path)
+                    ok, msg = inject_tweaks(
+                        appex_path,
+                        tweak_path,
+                        appex_plist_data,
+                        os.path.dirname(os.path.dirname(appex_path)),
+                        config
+                    )
+                    if ok:
+                        injected.append(appex)
+                        color_print(f"[SUCCESS] Инъекция в {appex} успешна", 'green')
+                    else:
+                        color_print(f"[WARN] Инъекция в {appex} не удалась: {msg}", 'yellow')
+                except Exception as e:
+                    color_print(f"[WARN] Не удалось инъектировать в {appex}: {e}", 'yellow')
+    
+    return injected
+
 
 def verify_binary_architecture(binary_path):
     if not os.path.isfile(binary_path):
-        return False, "Файл не найден"
-    
+        return False, "Файл не найден"
     try:
         with open(binary_path, 'rb') as f:
             magic_bytes = f.read(4)
-            
         if len(magic_bytes) < 4:
             return False, "Бинарник поврежден или пуст"
-            
         if magic_bytes in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf'):
-            return True, "Чистый ARM64 / ARM64e бинарник. Отлично."
-            
+            return True, "Чистый ARM64 / ARM64e бинарник. Отлично."
         if magic_bytes in (b'\xce\xfa\xed\xfe', b'\xfe\xed\xfa\xce'):
-            return False, "Критическая ошибка: Это 32-битный бинарник (ARMv7/v7s)."
-            
+            return False, "Критическая ошибка: Это 32-битный бинарник (ARMv7/v7s)."
         if magic_bytes in (b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'):
             endian = '>' if magic_bytes == b'\xca\xfe\xba\xbe' else '<'
-            
             with open(binary_path, 'rb') as f:
                 header_data = f.read(4096)
-                
             nfat = struct.unpack_from(endian + 'I', header_data, 4)[0]
-            
             if nfat > 20 or nfat < 1:
                 return False, f"Ошибка структуры FAT заголовка: неверное количество архитектур ({nfat})"
-            
             has_modern_arch = False
             detected_archs = []
-            
             for i in range(nfat):
                 offset = 8 + i * 20
                 if offset + 20 > len(header_data):
                     break
-                    
                 cputype = struct.unpack_from(endian + 'i', header_data, offset)[0]
                 cpusubtype = struct.unpack_from(endian + 'i', header_data, offset + 4)[0]
-                
                 ARM_CPUTYPE = 12
                 ARM64_CPUTYPE = 0x0100000C
-                
                 if cputype == ARM_CPUTYPE:
                     detected_archs.append("ARMv7/v7s (32-bit)")
                 elif cputype == ARM64_CPUTYPE:
@@ -74,15 +296,12 @@ def verify_binary_architecture(binary_path):
                         has_modern_arch = True
                 else:
                     detected_archs.append(f"Unknown ({hex(cputype)})")
-            
             arch_list_str = ", ".join(detected_archs)
             if has_modern_arch:
-                return True, f"FAT бинарник. Найдены архитектуры: [{arch_list_str}]. Разрешено прореживание."
+                return True, f"FAT бинарник. Найдены архитектуры: [{arch_list_str}]. Разрешено прореживание."
             else:
-                return False, f"Критическая ошибка: В FAT бинарнике нет 64-битного среза! Найдены только: [{arch_list_str}]."
-                
-        return False, f"Неизвестный формат файла (Magic: {magic_bytes.hex()}). Это не Mach-O бинарник."
-        
+                return False, f"Критическая ошибка: В FAT бинарнике нет 64-битного среза! Найдены только: [{arch_list_str}]."
+        return False, f"Неизвестный формат файла (Magic: {magic_bytes.hex()}). Это не Mach-O бинарник."
     except Exception as e:
         return False, f"Ошибка при анализе структуры бинарника: {e}"
 
@@ -90,63 +309,48 @@ def verify_binary_architecture(binary_path):
 def verify_dylib_headers(dylib_path):
     if not os.path.isfile(dylib_path):
         return False, "File not found"
-    
     try:
         with open(dylib_path, 'rb') as f:
             magic_bytes = f.read(4)
             if len(magic_bytes) < 4:
                 return False, "File too small"
-            
             magic_le = struct.unpack('<I', magic_bytes)[0]
             magic_be = struct.unpack('>I', magic_bytes)[0]
-            
             valid_magic = (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32, FAT_MAGIC, FAT_CIGAM)
             if magic_le not in valid_magic and magic_be not in valid_magic:
                 return False, "Not a valid Mach-O binary"
-            
             if magic_le in (MH_MAGIC_32, MH_CIGAM_32):
                 return False, "32-bit dylib not supported"
-            
             f.seek(0)
             file_data = f.read()
-            
             if magic_be in (FAT_MAGIC, FAT_CIGAM):
                 slices = get_arch_slices(bytearray(file_data))
                 if not slices:
                     return False, "Failed to parse FAT headers"
-                
                 has_arm64 = False
                 has_arm64e = False
-                
                 for s in slices:
                     if is_arm64_slice(s['cputype'], s['cpusubtype']):
                         has_arm64 = True
                         clean_subtype = s['cpusubtype'] & 0x0FFFFFFF
                         if clean_subtype == 2:
                             has_arm64e = True
-                
                 if not has_arm64:
                     return False, "No ARM64 slice found in FAT binary"
-                
                 arch_type = "ARM64e" if has_arm64e else "ARM64"
                 if has_arm64 and has_arm64e:
                     arch_type = "ARM64 + ARM64e"
                 return True, f"Valid FAT binary with {arch_type} slice(s)"
-            
             if len(file_data) >= 12:
                 endian = '>' if magic_le in (MH_CIGAM_64, MH_CIGAM_32) else '<'
                 cputype = struct.unpack_from(endian + 'i', file_data, 4)[0]
                 cpusubtype = struct.unpack_from(endian + 'i', file_data, 8)[0]
-                
                 if not is_arm64_slice(cputype, cpusubtype):
                     return False, f"Not ARM64 architecture (cputype: {hex(cputype)})"
-                
                 clean_subtype = cpusubtype & 0x0FFFFFFF
                 arch_type = "ARM64e" if clean_subtype == 2 else "ARM64"
                 return True, f"Valid {arch_type} binary"
-            
             return False, "Unable to determine architecture"
-            
     except Exception as e:
         return False, f"Error analyzing dylib: {e}"
 
@@ -167,7 +371,7 @@ def count_modules_in_tweak(tweak_path):
             return max(count, 1)
         elif ext == '.deb':
             if sys.platform == 'win32':
-                count = 3
+                count = 5
             else:
                 try:
                     import subprocess
@@ -178,19 +382,27 @@ def count_modules_in_tweak(tweak_path):
                     if result.returncode == 0:
                         for line in result.stdout.splitlines():
                             if 'data.tar.' in line:
-                                count += 3
+                                count += 8
                                 break
                     else:
-                        count = 3
+                        count = 5
                 except:
-                    count = 3
+                    count = 5
             return max(count, 1)
         elif ext in ('.tar', '.lzma', '.xz', '.gz', '.tgz'):
-            return 2
+            try:
+                import tarfile
+                with tarfile.open(tweak_path, 'r:*') as tar:
+                    for member in tar.getmembers():
+                        if member.name.endswith('.dylib') or '.framework/' in member.name:
+                            count += 1
+                return max(count, 3)
+            except:
+                return 3
         else:
-            return 2
+            return 3
     except:
-        return 2
+        return 3
 
 
 def parse_dependencies(control_path):
@@ -223,25 +435,36 @@ def resolve_dependencies(dep_name, source_root, frameworks_dir, copied_dylibs, c
                 src = os.path.join(root, f)
                 dst = os.path.join(frameworks_dir, f)
                 if not os.path.exists(dst):
-                    shutil.copy2(src, dst)
-                    patch_tweak_substrate_dependencies(dst)
-                    copied_dylibs.append((f, dst))
-                    color_print(f"Resolved dependency: {f}", 'hotpink')
-                    found = True
+                    try:
+                        if os.path.exists(src) and os.path.isfile(src):
+                            shutil.copy2(src, dst)
+                            patch_tweak_substrate_dependencies(dst)
+                            copied_dylibs.append((f, dst))
+                            color_print(f"Resolved dependency: {f}", 'hotpink')
+                            found = True
+                        else:
+                            color_print(f"  Skipped (not a file): {f}", 'yellow')
+                    except Exception as e:
+                        color_print(f"  Failed to resolve {f}: {e}", 'yellow')
+                        continue
             elif f.endswith('.framework') and clean_name in f.replace('.framework', ''):
                 src_path = os.path.join(root, f)
                 dst_path = os.path.join(frameworks_dir, f)
                 if os.path.isdir(src_path) and not os.path.exists(dst_path):
-                    shutil.copytree(src_path, dst_path, symlinks=False, ignore_dangling_symlinks=True)
-                    for root2, _, files2 in os.walk(dst_path):
-                        for f2 in files2:
-                            if f2 == f.replace('.framework', ''):
-                                fw_bin = os.path.join(root2, f2)
-                                if os.path.isfile(fw_bin) and is_macho_binary(fw_bin):
-                                    patch_tweak_substrate_dependencies(fw_bin)
-                    copied_frameworks.append((f, dst_path))
-                    color_print(f"Resolved framework dependency: {f}", 'hotpink')
-                    found = True
+                    try:
+                        shutil.copytree(src_path, dst_path, symlinks=False, ignore_dangling_symlinks=True)
+                        for root2, _, files2 in os.walk(dst_path):
+                            for f2 in files2:
+                                if f2 == f.replace('.framework', ''):
+                                    fw_bin = os.path.join(root2, f2)
+                                    if os.path.isfile(fw_bin) and is_macho_binary(fw_bin):
+                                        patch_tweak_substrate_dependencies(fw_bin)
+                        copied_frameworks.append((f, dst_path))
+                        color_print(f"Resolved framework dependency: {f}", 'hotpink')
+                        found = True
+                    except Exception as e:
+                        color_print(f"  Failed to resolve framework {f}: {e}", 'yellow')
+                        continue
     return found
 
 
@@ -251,9 +474,7 @@ def check_header_space(main_executable, required_bytes):
             data = bytearray(f.read())
         if len(data) < 4:
             return True
-            
         magic_be = struct.unpack_from('>I', data, 0)[0]
-        
         if magic_be in (FAT_MAGIC, FAT_CIGAM):
             slices = get_arch_slices(data)
             for s in slices:
@@ -317,7 +538,6 @@ def safe_extract_archive(archive_path, output_dir):
             libarchive = ctypes.CDLL('/usr/lib/libarchive.2.dylib')
         except OSError:
             raise RuntimeError("Failed to load system libarchive.2.dylib")
-        
         libarchive.archive_read_new.restype = ctypes.c_void_p
         libarchive.archive_read_support_filter_all.argtypes = [ctypes.c_void_p]
         libarchive.archive_read_support_format_all.argtypes = [ctypes.c_void_p]
@@ -331,22 +551,18 @@ def safe_extract_archive(archive_path, output_dir):
         libarchive.archive_read_free.restype = ctypes.c_int
         libarchive.archive_entry_pathname.argtypes = [ctypes.c_void_p]
         libarchive.archive_entry_pathname.restype = ctypes.c_char_p
-        
         archive = libarchive.archive_read_new()
         libarchive.archive_read_support_filter_all(archive)
         libarchive.archive_read_support_format_all(archive)
-        
         if libarchive.archive_read_open_filename(archive, archive_path.encode('utf-8'), 10240) != 0:
             libarchive.archive_read_free(archive)
             raise RuntimeError(f"Failed to open archive: {archive_path}")
-        
         entry = ctypes.c_void_p()
         os.makedirs(output_dir, exist_ok=True)
         old_cwd = os.getcwd()
         os.chdir(output_dir)
         extract_flags = 22
         real_output = os.path.realpath(output_dir)
-        
         try:
             while libarchive.archive_read_next_header(archive, ctypes.byref(entry)) == 0:
                 entry_path = libarchive.archive_entry_pathname(entry)
@@ -359,81 +575,63 @@ def safe_extract_archive(archive_path, output_dir):
         finally:
             libarchive.archive_read_free(archive)
             os.chdir(old_cwd)
-        
         color_print(f"Extracted: {os.path.basename(archive_path)}", 'hotpink')
         return
-    
     if sys.platform != 'win32':
         import subprocess
         if os.path.splitext(archive_path)[1].lower() == '.deb':
             subprocess.run(['ar', 'x', archive_path], cwd=output_dir, check=True)
             return
-    
     import tarfile
-    
     if not os.path.exists(archive_path):
         raise FileNotFoundError(f"Archive not found: {archive_path}")
-    
     os.makedirs(output_dir, exist_ok=True)
     real_output = os.path.realpath(output_dir)
     archive_ext = os.path.splitext(archive_path)[1].lower()
-    
     try:
         if archive_ext == '.deb':
             with open(archive_path, 'rb') as f:
                 magic = f.read(8)
                 if magic != b'!<arch>\n':
-                    raise ValueError("Файл не является валидным .deb / ar архивом")
-                
+                    raise ValueError("Файл не является валидным .deb / ar архивом")
                 while True:
                     header = f.read(60)
                     if not header or len(header) < 60:
                         break
-                    
                     filename = header[:16].decode('ascii', errors='ignore').strip().rstrip('/')
-                    
                     try:
                         file_size = int(header[48:58].decode('ascii').strip())
                     except ValueError:
                         break
-                    
                     file_data = f.read(file_size)
-                    
                     if file_size % 2 != 0:
                         f.seek(1, os.SEEK_CUR)
-                    
                     if filename:
                         target_file = os.path.join(output_dir, filename)
                         with open(target_file, 'wb') as out_f:
                             out_f.write(file_data)
-        
         elif archive_ext in ('.tar', '.tgz', '.gz', '.bz2', '.xz', '.lzma'):
             with tarfile.open(archive_path, 'r:*') as tar:
                 members = tar.getmembers()
                 symlinks_to_resolve = []
-
                 for member in members:
                     target_path = os.path.join(output_dir, member.name)
                     if not os.path.realpath(target_path).startswith(real_output):
                         raise ValueError("Path traversal attempt")
-
                     if member.isdir():
                         os.makedirs(target_path, exist_ok=True)
                     elif member.isfile():
                         tar.extract(member, path=output_dir)
                     elif member.issym() or member.islnk():
                         symlinks_to_resolve.append((member.name, member.linkname))
-
                 for link_name, link_target in symlinks_to_resolve:
                     link_path = os.path.join(output_dir, link_name)
                     os.makedirs(os.path.dirname(link_path), exist_ok=True)
-
                     if link_target.startswith('/') or link_target.startswith('\\'):
                         target_real_path = os.path.normpath(os.path.join(output_dir, link_target.lstrip('/\\')))
                     else:
                         link_dir = os.path.dirname(link_path)
                         target_real_path = os.path.normpath(os.path.join(link_dir, link_target))
-
                     if os.path.exists(target_real_path):
                         try:
                             if os.path.isdir(target_real_path):
@@ -452,10 +650,8 @@ def safe_extract_archive(archive_path, output_dir):
                                     f_out.write(f_in.read())
                         except Exception:
                             pass
-        
         else:
             raise ValueError(f"Unsupported archive format: {archive_ext}")
-            
     except Exception as e:
         color_print(f"Ошибка распаковки {archive_path}: {e}", 'red')
         raise
@@ -524,56 +720,45 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
     if config is None:
         from .constants import PatchConfig
         config = PatchConfig()
-    
     use_rpath = config.use_rpath
     enable_substrate = config.substrate_mode != 'none'
     substrate_source = config.substrate_source
-    
     if not os.path.exists(tweak_path):
         return False, "File not found"
-    
     main_executable = get_main_executable(app_dir, plist_data)
     if not main_executable:
         return False, "Main executable not found"
     if not is_macho_binary(main_executable):
         return False, "Main binary is not Mach-O"
-    
-    color_print(f"[*] Анализ архитектуры исполняемого файла: {os.path.basename(main_executable)}", 'cyan')
+    color_print(f"[*] Анализ архитектуры исполняемого файла: {os.path.basename(main_executable)}", 'cyan')
     is_supported, status_message = verify_binary_architecture(main_executable)
-    
     if not is_supported:
         color_print(f"[ERROR] {status_message}", 'red')
         log_message(f"Architecture check failed: {status_message}", 'ERROR')
         return False, "Unsupported architecture"
-    
     color_print(f"[SUCCESS] {status_message}", 'green')
     log_message(f"Architecture check passed: {status_message}", 'INFO')
-    
     if is_fat_binary(main_executable):
         color_print("[INFO] FAT binary detected, thinning to arm64 only...", 'cyan')
         if thin_binary_to_arm64(main_executable):
             color_print("[INFO] Binary thinned to arm64 successfully", 'green')
         else:
             color_print("[WARN] Failed to thin binary, continuing with FAT (may cause issues)", 'yellow')
-    
     frameworks_dir = os.path.join(app_dir, "Frameworks")
     os.makedirs(frameworks_dir, exist_ok=True)
-    
     temp_extract = None
     copied_dylibs = []
     copied_frameworks = []
     copied_bundles = []
     direct_dylib = None
-    
     ext = os.path.splitext(tweak_path)[1].lower()
-    
     try:
         if ext == '.dylib':
             direct_dylib = tweak_path
             is_valid, msg = verify_dylib_headers(tweak_path)
             if not is_valid:
                 color_print(f"[WARN] Dylib verification failed: {msg}", 'yellow')
-                if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
+                if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
                     return False, "Dylib verification failed"
             else:
                 color_print(f"[INFO] Dylib verification passed: {msg}", 'green')
@@ -607,91 +792,124 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
                     source_root = temp_extract
             else:
                 return False, f"Unsupported file format: {ext}"
-            
-            ms_path = os.path.join(source_root, 'Library', 'MobileSubstrate', 'DynamicLibraries')
-            if os.path.exists(ms_path) and os.path.isdir(ms_path):
-                color_print(f"Found DynamicLibraries folder: {ms_path}", 'hotpink')
-                for item in os.listdir(ms_path):
-                    item_path = os.path.join(ms_path, item)
-                    if item.endswith('.dylib') and not os.path.isdir(item_path):
-                        if os.path.islink(item_path):
-                            link_target = os.readlink(item_path)
-                            if link_target.startswith('/'):
-                                real_path = os.path.join(source_root, link_target.lstrip('/'))
-                            else:
-                                real_path = os.path.abspath(os.path.join(os.path.dirname(item_path), link_target))
-                            if os.path.exists(real_path):
-                                dst = os.path.join(frameworks_dir, item)
-                                shutil.copy2(real_path, dst)
-                                patch_tweak_substrate_dependencies(dst)
-                                copied_dylibs.append((item, dst))
-                                color_print(f"Copied .dylib (from symlink): {item}", 'hotpink')
-                            else:
-                                color_print(f"Symlink {item} points to non-existent file: {real_path}", 'yellow')
-                        else:
-                            dst = os.path.join(frameworks_dir, item)
-                            shutil.copy2(item_path, dst)
-                            patch_tweak_substrate_dependencies(dst)
-                            copied_dylibs.append((item, dst))
-                            color_print(f"Copied .dylib: {item}", 'hotpink')
-            else:
-                color_print("DynamicLibraries folder not found, searching for .dylib...", 'hotpink')
+            tweak_type = detect_tweak_type(source_root)
+            color_print(f"[INFO] Обнаружен тип твика: {tweak_type}", 'cyan')
+            if tweak_type in ['ellekit', 'libhooker', 'roothide', 'chimera', 'odyssey']:
+                copy_modern_tweak_files(source_root, frameworks_dir, tweak_type, copied_dylibs, copied_frameworks)
                 for root, _, files in os.walk(source_root):
                     for f in files:
                         if f.endswith('.dylib'):
                             src = os.path.join(root, f)
                             dst = os.path.join(frameworks_dir, f)
                             if not os.path.exists(dst):
-                                shutil.copy2(src, dst)
-                                patch_tweak_substrate_dependencies(dst)
-                                copied_dylibs.append((f, dst))
-                                color_print(f"Copied .dylib: {f}", 'hotpink')
-            
-            fw_path = os.path.join(source_root, 'Library', 'Frameworks')
-            if os.path.exists(fw_path) and os.path.isdir(fw_path):
-                color_print(f"Found Frameworks folder: {fw_path}", 'hotpink')
-                for item in os.listdir(fw_path):
-                    if item.endswith('.framework'):
-                        src = os.path.join(fw_path, item)
-                        dst = os.path.join(frameworks_dir, item)
-                        if os.path.isdir(src) and not os.path.exists(dst):
-                            shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
-                            for root2, _, files2 in os.walk(dst):
-                                for f2 in files2:
-                                    if f2 == item.replace('.framework', ''):
-                                        fw_bin = os.path.join(root2, f2)
-                                        if os.path.isfile(fw_bin) and is_macho_binary(fw_bin):
-                                            patch_tweak_substrate_dependencies(fw_bin)
-                            copied_frameworks.append((item, dst))
-                            color_print(f"Copied .framework: {item}", 'hotpink')
+                                try:
+                                    if os.path.exists(src) and os.path.isfile(src):
+                                        shutil.copy2(src, dst)
+                                        patch_tweak_substrate_dependencies(dst)
+                                        copied_dylibs.append((f, dst))
+                                        color_print(f"Copied .dylib: {f}", 'hotpink')
+                                    else:
+                                        color_print(f"  Skipped (not a file): {f}", 'yellow')
+                                except Exception as e:
+                                    color_print(f"  Failed to copy {f}: {e}", 'yellow')
+                                    continue
             else:
-                color_print("Library/Frameworks folder not found, searching for .framework...", 'hotpink')
-                for root, dirs, files in os.walk(source_root):
-                    for d in dirs:
-                        if d.endswith('.framework'):
-                            src = os.path.join(root, d)
-                            dst = os.path.join(frameworks_dir, d)
+                ms_path = os.path.join(source_root, 'Library', 'MobileSubstrate', 'DynamicLibraries')
+                if os.path.exists(ms_path) and os.path.isdir(ms_path):
+                    color_print(f"Found DynamicLibraries folder: {ms_path}", 'hotpink')
+                    for item in os.listdir(ms_path):
+                        item_path = os.path.join(ms_path, item)
+                        if item.endswith('.dylib') and not os.path.isdir(item_path):
+                            if os.path.islink(item_path):
+                                link_target = os.readlink(item_path)
+                                if link_target.startswith('/'):
+                                    real_path = os.path.join(source_root, link_target.lstrip('/'))
+                                else:
+                                    real_path = os.path.abspath(os.path.join(os.path.dirname(item_path), link_target))
+                                if os.path.exists(real_path):
+                                    dst = os.path.join(frameworks_dir, item)
+                                    shutil.copy2(real_path, dst)
+                                    patch_tweak_substrate_dependencies(dst)
+                                    copied_dylibs.append((item, dst))
+                                    color_print(f"Copied .dylib (from symlink): {item}", 'hotpink')
+                                else:
+                                    color_print(f"Symlink {item} points to non-existent file: {real_path}", 'yellow')
+                            else:
+                                dst = os.path.join(frameworks_dir, item)
+                                shutil.copy2(item_path, dst)
+                                patch_tweak_substrate_dependencies(dst)
+                                copied_dylibs.append((item, dst))
+                                color_print(f"Copied .dylib: {item}", 'hotpink')
+                else:
+                    color_print("DynamicLibraries folder not found, searching for .dylib...", 'hotpink')
+                    for root, _, files in os.walk(source_root):
+                        for f in files:
+                            if f.endswith('.dylib'):
+                                src = os.path.join(root, f)
+                                dst = os.path.join(frameworks_dir, f)
+                                if not os.path.exists(dst):
+                                    try:
+                                        if os.path.exists(src) and os.path.isfile(src):
+                                            shutil.copy2(src, dst)
+                                            patch_tweak_substrate_dependencies(dst)
+                                            copied_dylibs.append((f, dst))
+                                            color_print(f"Copied .dylib: {f}", 'hotpink')
+                                        else:
+                                            color_print(f"  Skipped (not a file): {f}", 'yellow')
+                                    except Exception as e:
+                                        color_print(f"  Failed to copy {f}: {e}", 'yellow')
+                                        continue
+                fw_path = os.path.join(source_root, 'Library', 'Frameworks')
+                if os.path.exists(fw_path) and os.path.isdir(fw_path):
+                    color_print(f"Found Frameworks folder: {fw_path}", 'hotpink')
+                    for item in os.listdir(fw_path):
+                        if item.endswith('.framework'):
+                            src = os.path.join(fw_path, item)
+                            dst = os.path.join(frameworks_dir, item)
                             if os.path.isdir(src) and not os.path.exists(dst):
                                 shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
                                 for root2, _, files2 in os.walk(dst):
                                     for f2 in files2:
-                                        if f2 == d.replace('.framework', ''):
+                                        if f2 == item.replace('.framework', ''):
                                             fw_bin = os.path.join(root2, f2)
                                             if os.path.isfile(fw_bin) and is_macho_binary(fw_bin):
                                                 patch_tweak_substrate_dependencies(fw_bin)
-                                copied_frameworks.append((d, dst))
-                                color_print(f"Copied .framework: {d}", 'hotpink')
-            
+                                copied_frameworks.append((item, dst))
+                                color_print(f"Copied .framework: {item}", 'hotpink')
+                else:
+                    color_print("Library/Frameworks folder not found, searching for .framework...", 'hotpink')
+                    for root, dirs, files in os.walk(source_root):
+                        for d in dirs:
+                            if d.endswith('.framework'):
+                                src = os.path.join(root, d)
+                                dst = os.path.join(frameworks_dir, d)
+                                if os.path.isdir(src) and not os.path.exists(dst):
+                                    try:
+                                        shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
+                                        for root2, _, files2 in os.walk(dst):
+                                            for f2 in files2:
+                                                if f2 == d.replace('.framework', ''):
+                                                    fw_bin = os.path.join(root2, f2)
+                                                    if os.path.isfile(fw_bin) and is_macho_binary(fw_bin):
+                                                        patch_tweak_substrate_dependencies(fw_bin)
+                                        copied_frameworks.append((d, dst))
+                                        color_print(f"Copied .framework: {d}", 'hotpink')
+                                    except Exception as e:
+                                        color_print(f"  Failed to copy framework {d}: {e}", 'yellow')
+                                        continue
             for root, dirs, files in os.walk(source_root):
                 for d in dirs:
                     if d.endswith('.bundle'):
                         src = os.path.join(root, d)
                         dst = os.path.join(frameworks_dir, d)
                         if os.path.isdir(src) and not os.path.exists(dst):
-                            shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
-                            copied_bundles.append((d, dst))
-                            color_print(f"Copied .bundle: {d}", 'hotpink')
-            
+                            try:
+                                shutil.copytree(src, dst, symlinks=False, ignore_dangling_symlinks=True)
+                                copied_bundles.append((d, dst))
+                                color_print(f"Copied .bundle: {d}", 'hotpink')
+                            except Exception as e:
+                                color_print(f"  Failed to copy bundle {d}: {e}", 'yellow')
+                                continue
             for unwanted in ['Applications', 'DEBIAN']:
                 unwanted_path = os.path.join(source_root, unwanted)
                 if os.path.exists(unwanted_path):
@@ -705,71 +923,69 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
     finally:
         if temp_extract and os.path.exists(temp_extract):
             shutil.rmtree(temp_extract, ignore_errors=True)
-    
     if direct_dylib:
         dylib_name = os.path.basename(direct_dylib)
         dst = os.path.join(frameworks_dir, dylib_name)
         if not os.path.exists(dst):
-            shutil.copy2(direct_dylib, dst)
-            patch_tweak_substrate_dependencies(dst)
-            copied_dylibs.append((dylib_name, dst))
-            color_print(f"Copied direct .dylib: {dylib_name}", 'hotpink')
-    
+            try:
+                if os.path.exists(direct_dylib) and os.path.isfile(direct_dylib):
+                    shutil.copy2(direct_dylib, dst)
+                    patch_tweak_substrate_dependencies(dst)
+                    copied_dylibs.append((dylib_name, dst))
+                    color_print(f"Copied direct .dylib: {dylib_name}", 'hotpink')
+                else:
+                    color_print(f"  Direct dylib not found: {dylib_name}", 'yellow')
+            except Exception as e:
+                color_print(f"  Failed to copy direct dylib: {e}", 'yellow')
     if not copied_dylibs and not copied_frameworks and not copied_bundles and not direct_dylib:
         return False, "No tweaks found to inject"
-    
     estimated_commands = len(copied_dylibs) + len(copied_frameworks)
     if enable_substrate:
         estimated_commands += 1
     required_space = estimated_commands * 48 + 16
-    
     if not check_header_space(main_executable, required_space + MIN_HEADER_PADDING):
         return False, (
             f"Not enough space in Mach-O header for {estimated_commands} "
             f"load command(s) (~{required_space} bytes needed). "
             f"Injection aborted to avoid corrupting the binary."
         )
-    
     ensure_executable_rpath(main_executable)
     ensure_frameworks_rpath(main_executable)
-    
     if enable_substrate:
         substrate_path = inject_substrate(app_dir, script_dir, substrate_source)
         if substrate_path is None:
             color_print("Error: failed to copy substrate", 'red')
             return False, "Substrate injection failed"
-        
         install_substrate = "@executable_path/sb.dylib"
-        
         if not inject_lc_load_dylib(main_executable, install_substrate):
             color_print("Failed to add substrate to LC_LOAD_DYLIB", 'yellow')
         else:
             color_print(f"Substrate universally added: {install_substrate}", 'hotpink')
-    
     if use_rpath:
         path_prefix = b"@rpath/Frameworks/"
+    elif config.use_loader_path:
+        path_prefix = b"@loader_path/Frameworks/"
     else:
         path_prefix = b"@executable_path/Frameworks/"
-    
     replacement_pairs = [
         (b"/Library/MobileSubstrate/DynamicLibraries/", path_prefix),
     ]
-    
     fw_path_prefix = "@rpath/"
     for fw_name, _ in copied_frameworks:
         binary_name = fw_name.replace('.framework', '')
         old_fw_path = f"/Library/Frameworks/{fw_name}/{binary_name}".encode('utf-8')
         new_fw_path = f"{fw_path_prefix}{fw_name}/{binary_name}".encode('utf-8')
         replacement_pairs.append((old_fw_path, new_fw_path))
-    
     patch_all_macho_in_dir(frameworks_dir, replacement_pairs)
-    
     print("\n--- LC_LOAD_DYLIB ---")
     injected = []
     failed = []
-    
-    dylib_prefix = "@rpath/" if use_rpath else "@executable_path/Frameworks/"
-    
+    if use_rpath:
+        dylib_prefix = "@rpath/"
+    elif config.use_loader_path:
+        dylib_prefix = "@loader_path/"
+    else:
+        dylib_prefix = "@executable_path/Frameworks/"
     for name, path in copied_dylibs:
         install = f"{dylib_prefix}{os.path.basename(path)}"
         if inject_lc_load_dylib(main_executable, install):
@@ -778,7 +994,6 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
         else:
             failed.append(name)
             color_print(f"Failed to inject .dylib: {name}", 'yellow')
-    
     for name, fw_path in copied_frameworks:
         binary_name = name.replace('.framework', '')
         binary_path = os.path.join(fw_path, binary_name)
@@ -793,22 +1008,22 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, config=None):
         else:
             color_print(f"Binary not found in framework {name}", 'yellow')
             failed.append(name)
-    
     if injected:
         color_print(f"Successfully injected: {injected}", 'hotpink')
     if failed:
         color_print(f"Failed to inject: {failed}", 'yellow')
-    
     all_injected = list(set(injected + [name for name, _ in copied_frameworks if name not in failed]))
     if all_injected:
         color_print(f"Total successfully injected: {all_injected}", 'green')
-    
     if not injected and (copied_dylibs or copied_frameworks):
         return False, "Injection failed (not enough space in header)"
+    
+    appex_injected = inject_into_appex(app_dir, tweak_path, plist_data, config)
+    if appex_injected:
+        color_print(f"[INFO] Инъекция в расширения: {', '.join(appex_injected)}", 'green')
     
     if enable_substrate:
         msg = f"Substrate + {len(injected)} tweaks. Copied .bundle: {len(copied_bundles)}"
     else:
         msg = f"{len(injected)} tweaks (without substrate). Copied .bundle: {len(copied_bundles)}"
-    
     return True, msg
