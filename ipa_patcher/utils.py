@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+import time
 import datetime
 import logging
+import shutil
 
 try:
     import console
@@ -11,13 +13,18 @@ except ImportError:
     HAVE_CONSOLE = False
 
 DOCS_DIR = os.path.expanduser('~/Documents')
-LOGS_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Logs')
+WORKSPACE_DIR = os.path.join(DOCS_DIR, 'IPA_Workspace')
+
+LOGS_DIR = os.path.join(WORKSPACE_DIR, 'Logs_patcher')
+PATCHED_DIR = os.path.join(WORKSPACE_DIR, 'Patched_ipa')
+BACKUP_DIR = os.path.join(WORKSPACE_DIR, 'Backups')
+TEMP_DIR = os.path.join(WORKSPACE_DIR, 'Temp_ipa')
+
 LOG_FILE = os.path.join(LOGS_DIR, 'patcher.log')
-PATCHED_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Patched')
 
 
 def ensure_directories():
-    for dir_path in [LOGS_DIR, PATCHED_DIR]:
+    for dir_path in [WORKSPACE_DIR, LOGS_DIR, PATCHED_DIR, BACKUP_DIR, TEMP_DIR]:
         if not os.path.exists(dir_path):
             try:
                 os.makedirs(dir_path)
@@ -141,3 +148,15 @@ def format_file_size(size: int) -> str:
             return f"{size:.1f} {unit}"
         size /= 1024.0
     return f"{size:.1f} TB"
+
+
+def check_disk_space(required_mb=500):
+    try:
+        usage = shutil.disk_usage(WORKSPACE_DIR)
+        free_mb = usage.free / (1024 * 1024)
+        if free_mb < required_mb:
+            color_print(f"[WARN] Свободно: {free_mb:.0f} MB, требуется: {required_mb} MB", 'yellow')
+            return False
+        return True
+    except:
+        return True
