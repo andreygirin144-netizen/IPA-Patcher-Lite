@@ -7,7 +7,7 @@ from .core.exceptions import PatchError
 from .core.types import PatchType, SearchMode
 from .utils.hex_utils import HexUtils
 from .analyzers.macho import MachOAnalyzer
-from utils import color_print, ask_input, ask_yes_no, format_file_size
+from utils import color_print, ask_input, ask_yes_no, format_file_size, BACKUP_DIR
 
 
 class InteractiveCli:
@@ -21,8 +21,9 @@ class InteractiveCli:
         self.current_patch: Optional[dict] = None
         self.running: bool = True
         self.dump_mode: bool = False
+        self.has_changes: bool = False
 
-    def run(self, app_dir: str, file_path: str = None) -> None:
+    def run(self, app_dir: str, file_path: str = None) -> bool:
         self.app_dir = app_dir
         if file_path and os.path.isfile(file_path):
             self.selected_file = file_path
@@ -33,6 +34,7 @@ class InteractiveCli:
         color_print("\n[15] Hex & String Патчер", 'cyan')
         while self.running:
             self._show_menu()
+        return self.has_changes
 
     def _show_menu(self) -> None:
         print("\n  1. Одиночный патч")
@@ -137,7 +139,13 @@ class InteractiveCli:
             if 0 <= idx < len(self.offsets):
                 off = self.offsets[idx]
                 color_print(f"  Смещение: 0x{off:08X} (#{idx+1})", 'green')
-                self._edit_at_offset_from_dump(off)
+                print("")
+                with open(self.selected_file, 'rb') as f:
+                    mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                    context = self.engine.preview_context(self.selected_file, off, len(self.search_bytes), 16)
+                    mm.close()
+                print(context)
+                print("")
             else:
                 color_print(f"Номер {line_num} вне диапазона (1-{len(self.offsets)})", 'red')
         except:
@@ -496,6 +504,7 @@ class InteractiveCli:
             mm.close()
         
         color_print("Заменено", 'green')
+        self.has_changes = True
         
         with open(self.selected_file, 'rb') as f:
             mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
@@ -527,7 +536,6 @@ class InteractiveCli:
                     if 0 <= idx < len(self.offsets):
                         offset = self.offsets[idx]
                         color_print(f"0x{offset:08X} (#{idx+1})", 'green')
-                        self._edit_at_offset_from_dump(offset)
                     else:
                         color_print("Неверный номер", 'red')
                         return
@@ -541,7 +549,6 @@ class InteractiveCli:
                         offset = int(offset_str, 16)
                     else:
                         offset = int(offset_str)
-                    self._edit_at_offset_from_dump(offset)
                 except:
                     color_print("Неверный формат", 'red')
                     return
@@ -552,10 +559,72 @@ class InteractiveCli:
                     offset = int(offset_str, 16)
                 else:
                     offset = int(offset_str)
-                self._edit_at_offset_from_dump(offset)
             except:
                 color_print("Неверный формат", 'red')
                 return
+        
+        file_size = os.path.getsize(self.selected_file)
+        if offset >= file_size:
+            color_print(f"Смещение {offset} > {file_size}", 'red')
+            return
+        
+        with open(self.selected_file, 'rb') as f:
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            current_bytes = mm[offset:min(offset + 16, file_size)]
+            mm.close()
+        
+        color_print(f"\nТекущие байты 0x{offset:08X}:", 'cyan')
+        color_print(f"  HEX: {HexUtils.bytes_to_hex(current_bytes)}", 'white')
+        ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in current_bytes)
+        color_print(f"  ASC: {ascii_str}", 'white')
+        print("")
+        
+        new_hex = ask_input("Новые байты (HEX): ")
+        if not new_hex:
+            return
+        
+        try:
+            new_bytes = HexUtils.hex_to_bytes(new_hex)
+        except:
+            color_print("Неверный HEX формат", 'red')
+            return
+        
+        if len(new_bytes) != len(current_bytes):
+            color_print(f"Длина: старые {len(current_bytes)} байт, новые {len(new_bytes)} байт", 'yellow')
+            if not ask_yes_no("Продолжить? (будет дополнено нулями или обрезано)", default=False):
+                return
+            if len(new_bytes) < len(current_bytes):
+                new_bytes += b'\x00' * (len(current_bytes) - len(new_bytes))
+            else:
+                new_bytes = new_bytes[:len(current_bytes)]
+        
+        if not ask_yes_no(f"Подтвердить замену 0x{offset:08X}?", default=True):
+            return
+        
+        backup = self.engine.backup_mgr.create(self.selected_file)
+        if backup is None:
+            color_print("Бэкап не создан", 'red')
+            return
+        
+        with open(self.selected_file, 'r+b') as f:
+            mm = mmap.mmap(f.fileno(), 0)
+            mm[offset:offset + len(new_bytes)] = new_bytes
+            mm.flush()
+            mm.close()
+        
+        color_print("Заменено", 'green')
+        self.has_changes = True
+        
+        with open(self.selected_file, 'rb') as f:
+            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            new_current = mm[offset:min(offset + 16, file_size)]
+            mm.close()
+        
+        color_print(f"\nНовые байты 0x{offset:08X}:", 'green')
+        color_print(f"  HEX: {HexUtils.bytes_to_hex(new_current)}", 'green')
+        ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in new_current)
+        color_print(f"  ASC: {ascii_str}", 'green')
+        print("")
 
     def _search_and_replace(self) -> None:
         color_print("\nПоиск и замена", 'cyan')
@@ -714,6 +783,7 @@ class InteractiveCli:
             if count > 0:
                 self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
                 color_print(f"Заменено: {count}", 'green')
+                self.has_changes = True
             else:
                 color_print("Изменений не внесено", 'yellow')
             return
@@ -829,6 +899,7 @@ class InteractiveCli:
         if count > 0:
             self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
             color_print(f"Заменено: {count}", 'green')
+            self.has_changes = True
         else:
             color_print("Изменений не внесено", 'yellow')
 
@@ -958,6 +1029,7 @@ class InteractiveCli:
         try:
             self.engine.apply_json_patches(patch_path, False)
             color_print("Все патчи применены", 'green')
+            self.has_changes = True
         except Exception as e:
             color_print(f"Ошибка: {e}", 'red')
 
@@ -1207,6 +1279,7 @@ class InteractiveCli:
                     self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
                     color_print(f"Изменено: {len(changes)}", 'green')
                     self._show_last_changes()
+                    self.has_changes = True
                     if self.current_patch:
                         color_print("Для сохранения в JSON: пункт 5", 'blue')
                 else:
@@ -1277,11 +1350,12 @@ class InteractiveCli:
         return self.offsets
 
 
-def start_hex_patcher(app_dir: str, file_path: str = None) -> None:
+def start_hex_patcher(app_dir: str, file_path: str = None) -> bool:
     engine = PatchEngine()
     engine.set_app_dir(app_dir)
     cli = InteractiveCli(engine)
     if file_path and os.path.isfile(file_path):
         cli.selected_file = file_path
     cli.app_dir = app_dir
-    cli.run(app_dir, file_path)
+    result = cli.run(app_dir, file_path)
+    return result
