@@ -10,6 +10,26 @@ from .macho_tools import handle_macho_file
 from .file_actions import handle_file_actions, cleanup_all_temp_files
 
 
+def cleanup_backups_in_app(app_dir: str) -> int:
+    try:
+        deleted = 0
+        for root, dirs, files in os.walk(app_dir):
+            for file in files:
+                if '.bak.' in file or file.endswith('.bak'):
+                    file_path = os.path.join(root, file)
+                    try:
+                        os.remove(file_path)
+                        deleted += 1
+                    except:
+                        pass
+        if deleted > 0:
+            color_print(f"[INFO] Удалено {deleted} бэкапов из .app", 'green')
+        return deleted
+    except Exception as e:
+        log_message(f"Failed to cleanup backups in app: {e}", 'WARN')
+        return 0
+
+
 def search_files(app_dir: str, search_pattern: str, current_dir: str = None) -> list:
     if current_dir is None:
         current_dir = app_dir
@@ -46,6 +66,7 @@ def start_interactive_explorer(app_dir: str) -> tuple:
     plist_data = None
     search_results = []
     search_mode = False
+    changed_files = set()
 
     def reload_plist():
         nonlocal plist_data
@@ -59,8 +80,19 @@ def start_interactive_explorer(app_dir: str) -> tuple:
         except Exception as e:
             log_message(f"Failed to reload plist: {e}", 'WARN')
 
+    def add_change(change_type, file_name, old_value=None, new_value=None):
+        nonlocal modified_any
+        modified_any = True
+        changed_files.add(file_name)
+        all_changes.append({
+            'type': change_type,
+            'file': file_name,
+            'old': old_value,
+            'new': new_value
+        })
+
     if not os.path.isdir(real_app_dir):
-        color_print(f"[ERROR] Папка .app не найдена: {app_dir}", 'red')
+        color_print(f"[ERROR] Папка .app не найдена: {app_dir}", 'red')
         return False, [], None
 
     while True:
@@ -70,14 +102,14 @@ def start_interactive_explorer(app_dir: str) -> tuple:
         if search_mode:
             color_print(f"\nРезультаты поиска: {display_path}", 'cyan')
         else:
-            color_print(f"\nФайловый менеджер: {display_path}", 'cyan')
+            color_print(f"\nФайловый менеджер: {display_path}", 'cyan')
         print("=" * 55)
 
         if search_mode:
             if not search_results:
-                color_print("  Ничего не найдено.", 'yellow')
+                color_print("  Ничего не найдено.", 'yellow')
             else:
-                color_print(f"  Найдено: {len(search_results)} элементов", 'green')
+                color_print(f"  Найдено: {len(search_results)} элементов", 'green')
                 for idx, result in enumerate(search_results, 1):
                     if len(result) >= 4:
                         _, rel_path, is_dir, size_str = result
@@ -91,7 +123,7 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                             color_print(f"  {idx}) [DIR] {rel_path}", 'blue')
                         else:
                             print(f"  {idx}) {rel_path}")
-            print("  s) Новый поиск")
+            print("  s) Новый поиск")
             print("  c) Очистить результаты")
             print("  0) Назад")
             
@@ -105,7 +137,7 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                 search_pattern = ask_input("Введите шаблон поиска (например, *.plist, Info, .dylib)")
                 if search_pattern:
                     search_results = search_files(app_dir, search_pattern, app_dir)
-                    color_print(f"[INFO] Найдено: {len(search_results)} элементов", 'green')
+                    color_print(f"[INFO] Найдено: {len(search_results)} элементов", 'green')
                 continue
             elif choice.lower() == "c":
                 search_results = []
@@ -125,14 +157,25 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                         if is_macho_binary(selected_path):
                             modified, changes = handle_macho_file(selected_path)
                             if modified:
-                                modified_any = True
                                 for change in changes:
-                                    change['file'] = os.path.basename(selected_path)
-                                    all_changes.append(change)
+                                    if change['type'] == 'restored_backup':
+                                        all_changes = []
+                                        modified_any = False
+                                        changed_files.clear()
+                                    else:
+                                        add_change(
+                                            change['type'],
+                                            os.path.basename(selected_path),
+                                            change.get('old'),
+                                            change.get('new')
+                                        )
                         else:
+                            # Для не-Mach-O файлов отмечаем изменение
                             handle_file_actions(selected_path, os.path.basename(selected_path), reload_plist)
+                            # После редактирования добавляем запись об изменении
+                            add_change('file_edit', os.path.basename(selected_path))
             else:
-                color_print("Неверный выбор.", 'red')
+                color_print("Неверный выбор.", 'red')
             continue
 
         try:
@@ -149,7 +192,7 @@ def start_interactive_explorer(app_dir: str) -> tuple:
         items.sort(key=lambda x: (not os.path.isdir(os.path.join(current_dir, x)), x.lower()))
 
         print("  0) Выход в главное меню патчера")
-        print("  s) Поиск файлов")
+        print("  s) Поиск файлов")
         print("  h) Помощь")
 
         for idx, item in enumerate(items, 1):
@@ -191,24 +234,32 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                 except Exception as e:
                     log_message(f"Failed to reload plist on exit: {e}", 'WARN')
                 
-                if modified_any:
-                    color_print("\nСВОДКА ИЗМЕНЕНИЙ В ФАЙЛОВОМ МЕНЕДЖЕРЕ:", 'yellow')
+                if modified_any and all_changes:
+                    color_print("\nСВОДКА ИЗМЕНЕНИЙ В ФАЙЛОВОМ МЕНЕДЖЕРЕ:", 'yellow')
                     color_print("=" * 50, 'cyan')
+                    
+                    if changed_files:
+                        color_print("  Измененные файлы:", 'cyan')
+                        for file_name in sorted(changed_files):
+                            color_print(f"    - {file_name}", 'white')
+                        color_print("", 'white')
+                    
                     for change in all_changes:
                         if change['type'] == 'macho_path_change':
-                            color_print(f"  Изменён путь зависимости в {change.get('file', 'бинарнике')}:", 'green')
+                            color_print(f"  Изменён путь зависимости в {change.get('file', 'бинарнике')}:", 'green')
                             color_print(f"    {change['old']}", 'red')
                             color_print(f"    -> {change['new']}", 'green')
                         elif change['type'] == 'macho_add_dependency':
                             color_print(f"  Добавлена зависимость в {change.get('file', 'бинарнике')}: {change['path']}", 'green')
-                        elif change['type'] == 'restored_backup':
-                            color_print(f"  Восстановлена версия {change['version']} в {change.get('file', 'файле')}", 'green')
-                        elif change['type'] == 'hex_edit':
-                            color_print(f"  Изменён через Hex-редактор: {change['file']}", 'green')
+                        elif change['type'] == 'file_edit':
+                            color_print(f"  Изменён файл: {change.get('file')}", 'green')
                     color_print("=" * 50, 'cyan')
-                    if not ask_yes_no("Подтвердить выход из файлового менеджера?", default=True):
+                    if not ask_yes_no("Подтвердить выход из файлового менеджера?", default=True):
                         continue
+                else:
+                    color_print("[INFO] Изменений не обнаружено.", 'yellow')
                 
+                cleanup_backups_in_app(app_dir)
                 cleanup_backups(app_dir)
                 cleanup_all_temp_files()
                 break
@@ -228,24 +279,24 @@ def start_interactive_explorer(app_dir: str) -> tuple:
             continue
 
         elif choice.lower() == "h":
-            color_print("\nПомощь по файловому менеджеру:", 'cyan')
+            color_print("\nПомощь по файловому менеджеру:", 'cyan')
             print("=" * 50)
             print("  Навигация:")
             print("    - Введите номер элемента для перехода")
             print("    - 0 - выход/на уровень выше")
-            print("    - s - поиск файлов")
+            print("    - s - поиск файлов")
             print("    - h - эта справка")
             print("")
-            print("  Типы файлов:")
+            print("  Типы файлов:")
             color_print("    [DIR] - папка", 'blue')
-            color_print("    [Mach-O] - исполняемый бинарник", 'hotpink')
-            color_print("    [Text] - текстовый файл", 'green')
+            color_print("    [Mach-O] - исполняемый бинарник", 'hotpink')
+            color_print("    [Text] - текстовый файл", 'green')
             print("")
-            print("  Действия с файлами:")
-            print("    - Mach-O: просмотр/изменение зависимостей")
-            print("    - Plist: интерактивный редактор")
-            print("    - JSON/Text: редактирование через временный файл")
-            print("    - Hex-редактор: для любых файлов")
+            print("  Действия с файлами:")
+            print("    - Mach-O: просмотр/изменение зависимостей")
+            print("    - Plist: интерактивный редактор")
+            print("    - JSON/Text: редактирование через временный файл")
+            print("    - Hex-редактор: для любых файлов")
             print("=" * 50)
             input("\nНажмите Enter для продолжения...")
             continue
@@ -264,7 +315,7 @@ def start_interactive_explorer(app_dir: str) -> tuple:
             selected_path = os.path.join(current_dir, selected_item)
 
             if not is_safe_path(selected_path, real_app_dir):
-                color_print("[WARN] Попытка выйти за пределы .app - запрещено.", 'yellow')
+                color_print("[WARN] Попытка выйти за пределы .app - запрещено.", 'yellow')
                 continue
 
             if os.path.isdir(selected_path):
@@ -273,13 +324,22 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                 if is_macho_binary(selected_path):
                     modified, changes = handle_macho_file(selected_path)
                     if modified:
-                        modified_any = True
                         for change in changes:
-                            change['file'] = selected_item
-                            all_changes.append(change)
+                            if change['type'] == 'restored_backup':
+                                all_changes = []
+                                modified_any = False
+                                changed_files.clear()
+                            else:
+                                add_change(
+                                    change['type'],
+                                    selected_item,
+                                    change.get('old'),
+                                    change.get('new')
+                                )
                 else:
                     handle_file_actions(selected_path, selected_item, reload_plist)
+                    add_change('file_edit', selected_item)
         else:
-            color_print("Неверный выбор.", 'red')
+            color_print("Неверный выбор.", 'red')
 
     return modified_any, all_changes, plist_data
