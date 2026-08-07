@@ -2,7 +2,9 @@
 import plistlib
 import os
 import re
-from utils import log_message, color_print
+import shutil
+import datetime
+from utils import log_message, color_print, PATCHED_DIR, ask_input, ask_yes_no
 
 
 def load_plist(path):
@@ -32,7 +34,7 @@ def load_plist_safe(path):
                     pass
             
             if content.startswith(b'bplist'):
-                color_print("[INFO] Попытка восстановить бинарный plist...", 'yellow')
+                color_print("[INFO] Попытка восстановить бинарный plist...", 'yellow')
                 try:
                     return plistlib.loads(content)
                 except:
@@ -99,7 +101,7 @@ def save_plist_safe(data, path):
         try:
             with open(path, "wb") as f:
                 plistlib.dump(data, f, fmt=plistlib.FMT_XML)
-            log_message(f"Plist сохранен в XML формате как запасной вариант", 'INFO')
+            log_message(f"Plist сохранен в XML формате как запасной вариант", 'INFO')
             return True
         except:
             log_message(f"Не удалось сохранить plist даже в XML: {e}", 'ERROR')
@@ -161,7 +163,7 @@ def update_version_in_extensions(app_dir, version, build):
                     log_message(f"Не удалось обновить версию в расширении {ext}: {e}", 'WARN')
     
     if updated > 0:
-        color_print(f"[INFO] Синхронизировано {updated} расширений", 'green')
+        color_print(f"[INFO] Синхронизировано {updated} расширений", 'green')
 
 
 def get_plist_value(plist_data, key, default=None):
@@ -176,4 +178,75 @@ def set_plist_value(plist_data, key, value):
     if plist_data.get(key) != value:
         plist_data[key] = value
         return True
+    return False
+
+
+def backup_info_plist(app_dir):
+    plist_path = os.path.join(app_dir, "Info.plist")
+    if not os.path.isfile(plist_path):
+        return None
+    
+    try:
+        backup_dir = os.path.join(PATCHED_DIR, "..", "Backups_info_plist")
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        app_name = os.path.basename(app_dir)
+        backup_path = os.path.join(backup_dir, f"{app_name}_Info.plist.bak")
+        
+        shutil.copy2(plist_path, backup_path)
+        return backup_path
+    except Exception as e:
+        log_message(f"Failed to backup Info.plist: {e}", 'WARN')
+        return None
+
+
+def restore_info_plist(app_dir):
+    backup_dir = os.path.join(PATCHED_DIR, "..", "Backups_info_plist")
+    
+    if not os.path.isdir(backup_dir):
+        color_print("[INFO] Папка с бэкапами не найдена", 'yellow')
+        return False
+    
+    app_name = os.path.basename(app_dir)
+    backup_path = os.path.join(backup_dir, f"{app_name}_Info.plist.bak")
+    
+    if not os.path.isfile(backup_path):
+        color_print(f"[INFO] Нет бэкапа Info.plist для приложения {app_name}", 'yellow')
+        return False
+    
+    try:
+        plist_path = os.path.join(app_dir, "Info.plist")
+        shutil.copy2(backup_path, plist_path)
+        color_print("[SUCCESS] Info.plist восстановлен из бэкапа", 'green')
+        return True
+    except Exception as e:
+        color_print(f"[ERROR] Не удалось восстановить: {e}", 'red')
+        return False
+
+
+def has_info_plist_backup(app_dir):
+    backup_dir = os.path.join(PATCHED_DIR, "..", "Backups_info_plist")
+    if not os.path.isdir(backup_dir):
+        return False
+    
+    app_name = os.path.basename(app_dir)
+    backup_path = os.path.join(backup_dir, f"{app_name}_Info.plist.bak")
+    
+    return os.path.isfile(backup_path)
+
+
+def cleanup_info_plist_backup(app_dir):
+    backup_dir = os.path.join(PATCHED_DIR, "..", "Backups_info_plist")
+    if not os.path.isdir(backup_dir):
+        return False
+    
+    app_name = os.path.basename(app_dir)
+    backup_path = os.path.join(backup_dir, f"{app_name}_Info.plist.bak")
+    
+    if os.path.isfile(backup_path):
+        try:
+            os.remove(backup_path)
+            return True
+        except:
+            pass
     return False
