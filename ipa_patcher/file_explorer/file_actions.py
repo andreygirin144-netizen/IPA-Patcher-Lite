@@ -55,7 +55,7 @@ def cleanup_temp_files():
         try:
             if os.path.exists(path):
                 os.unlink(path)
-                print(f"[INFO] Удалён временный файл: {os.path.basename(path)}")
+                print(f"[INFO] Удалён временный файл: {os.path.basename(path)}")
         except Exception as e:
             print(f"[WARN] Не удалось удалить {os.path.basename(path)}: {e}")
     
@@ -95,7 +95,7 @@ def register_temp_file(path):
 
 def cleanup_all_temp_files():
     if _temp_files_to_cleanup:
-        color_print(f"\n[INFO] Удаление {len(_temp_files_to_cleanup)} временных файлов...", 'yellow')
+        color_print(f"\n[INFO] Удаление {len(_temp_files_to_cleanup)} временных файлов...", 'yellow')
         cleanup_temp_files()
     else:
         cleanup_temp_dir_force()
@@ -124,10 +124,10 @@ def edit_text_file(file_path: str, file_name: str) -> None:
         with open(temp_path, 'w', encoding='utf-8') as f:
             f.write(content)
         
-        color_print(f"\n[INFO] Файл открыт для редактирования", 'blue')
-        color_print(f"[INFO] Временный файл: {temp_path}", 'white')
-        color_print("[INFO] После сохранения нажмите Enter для применения изменений.", 'blue')
-        color_print("[INFO] Для отмены закройте редактор и нажмите Enter без сохранения.", 'yellow')
+        color_print(f"\n[INFO] Файл открыт для редактирования", 'blue')
+        color_print(f"[INFO] Временный файл: {temp_path}", 'white')
+        color_print("[INFO] После сохранения нажмите Enter для применения изменений.", 'blue')
+        color_print("[INFO] Для отмены закройте редактор и нажмите Enter без сохранения.", 'yellow')
         
         print("\nВыберите способ редактирования:")
         print("  1) Открыть во встроенном редакторе (Pythonista)")
@@ -147,12 +147,12 @@ def edit_text_file(file_path: str, file_name: str) -> None:
             try:
                 import editor
                 editor.open_file(temp_path)
-                color_print("Редактор открыт. Закройте вкладку после редактирования.", 'blue')
+                color_print("Редактор открыт. Закройте вкладку после редактирования.", 'blue')
             except:
-                color_print("[WARN] Встроенный редактор не доступен.", 'yellow')
-                color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
+                color_print("[WARN] Встроенный редактор не доступен.", 'yellow')
+                color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
         else:
-            color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
+            color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
         
         input("\nНажмите Enter после завершения редактирования...")
         
@@ -162,9 +162,9 @@ def edit_text_file(file_path: str, file_name: str) -> None:
         if new_content != content:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
-            color_print("[SUCCESS] Файл успешно сохранён!", 'green')
+            color_print("[SUCCESS] Файл успешно сохранён!", 'green')
         else:
-            color_print("[INFO] Изменений не обнаружено.", 'yellow')
+            color_print("[INFO] Изменений не обнаружено.", 'yellow')
         
         try:
             os.unlink(temp_path)
@@ -189,9 +189,9 @@ def edit_json_file(file_path: str, file_name: str) -> None:
             raw_data = f.read(1024)
         
         if b'\x00' in raw_data:
-            color_print("[ERROR] Файл содержит нулевые байты. Это не текстовый JSON файл.", 'red')
-            color_print("[INFO] Возможно это бинарный файл или файл в другой кодировке.", 'yellow')
-            color_print("[INFO] Используйте Hex-редактор для просмотра.", 'yellow')
+            color_print("[ERROR] Файл содержит нулевые байты. Это не текстовый JSON файл.", 'red')
+            color_print("[INFO] Возможно это бинарный файл или файл в другой кодировке.", 'yellow')
+            color_print("[INFO] Используйте Hex-редактор для просмотра.", 'yellow')
             input("\nНажмите Enter, чтобы продолжить...")
             return
         
@@ -207,29 +207,29 @@ def edit_json_file(file_path: str, file_name: str) -> None:
                 continue
         
         if content is None:
-            color_print("[ERROR] Не удалось декодировать файл ни в одной из известных кодировок.", 'red')
-            color_print("[INFO] Используйте Hex-редактор для просмотра.", 'yellow')
+            color_print("[ERROR] Не удалось декодировать файл ни в одной из известных кодировок.", 'red')
+            color_print("[INFO] Используйте Hex-редактор для просмотра.", 'yellow')
             input("\nНажмите Enter, чтобы продолжить...")
             return
         
         content_stripped = content.strip()
         if not content_stripped:
-            color_print("[ERROR] Файл пуст.", 'red')
+            color_print("[ERROR] Файл пуст.", 'red')
             input("\nНажмите Enter, чтобы продолжить...")
             return
         
         if not (content_stripped.startswith('{') or content_stripped.startswith('[')):
-            color_print("[ERROR] Файл не является JSON (должен начинаться с { или [).", 'red')
-            color_print("[INFO] Это не текстовый JSON файл. Используйте Hex-редактор.", 'yellow')
+            color_print("[ERROR] Файл не является JSON (должен начинаться с { или [).", 'red')
+            color_print("[INFO] Это не текстовый JSON файл. Используйте Hex-редактор.", 'yellow')
             input("\nНажмите Enter, чтобы продолжить...")
             return
         
         try:
             data = json.loads(content)
             formatted = json.dumps(data, indent=2, ensure_ascii=False)
-            color_print("[INFO] JSON валидный. Отформатирован для редактирования.", 'green')
+            color_print("[INFO] JSON валидный. Отформатирован для редактирования.", 'green')
         except json.JSONDecodeError as e:
-            color_print(f"[WARN] JSON невалидный: {e}", 'yellow')
+            color_print(f"[WARN] JSON невалидный: {e}", 'yellow')
             if not ask_yes_no("Продолжить редактирование?", default=False):
                 return
             formatted = content
@@ -239,9 +239,9 @@ def edit_json_file(file_path: str, file_name: str) -> None:
             f.write(formatted)
         
         color_print(f"\n[INFO] JSON открыт для редактирования", 'blue')
-        color_print(f"[INFO] Временный файл: {temp_path}", 'white')
-        color_print("[INFO] После сохранения нажмите Enter для применения изменений.", 'blue')
-        color_print("[INFO] Для отмены закройте редактор и нажмите Enter без сохранения.", 'yellow')
+        color_print(f"[INFO] Временный файл: {temp_path}", 'white')
+        color_print("[INFO] После сохранения нажмите Enter для применения изменений.", 'blue')
+        color_print("[INFO] Для отмены закройте редактор и нажмите Enter без сохранения.", 'yellow')
         
         print("\nВыберите способ редактирования:")
         print("  1) Открыть во встроенном редакторе (Pythonista)")
@@ -261,12 +261,12 @@ def edit_json_file(file_path: str, file_name: str) -> None:
             try:
                 import editor
                 editor.open_file(temp_path)
-                color_print("Редактор открыт. Закройте вкладку после редактирования.", 'blue')
+                color_print("Редактор открыт. Закройте вкладку после редактирования.", 'blue')
             except:
-                color_print("[WARN] Встроенный редактор не доступен.", 'yellow')
-                color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
+                color_print("[WARN] Встроенный редактор не доступен.", 'yellow')
+                color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
         else:
-            color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
+            color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
         
         input("\nНажмите Enter после завершения редактирования...")
         
@@ -279,7 +279,7 @@ def edit_json_file(file_path: str, file_name: str) -> None:
                 f.write(new_content)
             color_print("[SUCCESS] JSON успешно сохранен!", 'green')
         except json.JSONDecodeError as e:
-            color_print(f"[ERROR] Невалидный JSON: {e}", 'red')
+            color_print(f"[ERROR] Невалидный JSON: {e}", 'red')
             if ask_yes_no("Сохранить как есть (без проверки)?", default=False):
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(new_content)
@@ -312,14 +312,14 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
             plistlib.dump(data, f, fmt=plistlib.FMT_XML)
         
         color_print(f"\n[INFO] Plist открыт для редактирования в XML формате", 'blue')
-        color_print(f"[INFO] Временный файл: {temp_path}", 'white')
-        color_print("[INFO] После сохранения нажмите Enter для применения изменений.", 'blue')
-        color_print("[INFO] Для отмены закройте редактор и нажмите Enter без сохранения.", 'yellow')
+        color_print(f"[INFO] Временный файл: {temp_path}", 'white')
+        color_print("[INFO] После сохранения нажмите Enter для применения изменений.", 'blue')
+        color_print("[INFO] Для отмены закройте редактор и нажмите Enter без сохранения.", 'yellow')
         
         print("\nВыберите способ редактирования:")
         print("  1) Открыть во встроенном редакторе (Pythonista)")
         print("  2) Редактировать вручную (путь указан выше)")
-        print("  3) Интерактивный редактор plist (ключ-значение)")
+        print("  3) Интерактивный редактор plist (ключ-значение)")
         print("  0) Отмена")
         
         edit_choice = ask_input("Ваш выбор", "1")
@@ -345,17 +345,17 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
             try:
                 import editor
                 editor.open_file(temp_path)
-                color_print("Редактор открыт. Закройте вкладку после редактирования.", 'blue')
+                color_print("Редактор открыт. Закройте вкладку после редактирования.", 'blue')
             except:
-                color_print("[WARN] Встроенный редактор не доступен.", 'yellow')
-                color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
+                color_print("[WARN] Встроенный редактор не доступен.", 'yellow')
+                color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
         else:
-            color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
+            color_print(f"[INFO] Отредактируйте файл вручную: {temp_path}", 'blue')
         
         input("\nНажмите Enter после завершения редактирования...")
         
         if not os.path.exists(temp_path):
-            color_print("[WARN] Временный файл не найден. Изменения отменены.", 'yellow')
+            color_print("[WARN] Временный файл не найден. Изменения отменены.", 'yellow')
             return
         
         try:
@@ -363,10 +363,10 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
                 new_data = plistlib.load(f)
         except Exception as e:
             color_print(f"[ERROR] Не удалось прочитать plist: {e}", 'red')
-            if ask_yes_no("Файл повреждён. Восстановить из резервной копии?", default=True):
+            if ask_yes_no("Файл повреждён. Восстановить из резервной копии?", default=True):
                 with open(temp_path, 'wb') as f:
                     plistlib.dump(data, f, fmt=plistlib.FMT_XML)
-                color_print("[INFO] Восстановлен оригинальный plist.", 'green')
+                color_print("[INFO] Восстановлен оригинальный plist.", 'green')
             try:
                 os.unlink(temp_path)
             except:
@@ -375,7 +375,7 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
         
         with open(file_path, 'wb') as f:
             plistlib.dump(new_data, f, fmt=plistlib.FMT_BINARY)
-        color_print("[SUCCESS] Plist успешно сохранён!", 'green')
+        color_print("[SUCCESS] Plist успешно сохранён!", 'green')
         
         if reload_callback:
             color_print("[INFO] Перезагружаем данные...", 'blue')
@@ -397,7 +397,7 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
 
 def handle_file_actions(file_path: str, file_name: str, reload_callback=None) -> None:
     while True:
-        color_print(f"\nДействия с файлом: {file_name}", 'cyan')
+        color_print(f"\nДействия с файлом: {file_name}", 'cyan')
         print("=" * 50)
         print("1. Показать информацию")
         print("2. Открыть в Hex-редакторе")
@@ -411,7 +411,7 @@ def handle_file_actions(file_path: str, file_name: str, reload_callback=None) ->
         
         print("0. Назад")
         
-        choice = ask_input("Выберите действие", "0")
+        choice = ask_input("Выберите действие", "0")
         
         if choice == "0":
             break
@@ -428,5 +428,5 @@ def handle_file_actions(file_path: str, file_name: str, reload_callback=None) ->
             elif is_text_extension(file_name):
                 edit_text_file(file_path, file_name)
             else:
-                color_print("[INFO] Этот пункт недоступен для бинарных файлов.", 'yellow')
+                color_print("[INFO] Этот пункт недоступен для бинарных файлов.", 'yellow')
                 continue
