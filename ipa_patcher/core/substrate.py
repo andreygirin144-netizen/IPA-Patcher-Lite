@@ -20,49 +20,42 @@ def safe_patch_dylib_path(binary_path, old_path, new_path, quiet=False):
     if len(data) < 4:
         return False
     
-    old_bytes = old_path.encode('utf-8') + b'\x00'
-    new_bytes = new_path.encode('utf-8') + b'\x00'
-    
-    if len(new_bytes) > len(old_bytes):
-        return False
-    
     old_without_null = old_path.encode('utf-8')
-    pos = data.find(old_bytes)
+    pos = data.find(old_without_null)
     
     if pos == -1:
-        pos = data.find(old_without_null)
-        if pos == -1:
-            return False
+        return False
     
-    if pos != -1:
-        end_pos = pos
-        while end_pos < len(data) and data[end_pos] != 0:
-            end_pos += 1
-        old_len = end_pos - pos
-        
-        if old_len != len(old_path.encode('utf-8')):
-            old_len = min(old_len, len(old_path.encode('utf-8')))
-        
-        new_len = len(new_path.encode('utf-8'))
-        if new_len > old_len:
-            return False
-        
-        padded_new = new_path.encode('utf-8') + b'\x00' * (old_len - new_len)
-        data[pos:pos + old_len] = padded_new
-        
-        try:
-            with open(binary_path, 'wb') as f:
-                f.write(data)
-            os.chmod(binary_path, 0o755)
-            if not quiet:
-                log_message(f"Successfully patched: {old_path} -> {new_path}", 'INFO')
-            return True
-        except Exception as e:
-            if not quiet:
-                log_message(f"Failed to write binary: {e}", 'ERROR')
-            return False
+    end_pos = pos
+    while end_pos < len(data) and data[end_pos] != 0:
+        end_pos += 1
     
-    return False
+    zero_padding_end = end_pos
+    while zero_padding_end < len(data) and data[zero_padding_end] == 0:
+        zero_padding_end += 1
+    
+    available_len = zero_padding_end - pos
+    new_bytes = new_path.encode('utf-8') + b'\x00'
+    
+    if len(new_bytes) > available_len:
+        if not quiet:
+            log_message(f"Not enough space: need {len(new_bytes)} bytes, available {available_len}", 'WARN')
+        return False
+    
+    padded_new = new_bytes + b'\x00' * (available_len - len(new_bytes))
+    data[pos:pos + available_len] = padded_new
+    
+    try:
+        with open(binary_path, 'wb') as f:
+            f.write(data)
+        os.chmod(binary_path, 0o755)
+        if not quiet:
+            log_message(f"Successfully patched: {old_path} -> {new_path}", 'INFO')
+        return True
+    except Exception as e:
+        if not quiet:
+            log_message(f"Failed to write binary: {e}", 'ERROR')
+        return False
 
 
 def check_substrate_dependencies(binary_path):
@@ -232,7 +225,16 @@ def patch_tweak_substrate_dependencies(tweak_binary_path):
     replacements = [
         ("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "@executable_path/sb.dylib"),
         ("@rpath/CydiaSubstrate.framework/CydiaSubstrate", "@executable_path/sb.dylib"),
-        ("/usr/lib/libsubstrate.dylib", "@executable_path/sb.dylib")
+        ("/usr/lib/libsubstrate.dylib", "@executable_path/sb.dylib"),
+        ("/usr/lib/libhooker.dylib", "@executable_path/sb.dylib"),
+        ("/usr/lib/TweakInject.dylib", "@executable_path/sb.dylib"),
+        ("/usr/lib/TweakLoader.dylib", "@executable_path/sb.dylib"),
+        ("/usr/lib/libellekit.dylib", "@executable_path/sb.dylib"),
+        ("/usr/lib/libinjector.dylib", "@executable_path/sb.dylib"),
+        ("/usr/lib/libblackjack.dylib", "@executable_path/sb.dylib"),
+        ("/usr/lib/libroothide.dylib", "@executable_path/sb.dylib"),
+        ("/usr/local/lib/libhooker.dylib", "@executable_path/sb.dylib"),
+        ("/usr/local/lib/libellekit.dylib", "@executable_path/sb.dylib"),
     ]
     
     modified = False
@@ -254,9 +256,15 @@ def inject_substrate(app_dir, script_dir, substrate_source=None):
         if not os.path.isfile(src):
             src = os.path.join(script_dir, "libsubstrate.dylib")
             if not os.path.isfile(src):
-                log_message("libsubstrate.dylib not found in script directory", 'ERROR')
-                color_print("[ERROR] libsubstrate.dylib not found in script folder", 'red')
-                return None
+                src = os.path.join(os.path.dirname(script_dir), "libsubstrate.dylib")
+                if not os.path.isfile(src):
+                    src = os.path.join(script_dir, "assets", "libhooker.dylib")
+                    if not os.path.isfile(src):
+                        src = os.path.join(script_dir, "libhooker.dylib")
+                        if not os.path.isfile(src):
+                            log_message("libsubstrate.dylib not found in script directory", 'ERROR')
+                            color_print("[ERROR] libsubstrate.dylib not found in script folder", 'red')
+                            return None
     else:
         src = substrate_source
         if not os.path.isfile(src):
