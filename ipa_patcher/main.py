@@ -926,7 +926,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 current_version = plist_data.get('CFBundleVersion', 'не указана')
                 color_print(f"  Текущая версия сборки: {current_version}", 'cyan')
                 
-                if ask_yes_no("\nПрименить изменения и собрать IPA?", default=True):
+                if ask_yes_no("\nПрименить изменения и собрать IPA/TIPA?", default=True):
                     if deep_version_mode and "version" in real_changes:
                         color_print("Глубокая замена версии в бинарниках и файлах...", 'blue')
                         old_ver = changes.get('version_old', original.get("CFBundleShortVersionString", "1.0"))
