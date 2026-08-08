@@ -248,23 +248,39 @@ def patch_tweak_substrate_dependencies(tweak_binary_path):
     return modified
 
 
+def find_substrate_file(script_dir):
+    possible_paths = [
+        os.path.join(script_dir, "assets", "libsubstrate.dylib"),
+        os.path.join(script_dir, "libsubstrate.dylib"),
+        os.path.join(os.path.dirname(script_dir), "libsubstrate.dylib"),
+        os.path.join(script_dir, "assets", "libhooker.dylib"),
+        os.path.join(script_dir, "libhooker.dylib"),
+        os.path.join(os.path.dirname(script_dir), "assets", "libsubstrate.dylib"),
+        os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "assets", "libsubstrate.dylib"),
+        os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "libsubstrate.dylib"),
+    ]
+    
+    for path in possible_paths:
+        if os.path.isfile(path):
+            return path
+    
+    return None
+
+
 def inject_substrate(app_dir, script_dir, substrate_source=None):
     substrate_path = os.path.join(app_dir, "sb.dylib")
     
     if substrate_source is None:
-        src = os.path.join(script_dir, "assets", "libsubstrate.dylib")
-        if not os.path.isfile(src):
-            src = os.path.join(script_dir, "libsubstrate.dylib")
-            if not os.path.isfile(src):
-                src = os.path.join(os.path.dirname(script_dir), "libsubstrate.dylib")
-                if not os.path.isfile(src):
-                    src = os.path.join(script_dir, "assets", "libhooker.dylib")
-                    if not os.path.isfile(src):
-                        src = os.path.join(script_dir, "libhooker.dylib")
-                        if not os.path.isfile(src):
-                            log_message("libsubstrate.dylib not found in script directory", 'ERROR')
-                            color_print("[ERROR] libsubstrate.dylib not found in script folder", 'red')
-                            return None
+        src = find_substrate_file(script_dir)
+        if src is None:
+            log_message("libsubstrate.dylib not found in script directory", 'ERROR')
+            color_print("[ERROR] libsubstrate.dylib not found in script folder", 'red')
+            color_print("[INFO] Скачайте libsubstrate.dylib и положите в:", 'yellow')
+            color_print(f"  1. {os.path.join(script_dir, 'libsubstrate.dylib')}", 'white')
+            color_print(f"  2. {os.path.join(script_dir, 'assets', 'libsubstrate.dylib')}", 'white')
+            color_print(f"  3. {os.path.join(os.path.expanduser('~/Documents/ipa_patcher'), 'libsubstrate.dylib')}", 'white')
+            color_print("[INFO] Или используйте режим 'manual' в пункте 11 для выбора своего файла", 'yellow')
+            return None
     else:
         src = substrate_source
         if not os.path.isfile(src):
