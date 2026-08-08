@@ -3,7 +3,7 @@ import os
 import fnmatch
 
 from utils import color_print, ask_input, ask_yes_no, log_message
-from core import is_macho_binary
+from core import is_macho_binary, load_plist_safe
 from .utils import is_safe_path, format_file_size, count_items_in_dir, is_text_extension
 from .backups import cleanup_backups
 from .macho_tools import handle_macho_file
@@ -63,10 +63,22 @@ def start_interactive_explorer(app_dir: str) -> tuple:
     real_app_dir = os.path.realpath(app_dir)
     all_changes = []
     modified_any = False
-    plist_data = None
     search_results = []
     search_mode = False
     changed_files = set()
+    plist_changes = {}
+    deep_flags = {'version_deep': False, 'bundle_deep': False}
+    
+    plist_data = None
+    try:
+        import plistlib
+        plist_path = os.path.join(real_app_dir, "Info.plist")
+        if os.path.exists(plist_path):
+            with open(plist_path, 'rb') as f:
+                plist_data = plistlib.load(f)
+    except Exception as e:
+        log_message(f"Failed to load plist at start: {e}", 'WARN')
+        plist_data = {}
 
     def reload_plist():
         nonlocal plist_data
@@ -93,7 +105,7 @@ def start_interactive_explorer(app_dir: str) -> tuple:
 
     if not os.path.isdir(real_app_dir):
         color_print(f"[ERROR] Папка .app не найдена: {app_dir}", 'red')
-        return False, [], None
+        return False, [], None, {}
 
     while True:
         rel_path = os.path.relpath(current_dir, app_dir)
@@ -157,23 +169,26 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                         if is_macho_binary(selected_path):
                             modified, changes = handle_macho_file(selected_path)
                             if modified:
+                                modified_any = True
+                                changed_files.add(os.path.basename(selected_path))
                                 for change in changes:
                                     if change['type'] == 'restored_backup':
                                         all_changes = []
                                         modified_any = False
                                         changed_files.clear()
+                                        plist_changes = {}
+                                        deep_flags = {'version_deep': False, 'bundle_deep': False}
                                     else:
-                                        add_change(
-                                            change['type'],
-                                            os.path.basename(selected_path),
-                                            change.get('old'),
-                                            change.get('new')
-                                        )
+                                        change['file'] = os.path.basename(selected_path)
+                                        all_changes.append(change)
                         else:
-                            # Для не-Mach-O файлов отмечаем изменение
-                            handle_file_actions(selected_path, os.path.basename(selected_path), reload_plist)
-                            # После редактирования добавляем запись об изменении
-                            add_change('file_edit', os.path.basename(selected_path))
+                            if selected_path.lower().endswith('.plist'):
+                                from .file_actions import edit_plist_as_text
+                                modified, df = edit_plist_as_text(selected_path, os.path.basename(selected_path), reload_plist)
+                                if modified:
+                                    deep_flags.update(df)
+                            else:
+                                handle_file_actions(selected_path, os.path.basename(selected_path), reload_plist)
             else:
                 color_print("Неверный выбор.", 'red')
             continue
@@ -229,11 +244,42 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                     plist_path = os.path.join(real_app_dir, "Info.plist")
                     if os.path.exists(plist_path):
                         with open(plist_path, 'rb') as f:
-                            plist_data = plistlib.load(f)
+                            current_plist = plistlib.load(f)
+                        
+                        old_name = plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName')
+                        new_name = current_plist.get('CFBundleDisplayName') or current_plist.get('CFBundleName')
+                        if new_name and old_name and new_name != old_name:
+                            plist_changes['name'] = new_name
+                            add_change('plist_change', 'Info.plist', f'Имя: {old_name}', f'Имя: {new_name}')
+                        
+                        old_version = plist_data.get('CFBundleShortVersionString')
+                        new_version = current_plist.get('CFBundleShortVersionString')
+                        if new_version and old_version and new_version != old_version:
+                            plist_changes['version'] = new_version
+                            plist_changes['version_old'] = old_version
+                            plist_changes['version_deep'] = deep_flags.get('version_deep', False)
+                            add_change('plist_change', 'Info.plist', f'Версия: {old_version}', f'Версия: {new_version}')
+                        
+                        old_bundle = plist_data.get('CFBundleIdentifier')
+                        new_bundle = current_plist.get('CFBundleIdentifier')
+                        if new_bundle and old_bundle and new_bundle != old_bundle:
+                            plist_changes['bundle_id'] = new_bundle
+                            plist_changes['bundle_old'] = old_bundle
+                            plist_changes['bundle_deep'] = deep_flags.get('bundle_deep', False)
+                            add_change('plist_change', 'Info.plist', f'Bundle ID: {old_bundle}', f'Bundle ID: {new_bundle}')
+                        
+                        old_build = plist_data.get('CFBundleVersion')
+                        new_build = current_plist.get('CFBundleVersion')
+                        if new_build and old_build and new_build != old_build:
+                            plist_changes['build'] = new_build
+                            add_change('plist_change', 'Info.plist', f'Сборка: {old_build}', f'Сборка: {new_build}')
+                        
+                        plist_data = current_plist
                         color_print("[INFO] Info.plist перезагружен при выходе!", 'green')
                 except Exception as e:
                     log_message(f"Failed to reload plist on exit: {e}", 'WARN')
                 
+                # Показываем сводку изменений ТОЛЬКО если есть изменения
                 if modified_any and all_changes:
                     color_print("\nСВОДКА ИЗМЕНЕНИЙ В ФАЙЛОВОМ МЕНЕДЖЕРЕ:", 'yellow')
                     color_print("=" * 50, 'cyan')
@@ -251,6 +297,8 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                             color_print(f"    -> {change['new']}", 'green')
                         elif change['type'] == 'macho_add_dependency':
                             color_print(f"  Добавлена зависимость в {change.get('file', 'бинарнике')}: {change['path']}", 'green')
+                        elif change['type'] == 'plist_change':
+                            color_print(f"  {change['new']}", 'green')
                         elif change['type'] == 'file_edit':
                             color_print(f"  Изменён файл: {change.get('file')}", 'green')
                     color_print("=" * 50, 'cyan')
@@ -259,10 +307,13 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                 else:
                     color_print("[INFO] Изменений не обнаружено.", 'yellow')
                 
+                result_plist_changes = plist_changes.copy() if plist_changes else {}
+                
                 cleanup_backups_in_app(app_dir)
                 cleanup_backups(app_dir)
                 cleanup_all_temp_files()
-                break
+                
+                return modified_any, all_changes, plist_data, result_plist_changes
             else:
                 parent = os.path.realpath(os.path.dirname(current_dir))
                 if is_safe_path(parent, real_app_dir):
@@ -324,22 +375,27 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                 if is_macho_binary(selected_path):
                     modified, changes = handle_macho_file(selected_path)
                     if modified:
+                        modified_any = True
+                        changed_files.add(selected_item)
                         for change in changes:
                             if change['type'] == 'restored_backup':
                                 all_changes = []
                                 modified_any = False
                                 changed_files.clear()
+                                plist_changes = {}
+                                deep_flags = {'version_deep': False, 'bundle_deep': False}
                             else:
-                                add_change(
-                                    change['type'],
-                                    selected_item,
-                                    change.get('old'),
-                                    change.get('new')
-                                )
+                                change['file'] = selected_item
+                                all_changes.append(change)
                 else:
-                    handle_file_actions(selected_path, selected_item, reload_plist)
-                    add_change('file_edit', selected_item)
+                    if selected_item.lower().endswith('.plist'):
+                        from .file_actions import edit_plist_as_text
+                        modified, df = edit_plist_as_text(selected_path, selected_item, reload_plist)
+                        if modified:
+                            deep_flags.update(df)
+                    else:
+                        handle_file_actions(selected_path, selected_item, reload_plist)
         else:
             color_print("Неверный выбор.", 'red')
 
-    return modified_any, all_changes, plist_data
+    return modified_any, all_changes, plist_data, plist_changes
