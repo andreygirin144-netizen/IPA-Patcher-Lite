@@ -6,13 +6,12 @@ import tempfile
 import shutil
 import time
 import stat
-from utils import TEMP_DIR
+from utils import TEMP_DIR, PYTHONISTA
 
 try:
     import dialogs
-    PYTHONISTA = True
 except ImportError:
-    PYTHONISTA = False
+    dialogs = None
 
 try:
     from tqdm import tqdm
@@ -264,19 +263,30 @@ def smart_find_in_tmp(extensions):
     found = []
     if not os.path.isdir(tmp_dir):
         return found
+    
     for f in os.listdir(tmp_dir):
         full = os.path.join(tmp_dir, f)
         if os.path.isfile(full):
             for ext in extensions:
                 if f.lower().endswith(f'.{ext.lower()}'):
                     found.append((f, full))
+    
+    if not PYTHONISTA:
+        current_dir = os.getcwd()
+        for f in os.listdir(current_dir):
+            full = os.path.join(current_dir, f)
+            if os.path.isfile(full):
+                for ext in extensions:
+                    if f.lower().endswith(f'.{ext.lower()}'):
+                        if full not in [p for _, p in found]:
+                            found.append((f, full))
+    
     return found
 
 
 def pick_ipa_file():
-    if PYTHONISTA:
+    if PYTHONISTA and dialogs:
         try:
-            import dialogs
             path = dialogs.pick_document(types=["public.data"])
         except:
             path = None
@@ -310,15 +320,18 @@ def pick_ipa_file():
                 print("Введите число.")
     else:
         print(f"В {TEMP_DIR} не найдено .ipa или .tipa файлов.")
+        if not PYTHONISTA:
+            print("  Для a-shell положите файл в:")
+            print(f"    {TEMP_DIR}")
+            print("  Или запустите патчер из папки с файлом.")
 
     path = input("Введите полный путь к .ipa: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
 
 
 def pick_tweak_file():
-    if PYTHONISTA:
+    if PYTHONISTA and dialogs:
         try:
-            import dialogs
             path = dialogs.pick_document(types=["public.data", "public.zip", "com.apple.dylib"])
         except:
             path = None
@@ -348,15 +361,16 @@ def pick_tweak_file():
                 print("Введите число.")
     else:
         print(f"В {TEMP_DIR} не найдено подходящих файлов твиков.")
+        if not PYTHONISTA:
+            print(f"  Для a-shell положите файл в {TEMP_DIR}")
 
     path = input("Введите полный путь к твику/архиву: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
 
 
 def pick_icon_file():
-    if PYTHONISTA:
+    if PYTHONISTA and dialogs:
         try:
-            import dialogs
             path = dialogs.pick_document(types=["public.png"])
         except:
             path = None
@@ -385,15 +399,16 @@ def pick_icon_file():
                 print("Введите число.")
     else:
         print(f"В {TEMP_DIR} не найдено PNG файлов.")
+        if not PYTHONISTA:
+            print(f"  Для a-shell положите файл в {TEMP_DIR}")
 
     path = input("Введите полный путь к PNG: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
 
 
 def pick_substrate_file():
-    if PYTHONISTA:
+    if PYTHONISTA and dialogs:
         try:
-            import dialogs
             path = dialogs.pick_document(types=["com.apple.dylib"])
         except:
             path = None
@@ -422,15 +437,16 @@ def pick_substrate_file():
                 print("Введите число.")
     else:
         print(f"В {TEMP_DIR} не найдено .dylib для субстрата.")
+        if not PYTHONISTA:
+            print(f"  Для a-shell положите файл в {TEMP_DIR}")
 
     path = input("Введите полный путь к libsubstrate.dylib: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
 
 
 def pick_cert_zip():
-    if PYTHONISTA:
+    if PYTHONISTA and dialogs:
         try:
-            import dialogs
             path = dialogs.pick_document(types=["public.zip"])
         except:
             path = None
@@ -459,6 +475,8 @@ def pick_cert_zip():
                 print("Введите число.")
     else:
         print(f"В {TEMP_DIR} не найдено .zip архивов.")
+        if not PYTHONISTA:
+            print(f"  Для a-shell положите файл в {TEMP_DIR}")
 
     path = input("Введите полный путь к .zip архиву с сертификатом: ").strip().strip('"')
     return os.path.expanduser(path) if path else None
