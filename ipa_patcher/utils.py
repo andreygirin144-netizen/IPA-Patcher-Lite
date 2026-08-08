@@ -5,6 +5,7 @@ import time
 import datetime
 import logging
 import shutil
+import tempfile
 
 try:
     import console
@@ -18,13 +19,29 @@ WORKSPACE_DIR = os.path.join(DOCS_DIR, 'IPA_Workspace')
 LOGS_DIR = os.path.join(WORKSPACE_DIR, 'Logs_patcher')
 PATCHED_DIR = os.path.join(WORKSPACE_DIR, 'Patched_ipa')
 BACKUP_DIR = os.path.join(WORKSPACE_DIR, 'Backups')
-TEMP_DIR = os.path.join(WORKSPACE_DIR, 'Temp_ipa')
+
+try:
+    import dialogs
+    PYTHONISTA = True
+except ImportError:
+    PYTHONISTA = False
+
+if PYTHONISTA:
+    TEMP_DIR = os.path.join(WORKSPACE_DIR, 'Temp_ipa')
+else:
+    TEMP_DIR = os.path.join(os.getcwd(), 'tmp')
+    if not os.path.exists(TEMP_DIR):
+        try:
+            os.makedirs(TEMP_DIR, exist_ok=True)
+        except:
+            TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tmp')
 
 LOG_FILE = os.path.join(LOGS_DIR, 'patcher.log')
 
 
 def ensure_directories():
-    for dir_path in [WORKSPACE_DIR, LOGS_DIR, PATCHED_DIR, BACKUP_DIR, TEMP_DIR]:
+    dirs_to_create = [WORKSPACE_DIR, LOGS_DIR, PATCHED_DIR, BACKUP_DIR, TEMP_DIR]
+    for dir_path in dirs_to_create:
         if not os.path.exists(dir_path):
             try:
                 os.makedirs(dir_path)
