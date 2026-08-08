@@ -71,24 +71,6 @@ use_rpath = False
 use_loader_path = False
 
 
-def cleanup_backups_dir():
-    """Очищает папку Backups после завершения работы"""
-    try:
-        if os.path.exists(BACKUP_DIR):
-            for f in os.listdir(BACKUP_DIR):
-                file_path = os.path.join(BACKUP_DIR, f)
-                try:
-                    if os.path.isfile(file_path):
-                        os.remove(file_path)
-                    elif os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                except Exception as e:
-                    log_message(f"Не удалось удалить {f}: {e}", 'WARN')
-            color_print("[INFO] Папка Backups очищена", 'green')
-    except Exception as e:
-        log_message(f"Ошибка очистки Backups: {e}", 'WARN')
-
-
 def save_changelog(app_name, version, changes, output_path):
     changelog_path = os.path.join(PATCHED_DIR, "changelog.json")
     try:
@@ -202,6 +184,9 @@ def replace_icon(app_dir, icon_path, remove_assets=False):
 
 
 def deep_patch_string_in_bundle(app_dir, old_str, new_str, desc="строка"):
+    old_str = str(old_str) if not isinstance(old_str, str) else old_str
+    new_str = str(new_str) if not isinstance(new_str, str) else new_str
+    
     old_bytes = old_str.encode('utf-8')
     new_bytes = new_str.encode('utf-8')
     len_old = len(old_bytes)
@@ -308,6 +293,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
     deep_version_mode = False
     file_manager_changes = []
     info_plist_path = os.path.join(app_dir, "Info.plist")
+    plist_changes = {}
     
     backup_info_plist(app_dir)
     
@@ -715,76 +701,29 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print(f"Ошибка создания списка: {e}", 'red')
                     
             elif view_mode == "2":
-                fm_modified, fm_changes, fm_plist_data = start_interactive_explorer(app_dir)
+                fm_modified, fm_changes, fm_plist_data, fm_plist_changes = start_interactive_explorer(app_dir)
+                
+                if fm_plist_changes:
+                    if 'version_deep' in fm_plist_changes:
+                        deep_version_mode = fm_plist_changes.get('version_deep', False)
+                        changes['version_deep'] = deep_version_mode
+                    if 'bundle_deep' in fm_plist_changes:
+                        deep_bundle_mode = fm_plist_changes.get('bundle_deep', False)
+                        changes['bundle_deep'] = deep_bundle_mode
+                    if 'version' in fm_plist_changes:
+                        changes['version'] = fm_plist_changes.get('version')
+                        changes['version_old'] = fm_plist_changes.get('version_old')
+                    if 'bundle_id' in fm_plist_changes:
+                        changes['bundle_id'] = fm_plist_changes.get('bundle_id')
+                        changes['bundle_old'] = fm_plist_changes.get('bundle_old')
+                    if 'name' in fm_plist_changes:
+                        changes['name'] = fm_plist_changes.get('name')
+                    if 'build' in fm_plist_changes:
+                        changes['build'] = fm_plist_changes.get('build')
+                    plist_changes = fm_plist_changes
                 
                 if fm_plist_data:
-                    try:
-                        import plistlib
-                        with open(info_plist_path, 'rb') as f:
-                            current_plist = plistlib.load(f)
-                        
-                        old_version = original.get("CFBundleShortVersionString", "1.0")
-                        old_bundle = original.get("CFBundleIdentifier", "")
-                        old_name = original.get("CFBundleDisplayName") or original.get("CFBundleName", "")
-                        old_build = original.get("CFBundleVersion", "1")
-                        
-                        new_version = current_plist.get("CFBundleShortVersionString")
-                        new_bundle = current_plist.get("CFBundleIdentifier")
-                        new_name = current_plist.get("CFBundleDisplayName") or current_plist.get("CFBundleName")
-                        new_build = current_plist.get("CFBundleVersion")
-                        
-                        if new_version and new_version != old_version:
-                            if "version" not in changes:
-                                changes["version"] = new_version
-                                changes["version_old"] = old_version
-                                color_print(f"\n[INFO] Обнаружено изменение версии: {old_version} -> {new_version}", 'cyan')
-                                if ask_yes_no("Выполнить глубокую замену версии во всех файлах?", default=False):
-                                    deep_version_mode = True
-                                    changes["version_deep"] = True
-                                    color_print("[INFO] Выбрана глубокая замена версии", 'yellow')
-                                else:
-                                    deep_version_mode = False
-                                    changes["version_deep"] = False
-                            plist_data["CFBundleShortVersionString"] = new_version
-                            original["CFBundleShortVersionString"] = new_version
-                            modified = True
-                        
-                        if new_bundle and new_bundle != old_bundle:
-                            if "bundle_id" not in changes:
-                                changes["bundle_id"] = new_bundle
-                                changes["bundle_old"] = old_bundle
-                                color_print(f"\n[INFO] Обнаружено изменение Bundle ID: {old_bundle} -> {new_bundle}", 'cyan')
-                                if ask_yes_no("Выполнить глубокую замену Bundle ID во всех файлах?", default=False):
-                                    deep_bundle_mode = True
-                                    changes["bundle_deep"] = True
-                                    color_print("[INFO] Выбрана глубокая замена Bundle ID", 'yellow')
-                                else:
-                                    deep_bundle_mode = False
-                                    changes["bundle_deep"] = False
-                            plist_data["CFBundleIdentifier"] = new_bundle
-                            original["CFBundleIdentifier"] = new_bundle
-                            modified = True
-                        
-                        if new_name and new_name != old_name:
-                            if "name" not in changes:
-                                changes["name"] = new_name
-                                color_print(f"\n[INFO] Обнаружено изменение имени: {old_name} -> {new_name}", 'cyan')
-                            plist_data["CFBundleDisplayName"] = new_name
-                            plist_data["CFBundleName"] = new_name
-                            original["CFBundleDisplayName"] = new_name
-                            original["CFBundleName"] = new_name
-                            modified = True
-                        
-                        if new_build and new_build != old_build:
-                            if "build" not in changes:
-                                changes["build"] = new_build
-                                color_print(f"\n[INFO] Обнаружено изменение номера сборки: {old_build} -> {new_build}", 'cyan')
-                            plist_data["CFBundleVersion"] = new_build
-                            original["CFBundleVersion"] = new_build
-                            modified = True
-                        
-                    except Exception as e:
-                        log_message(f"Failed to check plist changes: {e}", 'WARN')
+                    plist_data = fm_plist_data
                 
                 if fm_modified:
                     modified = True
@@ -797,17 +736,62 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 
         elif choice == "9":
             real_changes = {}
+            
+            if plist_changes:
+                if 'version' in plist_changes and 'version_deep' in plist_changes:
+                    changes['version'] = plist_changes.get('version')
+                    changes['version_old'] = plist_changes.get('version_old')
+                    changes['version_deep'] = plist_changes.get('version_deep')
+                if 'bundle_id' in plist_changes and 'bundle_deep' in plist_changes:
+                    changes['bundle_id'] = plist_changes.get('bundle_id')
+                    changes['bundle_old'] = plist_changes.get('bundle_old')
+                    changes['bundle_deep'] = plist_changes.get('bundle_deep')
+                if 'name' in plist_changes:
+                    changes['name'] = plist_changes.get('name')
+                if 'build' in plist_changes:
+                    changes['build'] = plist_changes.get('build')
+            
             for key, value in changes.items():
-                if key == 'name' and value != original.get('CFBundleName'):
-                    real_changes[key] = value
-                elif key == 'version' and value != original.get('CFBundleShortVersionString'):
-                    real_changes[key] = value
-                elif key == 'build' and value != original.get('CFBundleVersion'):
-                    real_changes[key] = value
-                elif key == 'bundle_id' and value != original.get('CFBundleIdentifier'):
-                    real_changes[key] = value
-                elif key == 'min_os' and value != original.get('MinimumOSVersion'):
-                    real_changes[key] = value
+                if key == 'name':
+                    current_name = plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName')
+                    if current_name and current_name == value:
+                        real_changes[key] = value
+                    elif current_name and current_name != value:
+                        real_changes[key] = current_name
+                    else:
+                        real_changes[key] = value
+                elif key == 'version':
+                    current_version = plist_data.get('CFBundleShortVersionString')
+                    if current_version and current_version == value:
+                        real_changes[key] = value
+                    elif current_version and current_version != value:
+                        real_changes[key] = current_version
+                    else:
+                        real_changes[key] = value
+                elif key == 'build':
+                    current_build = plist_data.get('CFBundleVersion')
+                    if current_build and current_build == value:
+                        real_changes[key] = value
+                    elif current_build and current_build != value:
+                        real_changes[key] = current_build
+                    else:
+                        real_changes[key] = value
+                elif key == 'bundle_id':
+                    current_bundle = plist_data.get('CFBundleIdentifier')
+                    if current_bundle and current_bundle == value:
+                        real_changes[key] = value
+                    elif current_bundle and current_bundle != value:
+                        real_changes[key] = current_bundle
+                    else:
+                        real_changes[key] = value
+                elif key == 'min_os':
+                    current_min_os = plist_data.get('MinimumOSVersion')
+                    if current_min_os and current_min_os == value:
+                        real_changes[key] = value
+                    elif current_min_os and current_min_os != value:
+                        real_changes[key] = current_min_os
+                    else:
+                        real_changes[key] = value
                 elif key in ['version_deep', 'bundle_deep', 'version_old', 'bundle_old']:
                     continue
                 elif key in ['icon', 'tweak', 'entitlements', 'advanced_patched', 'thinned', 'file_support', 'custom_edit', 'file_manager_changes']:
@@ -815,6 +799,49 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         real_changes[key] = value
                 elif key == 'substrate_mode':
                     real_changes[key] = value
+            
+            if plist_changes:
+                if 'version_deep' in plist_changes:
+                    deep_version_mode = plist_changes.get('version_deep', False)
+                if 'bundle_deep' in plist_changes:
+                    deep_bundle_mode = plist_changes.get('bundle_deep', False)
+            
+            filtered_changes = {}
+            for key, value in real_changes.items():
+                if key == 'name':
+                    current = plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName')
+                    if current and current != original.get('CFBundleName'):
+                        filtered_changes[key] = current
+                    elif current and current == original.get('CFBundleName'):
+                        continue
+                elif key == 'version':
+                    current = plist_data.get('CFBundleShortVersionString')
+                    if current and current != original.get('CFBundleShortVersionString'):
+                        filtered_changes[key] = current
+                    elif current and current == original.get('CFBundleShortVersionString'):
+                        continue
+                elif key == 'build':
+                    current = plist_data.get('CFBundleVersion')
+                    if current and current != original.get('CFBundleVersion'):
+                        filtered_changes[key] = current
+                    elif current and current == original.get('CFBundleVersion'):
+                        continue
+                elif key == 'bundle_id':
+                    current = plist_data.get('CFBundleIdentifier')
+                    if current and current != original.get('CFBundleIdentifier'):
+                        filtered_changes[key] = current
+                    elif current and current == original.get('CFBundleIdentifier'):
+                        continue
+                elif key == 'min_os':
+                    current = plist_data.get('MinimumOSVersion')
+                    if current and current != original.get('MinimumOSVersion'):
+                        filtered_changes[key] = current
+                    elif current and current == original.get('MinimumOSVersion'):
+                        continue
+                else:
+                    filtered_changes[key] = value
+            
+            real_changes = filtered_changes
             
             if modified or icon_replaced or tweak_injected or ("custom_edit" in real_changes) or ("entitlements" in real_changes) or ("advanced_patched" in real_changes) or hex_patcher_used or ("file_manager_changes" in real_changes) or deep_version_mode or deep_bundle_mode:
                 
@@ -888,6 +915,9 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     has_changes = True
                 if "thinned" in real_changes:
                     color_print("  Прореживание бинарника: ВЫПОЛНЕНО", 'green')
+                    has_changes = True
+                if "restored_backups" in real_changes:
+                    color_print("  Резервные копии: ВОССТАНОВЛЕНЫ", 'green')
                     has_changes = True
                 
                 if not has_changes:
@@ -1677,8 +1707,6 @@ def main():
                 pass
         
         cleanup_info_plist_backup(app_dir)
-        
-        cleanup_backups_dir()
     
     color_print("\nГотово!", 'green')
     color_print(f"Файл: {os.path.basename(output_path)}", 'blue')
