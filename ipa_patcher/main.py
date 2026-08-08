@@ -312,7 +312,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             path_display = "@executable_path"
         
         color_print("\n" + "=" * 50, 'cyan')
-        color_print("   РЕДАКТИРОВАНИЕ Info.plist И ТВИКОВ", 'cyan')
+        color_print("IPA PATCHER LITE - Интерактивное меню", 'cyan')
         color_print("=" * 50, 'cyan')
         print("1. Изменить имя приложения")
         print(f"   Текущее: {plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName', 'не задано')}")
@@ -326,7 +326,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print("6. Заменить иконку")
         print("7. Инъекция твиков (.dylib, .zip, .deb, .tar, .lzma, .xz)")
         print("8. Файловый менеджер (просмотр/редактирование файлов .app)")
-        print("9. Применить изменения и собрать IPA")
+        print("9. Применить изменения и собрать IPA/TIPA")
         print(f"10. Тип пути: {path_display}")
         print("11. Режим субстрата: " + mode_display)
         print("12. Расширенное редактирование Info.plist (JSON)")
