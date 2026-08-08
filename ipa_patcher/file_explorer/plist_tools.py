@@ -6,13 +6,16 @@ from core import load_plist_safe, save_plist_safe
 from .text_viewer import parse_typed_value, safe_read_file_content
 
 
-def edit_plist_file(file_path: str) -> None:
+def edit_plist_file(file_path, on_change_callback=None):
     try:
         plist_data = load_plist_safe(file_path)
         if not plist_data or not isinstance(plist_data, dict):
             color_print("Не удалось загрузить plist или файл пуст.", 'red')
-            return
+            return [], {}
 
+        changed_keys = []
+        deep_flags = {'version_deep': False, 'bundle_deep': False}
+        
         while True:
             color_print(f"\nРедактор plist: {os.path.basename(file_path)}", 'cyan')
             print("=" * 50)
@@ -117,6 +120,11 @@ def edit_plist_file(file_path: str) -> None:
                     color_print("Не выбрано ни одного ключа.", 'yellow')
                     continue
                 
+                selected_keys = [keys[idx] for idx in selected_indices]
+                
+                has_version = any(k in ['CFBundleShortVersionString', 'CFBundleVersion'] for k in selected_keys)
+                has_bundle = any(k in ['CFBundleIdentifier'] for k in selected_keys)
+                
                 color_print(f"\nВыбрано {len(selected_indices)} ключей:", 'cyan')
                 for idx in selected_indices:
                     key = keys[idx]
@@ -128,6 +136,34 @@ def edit_plist_file(file_path: str) -> None:
                 
                 if not ask_yes_no("Продолжить редактирование выбранных ключей?", default=True):
                     continue
+                
+                deep_version = False
+                if has_version:
+                    color_print("\nВыберите способ замены версии:", 'cyan')
+                    print("  1) Только Info.plist (безопасно)")
+                    print("  2) Глубокая замена (во всех файлах)")
+                    mode = ask_input("Ваш выбор", "1")
+                    deep_version = (mode == "2")
+                    if deep_version:
+                        color_print("Выбрана глубокая замена версии", 'yellow')
+                        deep_flags['version_deep'] = True
+                    else:
+                        color_print("Выбрана замена только в Info.plist", 'yellow')
+                        deep_flags['version_deep'] = False
+                
+                deep_bundle = False
+                if has_bundle:
+                    color_print("\nВыберите способ замены Bundle ID:", 'cyan')
+                    print("  1) Только Info.plist (безопасно)")
+                    print("  2) Глубокая замена (во всех файлах)")
+                    mode = ask_input("Ваш выбор", "1")
+                    deep_bundle = (mode == "2")
+                    if deep_bundle:
+                        color_print("Выбрана глубокая замена Bundle ID", 'yellow')
+                        deep_flags['bundle_deep'] = True
+                    else:
+                        color_print("Выбрана замена только в Info.plist", 'yellow')
+                        deep_flags['bundle_deep'] = False
                 
                 color_print("\nПодсказка по форматам:", 'cyan')
                 print("  true/false - булево значение")
@@ -149,6 +185,11 @@ def edit_plist_file(file_path: str) -> None:
                     color_print(f"\n[{idx+1}/{len(selected_indices)}] Ключ: {key}", 'yellow')
                     color_print(f"  Текущее значение: {current_str}", 'white')
                     
+                    if key in ['CFBundleShortVersionString', 'CFBundleVersion'] and deep_version:
+                        color_print(f"  [ГЛУБОКАЯ ЗАМЕНА] Будет заменено во всех файлах", 'green')
+                    elif key == 'CFBundleIdentifier' and deep_bundle:
+                        color_print(f"  [ГЛУБОКАЯ ЗАМЕНА] Будет заменено во всех файлах", 'green')
+                    
                     new_value = ask_input(f"Новое значение для '{key}' (Enter = пропустить)", "")
                     if new_value == "":
                         color_print(f"  Пропущен: {key}", 'yellow')
@@ -156,15 +197,22 @@ def edit_plist_file(file_path: str) -> None:
                     
                     try:
                         parsed = parse_typed_value(new_value)
-                        plist_data[key] = parsed
-                        edited_count += 1
-                        color_print(f"  Обновлен: {key}", 'green')
+                        if parsed != current:
+                            plist_data[key] = parsed
+                            edited_count += 1
+                            if key not in changed_keys:
+                                changed_keys.append(key)
+                            color_print(f"  Обновлен: {key}", 'green')
+                        else:
+                            color_print(f"  Значение не изменилось: {key}", 'yellow')
                     except Exception as e:
                         color_print(f"  Ошибка для {key}: {e}", 'red')
                 
                 if edited_count > 0:
                     if save_plist_safe(plist_data, file_path):
                         color_print(f"\n[SUCCESS] Обновлено {edited_count} ключей.", 'green')
+                        if on_change_callback:
+                            on_change_callback()
                     else:
                         color_print("[ERROR] Не удалось сохранить plist.", 'red')
                 else:
@@ -176,8 +224,12 @@ def edit_plist_file(file_path: str) -> None:
                     new_value = ask_input(f"Введите значение для {new_key}")
                     if new_value:
                         plist_data[new_key] = parse_typed_value(new_value)
+                        if new_key not in changed_keys:
+                            changed_keys.append(new_key)
                         if save_plist_safe(plist_data, file_path):
                             color_print(f"[SUCCESS] Ключ {new_key} добавлен.", 'green')
+                            if on_change_callback:
+                                on_change_callback()
                         else:
                             color_print("[ERROR] Не удалось сохранить plist.", 'red')
                 elif new_key in plist_data:
@@ -248,10 +300,14 @@ def edit_plist_file(file_path: str) -> None:
                     key = keys[idx]
                     del plist_data[key]
                     deleted_count += 1
+                    if key in changed_keys:
+                        changed_keys.remove(key)
                     color_print(f"  Удален: {key}", 'green')
                 
                 if save_plist_safe(plist_data, file_path):
                     color_print(f"[SUCCESS] Удалено {deleted_count} ключей.", 'green')
+                    if on_change_callback:
+                        on_change_callback()
                 else:
                     color_print("[ERROR] Не удалось сохранить plist.", 'red')
                     
@@ -264,8 +320,14 @@ def edit_plist_file(file_path: str) -> None:
                 if new_name and new_name != current_name:
                     plist_data["CFBundleDisplayName"] = new_name
                     plist_data["CFBundleName"] = new_name
+                    if "CFBundleDisplayName" not in changed_keys:
+                        changed_keys.append("CFBundleDisplayName")
+                    if "CFBundleName" not in changed_keys:
+                        changed_keys.append("CFBundleName")
                     if save_plist_safe(plist_data, file_path):
                         color_print(f"[SUCCESS] Имя изменено: {current_name} -> {new_name}", 'green')
+                        if on_change_callback:
+                            on_change_callback()
                     else:
                         color_print("[ERROR] Не удалось сохранить.", 'red')
                         continue
@@ -280,10 +342,16 @@ def edit_plist_file(file_path: str) -> None:
                     deep_replace = (mode == "2")
                     
                     plist_data["CFBundleShortVersionString"] = new_version
+                    if "CFBundleShortVersionString" not in changed_keys:
+                        changed_keys.append("CFBundleShortVersionString")
+                    if deep_replace:
+                        deep_flags['version_deep'] = True
                     if save_plist_safe(plist_data, file_path):
                         color_print(f"[SUCCESS] Версия изменена: {current_version} -> {new_version}", 'green')
                         if deep_replace:
                             color_print("[INFO] Выбрана глубокая замена версии (будет выполнена при сборке)", 'yellow')
+                        if on_change_callback:
+                            on_change_callback()
                     else:
                         color_print("[ERROR] Не удалось сохранить.", 'red')
                         continue
@@ -292,8 +360,12 @@ def edit_plist_file(file_path: str) -> None:
                 new_build = ask_input("Номер сборки", current_build)
                 if new_build and new_build != current_build:
                     plist_data["CFBundleVersion"] = new_build
+                    if "CFBundleVersion" not in changed_keys:
+                        changed_keys.append("CFBundleVersion")
                     if save_plist_safe(plist_data, file_path):
                         color_print(f"[SUCCESS] Номер сборки изменён: {current_build} -> {new_build}", 'green')
+                        if on_change_callback:
+                            on_change_callback()
                     else:
                         color_print("[ERROR] Не удалось сохранить.", 'red')
                         continue
@@ -308,15 +380,24 @@ def edit_plist_file(file_path: str) -> None:
                     deep_replace = (mode == "2")
                     
                     plist_data["CFBundleIdentifier"] = new_bundle
+                    if "CFBundleIdentifier" not in changed_keys:
+                        changed_keys.append("CFBundleIdentifier")
+                    if deep_replace:
+                        deep_flags['bundle_deep'] = True
                     if save_plist_safe(plist_data, file_path):
                         color_print(f"[SUCCESS] Bundle ID изменён: {current_bundle} -> {new_bundle}", 'green')
                         if deep_replace:
                             color_print("[INFO] Выбрана глубокая замена Bundle ID (будет выполнена при сборке)", 'yellow')
+                        if on_change_callback:
+                            on_change_callback()
                     else:
                         color_print("[ERROR] Не удалось сохранить.", 'red')
                         continue
                 
                 color_print("[SUCCESS] Быстрое редактирование завершено!", 'green')
+        
+        return changed_keys, deep_flags
 
     except Exception as e:
         color_print(f"Ошибка работы с plist: {e}", 'red')
+        return [], {}
