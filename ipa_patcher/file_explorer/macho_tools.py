@@ -12,6 +12,44 @@ from .utils import format_file_size
 from .types import ChangeSummary
 
 
+def parse_number_input(input_str: str, max_value: int) -> list:
+    if not input_str or input_str.strip() == "":
+        return []
+    
+    if input_str.lower() == "all":
+        return list(range(max_value))
+    
+    result = []
+    parts = input_str.split()
+    
+    for part in parts:
+        part = part.strip()
+        if '-' in part:
+            try:
+                start, end = part.split('-')
+                start_idx = int(start) - 1
+                end_idx = int(end) - 1
+                if 0 <= start_idx < max_value and 0 <= end_idx < max_value:
+                    for i in range(start_idx, end_idx + 1):
+                        if i not in result:
+                            result.append(i)
+                else:
+                    color_print(f"Диапазон {part} вне допустимых значений (1-{max_value})", 'yellow')
+            except ValueError:
+                color_print(f"Неверный формат диапазона: {part}", 'red')
+        elif part.isdigit():
+            idx = int(part) - 1
+            if 0 <= idx < max_value:
+                if idx not in result:
+                    result.append(idx)
+            else:
+                color_print(f"Номер {part} вне диапазона (1-{max_value})", 'yellow')
+        else:
+            color_print(f"Неверный формат: {part}", 'red')
+    
+    return sorted(result)
+
+
 def is_valid_macho_binary(file_path: str) -> bool:
     if not is_macho_binary(file_path):
         return False
@@ -102,7 +140,11 @@ def handle_macho_file(file_path: str) -> tuple:
                 color_print("  Используйте пункт 3 для добавления новых зависимостей.", 'white')
                 continue
 
-            color_print("\nВыберите зависимость с префиксом для изменения (номера через пробел):", 'blue')
+            color_print("\nВыберите зависимость с префиксом для изменения:", 'blue')
+            color_print("  Поддерживаются: номера через пробел, диапазоны (1-5), all", 'cyan')
+            color_print("  Примеры: 2 4 6, 2-5, all", 'cyan')
+            print("")
+            
             for idx, dylib in enumerate(prefixed_dylibs, 1):
                 if dylib.startswith('@rpath'):
                     color_print(f"  {idx}) {dylib}", 'magenta')
@@ -110,29 +152,18 @@ def handle_macho_file(file_path: str) -> tuple:
                     color_print(f"  {idx}) {dylib}", 'green')
                 elif dylib.startswith('@loader_path'):
                     color_print(f"  {idx}) {dylib}", 'cyan')
+            
             print("  0) Отмена")
-            print("  all) Выбрать все")
             
             sel = ask_input("Введите номера", "0")
             if sel == "0":
                 continue
-            if sel.lower() == "all":
-                selected_indices = list(range(len(prefixed_dylibs)))
-            else:
-                try:
-                    nums = sel.split()
-                    selected_indices = []
-                    for num in nums:
-                        if num.isdigit():
-                            idx = int(num) - 1
-                            if 0 <= idx < len(prefixed_dylibs):
-                                selected_indices.append(idx)
-                    if not selected_indices:
-                        color_print("Не выбрано ни одной зависимости.", 'yellow')
-                        continue
-                except:
-                    color_print("Неверный формат ввода.", 'red')
-                    continue
+            
+            selected_indices = parse_number_input(sel, len(prefixed_dylibs))
+            
+            if not selected_indices:
+                color_print("Не выбрано ни одной зависимости.", 'yellow')
+                continue
             
             color_print(f"\nВыбрано {len(selected_indices)} зависимостей для изменения:", 'cyan')
             for idx in selected_indices:
