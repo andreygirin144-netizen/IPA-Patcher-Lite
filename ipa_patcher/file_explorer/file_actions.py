@@ -299,7 +299,7 @@ def edit_json_file(file_path: str, file_name: str) -> None:
                 pass
 
 
-def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> None:
+def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> tuple:
     temp_path = None
     try:
         import plistlib
@@ -323,6 +323,8 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
         print("  0) Отмена")
         
         edit_choice = ask_input("Ваш выбор", "1")
+        deep_flags = {'version_deep': False, 'bundle_deep': False}
+        changed = False
         
         if edit_choice == "0":
             try:
@@ -330,17 +332,18 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
             except:
                 pass
             color_print("[INFO] Редактирование отменено.", 'yellow')
-            return
+            return changed, deep_flags
         elif edit_choice == "3":
             try:
                 os.unlink(temp_path)
             except:
                 pass
             from .plist_tools import edit_plist_file
-            edit_plist_file(file_path)
-            if reload_callback:
+            changed_keys, deep_flags = edit_plist_file(file_path, reload_callback)
+            if changed_keys and reload_callback:
+                color_print(f"[INFO] Изменены ключи: {', '.join(changed_keys)}", 'green')
                 reload_callback()
-            return
+            return True, deep_flags
         elif edit_choice == "1":
             try:
                 import editor
@@ -356,7 +359,7 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
         
         if not os.path.exists(temp_path):
             color_print("[WARN] Временный файл не найден. Изменения отменены.", 'yellow')
-            return
+            return changed, deep_flags
         
         try:
             with open(temp_path, 'rb') as f:
@@ -371,7 +374,7 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
                 os.unlink(temp_path)
             except:
                 pass
-            return
+            return changed, deep_flags
         
         with open(file_path, 'wb') as f:
             plistlib.dump(new_data, f, fmt=plistlib.FMT_BINARY)
@@ -385,6 +388,8 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
             os.unlink(temp_path)
         except:
             pass
+        
+        return True, deep_flags
             
     except Exception as e:
         color_print(f"[ERROR] Ошибка редактирования plist: {e}", 'red')
@@ -393,6 +398,7 @@ def edit_plist_as_text(file_path: str, file_name: str, reload_callback=None) -> 
                 os.unlink(temp_path)
             except:
                 pass
+        return False, {'version_deep': False, 'bundle_deep': False}
 
 
 def handle_file_actions(file_path: str, file_name: str, reload_callback=None) -> None:
