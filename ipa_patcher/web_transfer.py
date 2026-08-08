@@ -29,8 +29,8 @@ except ImportError:
 
 CONFIG = {
     'PORT': 8080,
-    'MAX_FILE_SIZE': 500 * 1024 * 1024,
-    'ALLOWED_EXTENSIONS': {'.ipa', '.zip', '.deb', '.dylib'},
+    'MAX_FILE_SIZE': 5 * 1024 * 1024 * 1024,
+    'ALLOWED_EXTENSIONS': {'.ipa', '.tipa', '.zip', '.deb', '.dylib'},
     'RATE_LIMIT': 5,
     'BAN_THRESHOLD': 5,
     'BAN_DURATION': 600,
@@ -38,7 +38,7 @@ CONFIG = {
     'MAX_CONNECTIONS': 10,
 }
 
-VERSION = '1.1.1'
+VERSION = '1.1.2'
 
 DOCS_DIR = os.path.expanduser('~/Documents')
 FILES_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Files')
@@ -468,8 +468,8 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     f.write(chunk)
                     written += len(chunk)
 
-                    if time.time() - start_time > 600:
-                        raise TimeoutError("Upload timeout")
+                    if time.time() - start_time > 3600:
+                        raise TimeoutError("Upload timeout (1 hour)")
 
             if written < content_length:
                 raise ConnectionError("Incomplete read")
@@ -556,6 +556,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         token = security.get_token()
         ip = get_local_ip()
         port = CONFIG['PORT']
+        max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
 
         return f"""
         <!DOCTYPE html>
@@ -587,6 +588,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 .exts{{font-size:11px;color:#8e8e93;margin-top:8px}}
                 .exts span{{background:#e5e5ea;padding:2px 8px;border-radius:4px;display:inline-block;margin:2px}}
                 .version{{font-size:11px;color:#c7c7cc;margin-top:12px}}
+                .size-info{{font-size:11px;color:#8e8e93;margin-top:4px}}
             </style>
         </head>
         <body>
@@ -603,8 +605,9 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 <div id="msg" class="info"></div>
                 <button id="stopBtn" style="background:#ff3b30;color:white;padding:14px;border-radius:12px;border:none;width:100%;font-size:16px;font-weight:600;margin-top:12px;cursor:pointer">Остановить сервер</button>
                 <div class="exts">
-                    <span>.ipa</span><span>.zip</span><span>.deb</span><span>.dylib</span>
+                    <span>.ipa</span><span>.tipa</span><span>.zip</span><span>.deb</span><span>.dylib</span>
                 </div>
+                <div class="size-info">Макс. размер: {max_size_mb} MB</div>
                 <div class="version">IPA Patcher Lite Transfer v{VERSION}</div>
             </div>
             <script>
@@ -765,12 +768,13 @@ def print_header():
 
 
 def print_status(ip, port, running=False):
+    max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
     if running:
         color_print(f"  Статус: [РАБОТАЕТ]", 'green')
         color_print(f"  Адрес: http://{ip}:{port}", 'blue')
         color_print(f"  Папка: {shorten_path(FILES_DIR)}", 'white')
         color_print(f"  ПИН-код: {security.get_token()}", 'yellow')
-        color_print(f"  Макс. размер: {CONFIG['MAX_FILE_SIZE']//(1024*1024)} MB", 'white')
+        color_print(f"  Макс. размер: {max_size_mb} MB", 'white')
         color_print(f"  Активных соединений: {security.active_connections}", 'white')
         if HAVE_BACKGROUND:
             color_print("  Фоновый режим: АКТИВЕН", 'green')
@@ -805,7 +809,8 @@ def show_security_info():
     color_print("    " + ", ".join(CONFIG['ALLOWED_EXTENSIONS']), 'white')
     print()
     color_print("  Лимиты:", 'yellow')
-    color_print(f"    Макс. размер файла: {CONFIG['MAX_FILE_SIZE']//(1024*1024)} MB", 'white')
+    max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
+    color_print(f"    Макс. размер файла: {max_size_mb} MB", 'white')
     color_print(f"    Запросов в минуту: {CONFIG['RATE_LIMIT']}", 'white')
     color_print(f"    Макс. соединений: {CONFIG['MAX_CONNECTIONS']}", 'white')
     color_print(f"    Бан после: {CONFIG['BAN_THRESHOLD']} неудачных попыток", 'white')
