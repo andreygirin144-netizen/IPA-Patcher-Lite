@@ -556,7 +556,7 @@ python3 main.py
 - Rate-limit: не более 5 запросов в минуту с одного IP.
 - Автобан IP на 10 минут после 5 неудачных попыток ввода ПИН-кода; чёрный список сохраняется в `blacklist.json`.
 - Ограничение одновременных соединений (`MAX_CONNECTIONS`).
-- Проверка расширений (`.ipa`, `.tipa`, `.zip`, `.deb`, `.dylib`) и лимит размера файла (500 МБ).
+- Проверка расширений (`.ipa`, `.tipa`, `.zip`, `.deb`, `.dylib`) и лимит размера файла (5 ГБ).
 - Санитизация имён файлов и защита от directory traversal.
 - HTTP-заголовки безопасности: `X-Content-Type-Options`, `X-Frame-Options`, CSP, `Referrer-Policy`.
 - Отдельные логи: `web_transfer.log` и `audit.log` (с маскированием IP).
