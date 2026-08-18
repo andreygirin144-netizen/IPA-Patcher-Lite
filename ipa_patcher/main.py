@@ -312,7 +312,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             path_display = "@executable_path"
         
         color_print("\n" + "=" * 50, 'cyan')
-        color_print("IPA PATCHER LITE - Интерактивное меню", 'cyan')
+        color_print("   РЕДАКТИРОВАНИЕ Info.plist И ТВИКОВ", 'cyan')
         color_print("=" * 50, 'cyan')
         print("1. Изменить имя приложения")
         print(f"   Текущее: {plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName', 'не задано')}")
@@ -1173,7 +1173,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 else:
                     color_print("[INFO] Hex-патчер: изменений не было", 'yellow')
             else:
-                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA.", 'red')
+                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA/TIPA.", 'red')
                 
         elif choice == "16":
             color_print("\n--- ПРОРЕЖИВАНИЕ БИНАРНИКА ---", 'cyan')
@@ -1184,7 +1184,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             print("")
             
             if not app_dir or not os.path.exists(app_dir):
-                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA.", 'red')
+                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA/TIPA.", 'red')
                 continue
             
             main_executable = get_main_executable(app_dir, plist_data)
@@ -1645,31 +1645,34 @@ def main():
         
         cleanup_backups(app_dir)
         
-        color_print("\n--- Выбор уровня сжатия ---", 'cyan')
-        print("  1) Без сжатия (быстро, большой размер)")
-        print("  2) Стандартное сжатие (рекомендуется)")
-        print("  3) Максимальное сжатие (медленно, маленький размер)")
-        
-        compress_choice = ask_input("Ваш выбор", "2")
-        
-        if compress_choice == "1":
-            compression = zipfile.ZIP_STORED
-            compresslevel = 0
-            color_print("Выбран режим: Без сжатия", 'yellow')
-        elif compress_choice == "3":
-            compression = zipfile.ZIP_DEFLATED
-            compresslevel = 9
-            color_print("Выбран режим: Максимальное сжатие", 'yellow')
-        else:
-            compression = zipfile.ZIP_DEFLATED
-            compresslevel = 6
-            color_print("Выбран режим: Стандартное сжатие", 'green')
-        
         color_print("\n--- Сборка ---", 'cyan')
+        
         if is_tipa:
+            color_print("[INFO] Упаковка TIPA без сжатия (требование TrollStore)", 'yellow')
             pack_tipa_with_progress(temp_dir, output_path)
         else:
+            color_print("\n--- Выбор уровня сжатия ---", 'cyan')
+            print("  1) Без сжатия (быстро, большой размер)")
+            print("  2) Стандартное сжатие (рекомендуется)")
+            print("  3) Максимальное сжатие (медленно, маленький размер)")
+            
+            compress_choice = ask_input("Ваш выбор", "2")
+            
+            if compress_choice == "1":
+                compression = zipfile.ZIP_STORED
+                compresslevel = 0
+                color_print("Выбран режим: Без сжатия", 'yellow')
+            elif compress_choice == "3":
+                compression = zipfile.ZIP_DEFLATED
+                compresslevel = 9
+                color_print("Выбран режим: Максимальное сжатие", 'yellow')
+            else:
+                compression = zipfile.ZIP_DEFLATED
+                compresslevel = 6
+                color_print("Выбран режим: Стандартное сжатие", 'green')
+            
             pack_ipa_with_compression(temp_dir, output_path, compression, compresslevel)
+        
         print()
         color_print(f"[SUCCESS] {'TIPA' if is_tipa else 'IPA'} сохранен в: {output_path}", 'green')
         
