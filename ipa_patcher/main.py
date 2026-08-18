@@ -312,7 +312,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             path_display = "@executable_path"
         
         color_print("\n" + "=" * 50, 'cyan')
-        color_print("   РЕДАКТИРОВАНИЕ Info.plist И ТВИКОВ", 'cyan')
+        color_print("IPA Patcher Lite - Интерактивное меню", 'cyan')
         color_print("=" * 50, 'cyan')
         print("1. Изменить имя приложения")
         print(f"   Текущее: {plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName', 'не задано')}")
