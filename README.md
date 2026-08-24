@@ -9,7 +9,7 @@
 [![a-shell mini](https://img.shields.io/badge/a--shell-mini-FF8C00?style=flat-square)](https://apps.apple.com/app/a-shell-mini/id1543537943)
 [![Platform](https://img.shields.io/badge/Platform-iOS/iPadOS%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square)]()
 [![No Dependencies](https://img.shields.io/badge/Зависимости-0-22C55E?style=flat-square)]()
-[![Version](https://img.shields.io/badge/Версия-1.1.3-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Версия-1.1.4-blue?style=flat-square)]()
 [![License GPLv3](https://img.shields.io/badge/License-GPLv3-red?style=flat-square)](LICENSE)
 
 **Распаковка → редактирование → инъекция твиков → расширенные патчи → пересборка `.ipa`/`.tipa`
