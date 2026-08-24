@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-VERSION = "1.1.3"
+VERSION = "1.1.4"
 
 MH_MAGIC_64 = 0xFEEDFACF
 MH_CIGAM_64 = 0xCFFAEDFE
