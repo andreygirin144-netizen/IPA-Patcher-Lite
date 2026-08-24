@@ -71,6 +71,33 @@ use_rpath = False
 use_loader_path = False
 
 
+def sync_plist_after_icon_change(app_dir, plist_data, changes, info_plist_path):
+    try:
+        import plistlib
+        with open(os.path.join(app_dir, "Info.plist"), 'rb') as f:
+            new_plist = plistlib.load(f)
+        
+        if 'version' in changes:
+            new_plist["CFBundleShortVersionString"] = changes.get('version')
+        if 'bundle_id' in changes:
+            new_plist["CFBundleIdentifier"] = changes.get('bundle_id')
+        if 'name' in changes:
+            new_plist["CFBundleDisplayName"] = changes.get('name')
+            new_plist["CFBundleName"] = changes.get('name')
+        if 'build' in changes:
+            new_plist["CFBundleVersion"] = changes.get('build')
+        if 'version_old' in changes:
+            new_plist["CFBundleShortVersionString"] = changes.get('version')
+        
+        with open(info_plist_path, 'wb') as f:
+            plistlib.dump(new_plist, f, fmt=plistlib.FMT_BINARY)
+        
+        return new_plist
+    except Exception as e:
+        log_message(f"Failed to sync plist after icon change: {e}", 'WARN')
+        return plist_data
+
+
 def save_changelog(app_name, version, changes, output_path):
     changelog_path = os.path.join(PATCHED_DIR, "changelog.json")
     try:
@@ -312,7 +339,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             path_display = "@executable_path"
         
         color_print("\n" + "=" * 50, 'cyan')
-        color_print("IPA Patcher Lite - Интерактивное меню", 'cyan')
+        color_print("  IPA PATCHER LITE - Интерактивное меню", 'cyan')
         color_print("=" * 50, 'cyan')
         print("1. Изменить имя приложения")
         print(f"   Текущее: {plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName', 'не задано')}")
@@ -439,6 +466,16 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 if not img_path.lower().endswith('.png'):
                     color_print("Ошибка: поддерживаются только PNG файлы.", 'red')
                     continue
+                
+                if modified or changes:
+                    try:
+                        import plistlib
+                        with open(info_plist_path, 'wb') as f:
+                            plistlib.dump(plist_data, f, fmt=plistlib.FMT_BINARY)
+                        color_print("[INFO] Info.plist сохранен перед заменой иконки", 'green')
+                    except Exception as e:
+                        log_message(f"Failed to save plist before icon replacement: {e}", 'WARN')
+                
                 color_print("\nВыберите метод замены иконки:", 'cyan')
                 print("1. Гибридный (рекомендуется) - маскирует Assets.car + loose-иконки")
                 print("2. Только маскировка Assets.car (без замены файлов)")
@@ -485,16 +522,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     changes["icon"] = True
                     modified = True
                     
-                    try:
-                        import plistlib
-                        with open(os.path.join(app_dir, "Info.plist"), 'rb') as f:
-                            plist_data = plistlib.load(f)
-                        color_print("[INFO] Info.plist обновлен (версия: {})".format(
-                            plist_data.get('CFBundleVersion', 'не указана')
-                        ), 'blue')
-                    except:
-                        pass
-                    
+                    plist_data = sync_plist_after_icon_change(app_dir, plist_data, changes, info_plist_path)
                     color_print("[SUCCESS] Иконка заменена!", 'green')
                 else:
                     color_print("[ERROR] Не удалось заменить иконку", 'red')
