@@ -251,7 +251,7 @@ ipa_patcher/
 ### 🖥️ macOS / Linux / Windows — Python
 
 ```bash
-git clone https://github.com/andreygirin144-netizen/ipa-patcher.git
+git clone https://github.com/andreygirin144-netizen/IPA-Patcher-Lite.git
 cd ipa-patcher
 pip install Pillow   # опционально, для качественной генерации иконок
 python3 main.py

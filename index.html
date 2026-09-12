@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPA Patcher Lite — Патчер iOS .ipa и .tipa на чистом Python</title>
+<meta name="description" content="Патчер iOS .ipa и .tipa файлов на чистом Python — без компилятора, без внешних зависимостей. Работает на Pythonista 3, a-Shell mini, macOS, Linux, Windows.">
+<meta property="og:title" content="IPA Patcher Lite">
+<meta property="og:description" content="Патчер iOS .ipa и .tipa файлов на чистом Python">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============ RESET & BASE ============ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#08090d;
+  --bg-2:#0d0f14;
+  --surface:rgba(255,255,255,.03);
+  --surface-2:rgba(255,255,255,.05);
+  --border:rgba(255,255,255,.08);
+  --border-2:rgba(255,255,255,.14);
+  --text:#e7e9ee;
+  --text-2:#a0a4b0;
+  --text-3:#6b7080;
+  --accent:#7c5cff;
+  --accent-2:#22d3ee;
+  --accent-3:#f472b6;
+  --green:#22c55e;
+  --yellow:#fbbf24;
+  --red:#ef4444;
+  --radius:16px;
+  --radius-lg:24px;
+  --shadow:0 20px 60px -20px rgba(0,0,0,.8);
+  --gradient:linear-gradient(135deg,#7c5cff 0%,#22d3ee 50%,#f472b6 100%);
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--font);
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+  position:relative;
+}
+/* Aurora background */
+body::before{
+  content:'';
+  position:fixed;
+  inset:0;
+  z-index:-2;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% -10%,rgba(124,92,255,.25),transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 10%,rgba(34,211,238,.18),transparent 60%),
+    radial-gradient(ellipse 70% 60% at 50% 110%,rgba(244,114,182,.15),transparent 60%);
+  pointer-events:none;
+}
+body::after{
+  content:'';
+  position:fixed;
+  inset:0;
+  z-index:-1;
+  background-image:
+    linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px);
+  background-size:60px 60px;
+  mask-image:radial-gradient(ellipse 100% 80% at 50% 0%,#000 30%,transparent 70%);
+  pointer-events:none;
+}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+code{font-family:var(--mono);font-size:.9em}
+
+/* ============ NAV ============ */
+.nav{
+  position:sticky;
+  top:0;
+  z-index:100;
+  backdrop-filter:blur(20px) saturate(180%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);
+  background:rgba(8,9,13,.7);
+  border-bottom:1px solid var(--border);
+}
+.nav-inner{
+  max-width:1200px;
+  margin:0 auto;
+  padding:14px 24px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:24px;
+}
+.logo{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:700;
+  font-size:1.05rem;
+  letter-spacing:-.01em;
+}
+.logo-mark{
+  width:32px;height:32px;
+  border-radius:9px;
+  background:var(--gradient);
+  display:grid;place-items:center;
+  font-size:18px;
+  box-shadow:0 0 24px rgba(124,92,255,.5);
+}
+.nav-links{display:flex;gap:28px;align-items:center}
+.nav-links a{
+  font-size:.9rem;
+  color:var(--text-2);
+  transition:color .2s;
+  font-weight:500;
+}
+.nav-links a:hover{color:var(--text)}
+.nav-cta{
+  padding:9px 18px;
+  border-radius:10px;
+  background:var(--surface-2);
+  border:1px solid var(--border-2);
+  font-size:.88rem;
+  font-weight:600;
+  transition:all .25s;
+}
+.nav-cta:hover{
+  background:var(--gradient);
+  border-color:transparent;
+  transform:translateY(-1px);
+  box-shadow:0 8px 24px -8px rgba(124,92,255,.6);
+}
+@media(max-width:760px){.nav-links{display:none}}
+
+/* ============ HERO ============ */
+.hero{
+  max-width:1200px;
+  margin:0 auto;
+  padding:100px 24px 80px;
+  text-align:center;
+  position:relative;
+}
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 16px 7px 10px;
+  border-radius:999px;
+  background:var(--surface-2);
+  border:1px solid var(--border-2);
+  font-size:.82rem;
+  color:var(--text-2);
+  font-weight:500;
+  margin-bottom:28px;
+  backdrop-filter:blur(10px);
+}
+.badge-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:var(--green);
+  box-shadow:0 0 10px var(--green);
+  animation:pulse 2s infinite;
+}
+@keyframes pulse{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.6;transform:scale(.9)}
+}
+.hero h1{
+  font-size:clamp(2.4rem,6vw,4.5rem);
+  font-weight:800;
+  line-height:1.05;
+  letter-spacing:-.03em;
+  margin-bottom:24px;
+}
+.gradient-text{
+  background:var(--gradient);
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-size:200% 200%;
+  animation:shift 8s ease infinite;
+}
+@keyframes shift{
+  0%,100%{background-position:0% 50%}
+  50%{background-position:100% 50%}
+}
+.hero p.lead{
+  font-size:clamp(1rem,1.6vw,1.2rem);
+  color:var(--text-2);
+  max-width:640px;
+  margin:0 auto 40px;
+  font-weight:400;
+}
+.hero-cta{
+  display:flex;
+  gap:14px;
+  justify-content:center;
+  flex-wrap:wrap;
+  margin-bottom:56px;
+}
+.btn{
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  padding:14px 26px;
+  border-radius:12px;
+  font-weight:600;
+  font-size:.95rem;
+  transition:all .25s;
+  cursor:pointer;
+  border:none;
+  font-family:inherit;
+}
+.btn-primary{
+  background:var(--gradient);
+  color:#fff;
+  box-shadow:0 10px 30px -10px rgba(124,92,255,.7);
+  background-size:200% 200%;
+}
+.btn-primary:hover{
+  transform:translateY(-2px);
+  box-shadow:0 16px 40px -12px rgba(124,92,255,.9);
+  background-position:100% 50%;
+}
+.btn-secondary{
+  background:var(--surface-2);
+  border:1px solid var(--border-2);
+  color:var(--text);
+  backdrop-filter:blur(10px);
+}
+.btn-secondary:hover{
+  background:var(--surface);
+  border-color:rgba(255,255,255,.25);
+  transform:translateY(-2px);
+}
+
+/* Terminal mockup */
+.terminal{
+  max-width:760px;
+  margin:0 auto;
+  border-radius:var(--radius-lg);
+  background:rgba(13,15,20,.85);
+  border:1px solid var(--border-2);
+  box-shadow:var(--shadow),0 0 80px -20px rgba(124,92,255,.4);
+  overflow:hidden;
+  backdrop-filter:blur(20px);
+  text-align:left;
+}
+.terminal-bar{
+  padding:14px 18px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border-bottom:1px solid var(--border);
+  background:rgba(255,255,255,.02);
+}
+.dot{width:12px;height:12px;border-radius:50%}
+.dot.r{background:#ff5f57}
+.dot.y{background:#febc2e}
+.dot.g{background:#28c840}
+.terminal-title{
+  margin-left:14px;
+  font-size:.8rem;
+  color:var(--text-3);
+  font-family:var(--mono);
+}
+.terminal-body{
+  padding:22px;
+  font-family:var(--mono);
+  font-size:.85rem;
+  line-height:1.8;
+  color:var(--text-2);
+}
+.terminal-body .prompt{color:var(--accent-2)}
+.terminal-body .cmd{color:var(--text)}
+.terminal-body .ok{color:var(--green)}
+.terminal-body .warn{color:var(--yellow)}
+.terminal-body .info{color:var(--accent)}
+.cursor{
+  display:inline-block;
+  width:8px;height:16px;
+  background:var(--accent-2);
+  animation:blink 1s steps(2) infinite;
+  vertical-align:middle;
+  margin-left:2px;
+}
+@keyframes blink{50%{opacity:0}}
+
+/* ============ STATS ============ */
+.stats{
+  max-width:1200px;
+  margin:0 auto;
+  padding:40px 24px 80px;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:16px;
+}
+.stat{
+  padding:26px 22px;
+  border-radius:var(--radius);
+  background:var(--surface);
+  border:1px solid var(--border);
+  transition:all .3s;
+  position:relative;
+  overflow:hidden;
+}
+.stat::before{
+  content:'';
+  position:absolute;
+  inset:0;
+  background:var(--gradient);
+  opacity:0;
+  transition:opacity .3s;
+  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;
+  mask-composite:exclude;
+  padding:1px;
+  border-radius:var(--radius);
+}
+.stat:hover{
+  transform:translateY(-4px);
+  background:var(--surface-2);
+}
+.stat:hover::before{opacity:1}
+.stat-value{
+  font-size:2rem;
+  font-weight:800;
+  letter-spacing:-.02em;
+  margin-bottom:6px;
+}
+.stat-label{
+  font-size:.85rem;
+  color:var(--text-3);
+  font-weight:500;
+}
+
+/* ============ SECTIONS ============ */
+.section{
+  max-width:1200px;
+  margin:0 auto;
+  padding:80px 24px;
+}
+.section-head{
+  text-align:center;
+  margin-bottom:56px;
+}
+.section-eyebrow{
+  font-size:.8rem;
+  font-weight:600;
+  letter-spacing:.15em;
+  text-transform:uppercase;
+  color:var(--accent-2);
+  margin-bottom:12px;
+}
+.section-head h2{
+  font-size:clamp(1.8rem,3.5vw,2.8rem);
+  font-weight:800;
+  letter-spacing:-.02em;
+  margin-bottom:16px;
+}
+.section-head p{
+  color:var(--text-2);
+  max-width:600px;
+  margin:0 auto;
+  font-size:1.02rem;
+}
+
+/* ============ FEATURE GRID ============ */
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+  gap:18px;
+}
+.card{
+  padding:28px;
+  border-radius:var(--radius);
+  background:var(--surface);
+  border:1px solid var(--border);
+  transition:all .35s cubic-bezier(.4,0,.2,1);
+  position:relative;
+  overflow:hidden;
+}
+.card::after{
+  content:'';
+  position:absolute;
+  top:0;left:0;right:0;
+  height:1px;
+  background:var(--gradient);
+  opacity:0;
+  transition:opacity .35s;
+}
+.card:hover{
+  transform:translateY(-6px);
+  background:var(--surface-2);
+  border-color:var(--border-2);
+  box-shadow:0 24px 60px -30px rgba(124,92,255,.5);
+}
+.card:hover::after{opacity:1}
+.card-icon{
+  width:48px;height:48px;
+  border-radius:12px;
+  display:grid;place-items:center;
+  margin-bottom:18px;
+  font-size:22px;
+  background:var(--surface-2);
+  border:1px solid var(--border-2);
+  transition:all .35s;
+}
+.card:hover .card-icon{
+  transform:scale(1.08) rotate(-4deg);
+  background:var(--gradient);
+  border-color:transparent;
+}
+.card h3{
+  font-size:1.08rem;
+  font-weight:700;
+  margin-bottom:9px;
+  letter-spacing:-.01em;
+}
+.card p{
+  color:var(--text-2);
+  font-size:.93rem;
+  line-height:1.6;
+}
+
+/* ============ MENU TABLE ============ */
+.menu-list{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+  gap:10px;
+}
+.menu-item{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:16px 18px;
+  border-radius:12px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  transition:all .25s;
+}
+.menu-item:hover{
+  background:var(--surface-2);
+  border-color:var(--border-2);
+  transform:translateX(4px);
+}
+.menu-num{
+  font-family:var(--mono);
+  font-size:.8rem;
+  font-weight:600;
+  width:32px;height:32px;
+  border-radius:9px;
+  display:grid;place-items:center;
+  background:rgba(124,92,255,.15);
+  color:var(--accent);
+  flex-shrink:0;
+  border:1px solid rgba(124,92,255,.25);
+}
+.menu-text{
+  font-size:.9rem;
+  font-weight:500;
+  color:var(--text);
+}
+
+/* ============ CODE BLOCK ============ */
+.code-wrap{
+  border-radius:var(--radius-lg);
+  background:rgba(13,15,20,.85);
+  border:1px solid var(--border-2);
+  overflow:hidden;
+  backdrop-filter:blur(20px);
+  box-shadow:var(--shadow);
+}
+.code-head{
+  padding:13px 20px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  border-bottom:1px solid var(--border);
+  font-size:.8rem;
+  color:var(--text-3);
+  font-family:var(--mono);
+  background:rgba(255,255,255,.02);
+}
+.code-body{
+  padding:22px 24px;
+  font-family:var(--mono);
+  font-size:.85rem;
+  line-height:1.85;
+  overflow-x:auto;
+  color:var(--text-2);
+}
+.code-body .kw{color:#c084fc}
+.code-body .str{color:#86efac}
+.code-body .cmt{color:#525870}
+.code-body .fn{color:#67e8f9}
+.code-body .num{color:#fbbf24}
+
+/* ============ PLATFORMS ============ */
+.platforms{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:16px;
+}
+.platform{
+  padding:30px 22px;
+  border-radius:var(--radius);
+  background:var(--surface);
+  border:1px solid var(--border);
+  text-align:center;
+  transition:all .3s;
+}
+.platform:hover{
+  transform:translateY(-4px);
+  background:var(--surface-2);
+  border-color:var(--border-2);
+}
+.platform-emoji{font-size:38px;margin-bottom:14px}
+.platform h3{font-size:1rem;font-weight:700;margin-bottom:6px}
+.platform p{font-size:.85rem;color:var(--text-3)}
+
+/* ============ FAQ ============ */
+.faq{max-width:820px;margin:0 auto}
+.faq details{
+  border-radius:14px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  margin-bottom:10px;
+  overflow:hidden;
+  transition:all .25s;
+}
+.faq details[open]{
+  background:var(--surface-2);
+  border-color:var(--border-2);
+}
+.faq summary{
+  padding:20px 24px;
+  cursor:pointer;
+  font-weight:600;
+  font-size:.97rem;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  list-style:none;
+  transition:color .2s;
+}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{
+  content:'+';
+  font-size:1.4rem;
+  font-weight:300;
+  color:var(--accent-2);
+  transition:transform .3s;
+  line-height:1;
+}
+.faq details[open] summary::after{
+  transform:rotate(45deg);
+}
+.faq details p{
+  padding:0 24px 22px;
+  color:var(--text-2);
+  font-size:.92rem;
+  line-height:1.7;
+}
+
+/* ============ CTA FOOTER ============ */
+.cta{
+  max-width:900px;
+  margin:0 auto;
+  padding:80px 24px;
+  text-align:center;
+}
+.cta-box{
+  padding:60px 40px;
+  border-radius:var(--radius-lg);
+  background:linear-gradient(135deg,rgba(124,92,255,.12),rgba(34,211,238,.08));
+  border:1px solid var(--border-2);
+  backdrop-filter:blur(20px);
+  position:relative;
+  overflow:hidden;
+}
+.cta-box::before{
+  content:'';
+  position:absolute;
+  inset:-2px;
+  background:var(--gradient);
+  opacity:.15;
+  filter:blur(60px);
+  z-index:-1;
+}
+.cta-box h2{
+  font-size:clamp(1.6rem,3vw,2.2rem);
+  font-weight:800;
+  letter-spacing:-.02em;
+  margin-bottom:14px;
+}
+.cta-box p{
+  color:var(--text-2);
+  margin-bottom:30px;
+  font-size:1rem;
+}
+
+footer{
+  border-top:1px solid var(--border);
+  padding:40px 24px;
+  text-align:center;
+  color:var(--text-3);
+  font-size:.85rem;
+}
+footer a{color:var(--text-2);transition:color .2s}
+footer a:hover{color:var(--accent-2)}
+
+/* ============ REVEAL ANIMATION ============ */
+.reveal{
+  opacity:0;
+  transform:translateY(24px);
+  transition:opacity .7s cubic-bezier(.4,0,.2,1),transform .7s cubic-bezier(.4,0,.2,1);
+}
+.reveal.visible{opacity:1;transform:none}
+
+/* ============ SCROLLBAR ============ */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,.1);
+  border-radius:5px;
+  border:2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover{background:rgba(124,92,255,.5)}
+::selection{background:rgba(124,92,255,.35);color:#fff}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#" class="logo">
+      <div class="logo-mark">⚙️</div>
+      <span>IPA Patcher Lite</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Возможности</a>
+      <a href="#menu">Меню</a>
+      <a href="#platforms">Платформы</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite" class="nav-cta">GitHub →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="badge">
+    <span class="badge-dot"></span>
+    Версия 1.1.4 · GPLv3 · Zero dependencies
+  </div>
+  <h1>
+    Патчер iOS <span class="gradient-text">.ipa</span> и <span class="gradient-text">.tipa</span><br>
+    на чистом Python
+  </h1>
+  <p class="lead">
+    Распаковка → редактирование → инъекция твиков → расширенные патчи → пересборка.
+    Без компилятора, без внешних зависимостей. Работает на Pythonista 3, a-Shell mini, macOS, Linux и Windows.
+  </p>
+  <div class="hero-cta">
+    <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite" class="btn btn-primary">
+      Начать работу
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+    <a href="#features" class="btn btn-secondary">
+      Узнать больше
+    </a>
+  </div>
+
+  <!-- Terminal mockup -->
+  <div class="terminal">
+    <div class="terminal-bar">
+      <span class="dot r"></span>
+      <span class="dot y"></span>
+      <span class="dot g"></span>
+      <span class="terminal-title">python3 main.py — IPA Patcher Lite</span>
+    </div>
+    <div class="terminal-body">
+      <div><span class="prompt">$</span> <span class="cmd">python3 main.py</span></div>
+      <div><span class="info">→</span> Выбор файла: <span class="cmd">MyApp.ipa</span></div>
+      <div><span class="info">→</span> Распаковка в Temp_ipa/... <span class="ok">✓</span></div>
+      <div><span class="info">→</span> Payload/MyApp.app — <span class="ok">найден</span></div>
+      <div><span class="info">→</span> Меню редактирования (1–17)</div>
+      <div><span class="ok">[1]</span> Имя приложения</div>
+      <div><span class="ok">[6]</span> Замена иконки — <span class="warn">гибридный режим</span></div>
+      <div><span class="ok">[9]</span> Сборка IPA/TIPA... <span class="ok">✓</span></div>
+      <div><span class="info">→</span> Готово: <span class="cmd">Patched_ipa/MyApp_v1.0_tweaked_icon_patched.ipa</span></div>
+      <div><span class="prompt">$</span> <span class="cursor"></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<section class="stats reveal">
+  <div class="stat">
+    <div class="stat-value gradient-text">0</div>
+    <div class="stat-label">Внешних зависимостей</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value gradient-text">5</div>
+    <div class="stat-label">Методов замены иконки</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value gradient-text">17</div>
+    <div class="stat-label">Пунктов меню</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value gradient-text">4</div>
+    <div class="stat-label">Поддерживаемых ОС</div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section" id="features">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">Возможности</div>
+    <h2>Всё что нужно для модификации IPA</h2>
+    <p>Полный цикл работы с iOS-приложениями — от распаковки до установки через SideStore, AltStore или TrollStore.</p>
+  </div>
+  <div class="grid">
+    <div class="card reveal">
+      <div class="card-icon">📦</div>
+      <h3>IPA и TIPA</h3>
+      <p>Распаковка и упаковка с сохранением Unix-прав. Автоопределение формата, ZIP_STORED для TrollStore.</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-icon">🏪</div>
+      <h3>TrollStore</h3>
+      <p>Автоподготовка entitlements, настройка Info.plist и упаковка без сжатия для быстрой установки.</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-icon">✏️</div>
+      <h3>Info.plist</h3>
+      <p>Имя, версия, номер сборки, Bundle ID. Каскадное обновление во всех PlugIns, Watch и appex.</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-icon">🖼️</div>
+      <h3>Замена иконки</h3>
+      <p>5 методов: гибридный (маскировка Assets.car), только BOM, только loose, стандарт, удаление.</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-icon">💉</div>
+      <h3>Инъекция твиков</h3>
+      <p>.dylib, .deb, .zip, .tar.* — фреймворки и бандлы автоматически копируются в Frameworks/.</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-icon">🔧</div>
+      <h3>Hex патчер</h3>
+      <p>Встроенный интерактивный Hex-редактор. Поиск, замена, работа по смещению, undo и бэкапы.</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-icon">🛠️</div>
+      <h3>Расширенные патчи</h3>
+      <p>Понижение iOS, удаление плагинов, Watch, URL-схем, ограничений по устройствам.</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-icon">🛡️</div>
+      <h3>Безопасность</h3>
+      <p>Zip Slip защита, сканирование dylib на опасные вызовы, строгий парсинг Mach-O.</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-icon">🌐</div>
+      <h3>Web Transfer</h3>
+      <p>Локальный HTTP-сервер с ПИН-кодом и авто-баном для передачи файлов по Wi-Fi.</p>
+    </div>
+  </div>
+</section>
+
+<!-- MENU -->
+<section class="section" id="menu">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">Интерфейс</div>
+    <h2>17 пунктов меню</h2>
+    <p>Полный контроль над каждым аспектом приложения — от метаданных до бинарного патчинга.</p>
+  </div>
+  <div class="menu-list">
+    <div class="menu-item reveal"><span class="menu-num">01</span><span class="menu-text">Имя приложения</span></div>
+    <div class="menu-item reveal"><span class="menu-num">02</span><span class="menu-text">Версия</span></div>
+    <div class="menu-item reveal"><span class="menu-num">03</span><span class="menu-text">Номер сборки</span></div>
+    <div class="menu-item reveal"><span class="menu-num">04</span><span class="menu-text">Bundle ID</span></div>
+    <div class="menu-item reveal"><span class="menu-num">05</span><span class="menu-text">Файловый шеринг</span></div>
+    <div class="menu-item reveal"><span class="menu-num">06</span><span class="menu-text">Замена иконки</span></div>
+    <div class="menu-item reveal"><span class="menu-num">07</span><span class="menu-text">Инъекция твиков</span></div>
+    <div class="menu-item reveal"><span class="menu-num">08</span><span class="menu-text">Файловый менеджер</span></div>
+    <div class="menu-item reveal"><span class="menu-num">09</span><span class="menu-text">Собрать IPA/TIPA</span></div>
+    <div class="menu-item reveal"><span class="menu-num">10</span><span class="menu-text">Тип пути (@rpath)</span></div>
+    <div class="menu-item reveal"><span class="menu-num">11</span><span class="menu-text">Режим субстрата</span></div>
+    <div class="menu-item reveal"><span class="menu-num">12</span><span class="menu-text">JSON-редактор</span></div>
+    <div class="menu-item reveal"><span class="menu-num">13</span><span class="menu-text">Entitlements</span></div>
+    <div class="menu-item reveal"><span class="menu-num">14</span><span class="menu-text">Расширенные патчи</span></div>
+    <div class="menu-item reveal"><span class="menu-num">15</span><span class="menu-text">Hex патчер</span></div>
+    <div class="menu-item reveal"><span class="menu-num">16</span><span class="menu-text">Прореживание бинарника</span></div>
+    <div class="menu-item reveal"><span class="menu-num">17</span><span class="menu-text">Восстановление из бэкапов</span></div>
+  </div>
+</section>
+
+<!-- INSTALL -->
+<section class="section" id="install">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">Установка</div>
+    <h2>Запуск за 30 секунд</h2>
+    <p>Скопируй репозиторий и запусти — остальное скрипт сделает сам.</p>
+  </div>
+  <div class="code-wrap reveal">
+    <div class="code-head">
+      <span>bash</span>
+      <span>install.sh</span>
+    </div>
+    <div class="code-body">
+<span class="cmt"># Клонируем репозиторий</span>
+<span class="fn">git</span> clone https://github.com/andreygirin144-netizen/IPA-Patcher-Lite.git
+<span class="fn">cd</span> IPA-Patcher-Lite
+
+<span class="cmt"># Опционально: Pillow для качественной генерации иконок</span>
+<span class="fn">pip</span> install Pillow
+
+<span class="cmt"># Запуск</span>
+<span class="fn">python3</span> main.py
+    </div>
+  </div>
+</section>
+
+<!-- PLATFORMS -->
+<section class="section" id="platforms">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">Платформы</div>
+    <h2>Работает везде, где есть Python</h2>
+    <p>Единая кодовая база с автоопределением окружения через sys.platform.</p>
+  </div>
+  <div class="platforms">
+    <div class="platform reveal">
+      <div class="platform-emoji">📱</div>
+      <h3>Pythonista 3</h3>
+      <p>iPhone / iPad</p>
+    </div>
+    <div class="platform reveal">
+      <div class="platform-emoji">🐚</div>
+      <h3>a-Shell mini</h3>
+      <p>iPhone / iPad</p>
+    </div>
+    <div class="platform reveal">
+      <div class="platform-emoji">🍎</div>
+      <h3>macOS</h3>
+      <p>Нативный Python 3</p>
+    </div>
+    <div class="platform reveal">
+      <div class="platform-emoji">🐧</div>
+      <h3>Linux</h3>
+      <p>Нативный Python 3</p>
+    </div>
+    <div class="platform reveal">
+      <div class="platform-emoji">🪟</div>
+      <h3>Windows</h3>
+      <p>Нативный Python 3</p>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="section" id="faq">
+  <div class="section-head reveal">
+    <div class="section-eyebrow">FAQ</div>
+    <h2>Частые вопросы</h2>
+  </div>
+  <div class="faq">
+    <details class="reveal">
+      <summary>Нужен ли джейлбрейк?</summary>
+      <p>Нет. Установка через AltStore, SideStore или TrollStore работает на стоковой iOS.</p>
+    </details>
+    <details class="reveal">
+      <summary>Какие платформы поддерживаются?</summary>
+      <p>Pythonista 3 и a-Shell mini на iOS/iPadOS, а также нативный Python на macOS, Linux и Windows.</p>
+    </details>
+    <details class="reveal">
+      <summary>Можно ли откатить изменения?</summary>
+      <p>Скрипт никогда не изменяет исходный файл — результат всегда сохраняется в новый с суффиксами (_tweaked, _icon, _patched). Точечные правки через Hex-патчер откатываются через менеджер бэкапов.</p>
+    </details>
+    <details class="reveal">
+      <summary>Почему инъекция твика не удалась?</summary>
+      <p>Нехватка места в заголовке Mach-O, неподдерживаемая архитектура (32-бит) или исходный файл зашифрован (App Store бинарник без расшифровки).</p>
+    </details>
+    <details class="reveal">
+      <summary>Какой метод замены иконки выбрать?</summary>
+      <p>Гибридный (пункт 1) — безопасный и эффективный; не трогает Assets.car целиком и не вызывает крашей на iOS 15+.</p>
+    </details>
+    <details class="reveal">
+      <summary>Обязателен ли Pillow?</summary>
+      <p>Нет. Без Pillow иконки копируются без ресайза, но функционально работают.</p>
+    </details>
+    <details class="reveal">
+      <summary>Чем отличается .tipa от .ipa?</summary>
+      <p>.tipa — формат для TrollStore, упаковывается без сжатия (ZIP_STORED), содержит специальные entitlements-флаги. Скрипт автоматически определяет формат.</p>
+    </details>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="cta-box reveal">
+    <h2>Готовы модифицировать <span class="gradient-text">свои приложения?</span></h2>
+    <p>Скачай репозиторий и начни работу за 30 секунд.</p>
+    <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite" class="btn btn-primary">
+      Открыть на GitHub
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+  </div>
+</section>
+
+<footer>
+  <p>IPA Patcher Lite · GPLv3 · Сделано для iOS/iPadOS, macOS, Linux, Windows</p>
+  <p style="margin-top:8px">
+    <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite/edit/main/README.md">Улучшить страницу</a>
+  </p>
+</footer>
+
+<script>
+// Scroll reveal
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      e.target.classList.add('visible');
+      io.unobserve(e.target);
+    }
+  });
+},{threshold:0.1,rootMargin:'0px 0px -50px 0px'});
+document.querySelectorAll('.reveal').forEach((el,i)=>{
+  el.style.transitionDelay = (i%6)*60 + 'ms';
+  io.observe(el);
+});
+
+// Smooth anchor offset (sticky nav)
+document.querySelectorAll('a[href^="#"]').forEach(a=>{
+  a.addEventListener('click',e=>{
+    const id = a.getAttribute('href');
+    if(id.length > 1){
+      const el = document.querySelector(id);
+      if(el){
+        e.preventDefault();
+        const y = el.getBoundingClientRect().top + window.scrollY - 80;
+        window.scrollTo({top:y,behavior:'smooth'});
+      }
+    }
+  });
+});
+
+// Terminal typing effect (lightweight)
+(function(){
+  const lines = document.querySelectorAll('.terminal-body > div');
+  lines.forEach((l,i)=>{
+    l.style.opacity = '0';
+    l.style.transform = 'translateX(-8px)';
+    setTimeout(()=>{
+      l.style.transition = 'all .4s cubic-bezier(.4,0,.2,1)';
+      l.style.opacity = '1';
+      l.style.transform = 'none';
+    }, 300 + i*150);
+  });
+})();
+</script>
+</body>
+</html>
