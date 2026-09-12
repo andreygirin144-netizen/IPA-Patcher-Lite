@@ -1,24 +1,22 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IPA Patcher Lite — Патчер iOS .ipa и .tipa на чистом Python</title>
-<meta name="description" content="Патчер iOS .ipa и .tipa файлов на чистом Python — без компилятора, без внешних зависимостей. Работает на Pythonista 3, a-Shell mini, macOS, Linux, Windows.">
-<meta property="og:title" content="IPA Patcher Lite">
-<meta property="og:description" content="Патчер iOS .ipa и .tipa файлов на чистом Python">
-<meta property="og:type" content="website">
+<title>IPA Patcher Lite</title>
+<meta name="description" content="Патчер iOS .ipa и .tipa файлов на чистом Python.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-/* ============ RESET & BASE ============ */
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
+/* ============ THEMES ============ */
+:root,
+html[data-theme="dark"]{
   --bg:#08090d;
   --bg-2:#0d0f14;
   --surface:rgba(255,255,255,.03);
   --surface-2:rgba(255,255,255,.05);
+  --surface-3:rgba(255,255,255,.08);
   --border:rgba(255,255,255,.08);
   --border-2:rgba(255,255,255,.14);
   --text:#e7e9ee;
@@ -30,10 +28,51 @@
   --green:#22c55e;
   --yellow:#fbbf24;
   --red:#ef4444;
+  --gradient:linear-gradient(135deg,#7c5cff 0%,#22d3ee 50%,#f472b6 100%);
+  --nav-bg:rgba(8,9,13,.7);
+  --code-bg:rgba(13,15,20,.85);
+  --shadow:0 20px 60px -20px rgba(0,0,0,.8);
+  --aurora-1:rgba(124,92,255,.25);
+  --aurora-2:rgba(34,211,238,.18);
+  --aurora-3:rgba(244,114,182,.15);
+  --grid-line:rgba(255,255,255,.02);
+  --scroll-thumb:rgba(255,255,255,.1);
+  --selection-bg:rgba(124,92,255,.35);
+}
+html[data-theme="light"]{
+  --bg:#f7f8fc;
+  --bg-2:#eef0f7;
+  --surface:rgba(255,255,255,.7);
+  --surface-2:rgba(255,255,255,.9);
+  --surface-3:rgba(255,255,255,1);
+  --border:rgba(15,20,40,.08);
+  --border-2:rgba(15,20,40,.14);
+  --text:#0b0d17;
+  --text-2:#4b5162;
+  --text-3:#8a90a3;
+  --accent:#6d4aff;
+  --accent-2:#0891b2;
+  --accent-3:#db2777;
+  --green:#16a34a;
+  --yellow:#d97706;
+  --red:#dc2626;
+  --gradient:linear-gradient(135deg,#6d4aff 0%,#0891b2 50%,#db2777 100%);
+  --nav-bg:rgba(247,248,252,.75);
+  --code-bg:rgba(255,255,255,.9);
+  --shadow:0 20px 60px -20px rgba(20,30,80,.18);
+  --aurora-1:rgba(124,92,255,.18);
+  --aurora-2:rgba(34,211,238,.14);
+  --aurora-3:rgba(244,114,182,.12);
+  --grid-line:rgba(20,30,80,.035);
+  --scroll-thumb:rgba(20,30,80,.15);
+  --selection-bg:rgba(124,92,255,.25);
+}
+
+/* ============ RESET & BASE ============ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
   --radius:16px;
   --radius-lg:24px;
-  --shadow:0 20px 60px -20px rgba(0,0,0,.8);
-  --gradient:linear-gradient(135deg,#7c5cff 0%,#22d3ee 50%,#f472b6 100%);
   --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
   --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
 }
@@ -46,18 +85,19 @@ body{
   -webkit-font-smoothing:antialiased;
   overflow-x:hidden;
   position:relative;
+  transition:background .4s ease,color .4s ease;
 }
-/* Aurora background */
 body::before{
   content:'';
   position:fixed;
   inset:0;
   z-index:-2;
   background:
-    radial-gradient(ellipse 80% 50% at 20% -10%,rgba(124,92,255,.25),transparent 60%),
-    radial-gradient(ellipse 60% 50% at 80% 10%,rgba(34,211,238,.18),transparent 60%),
-    radial-gradient(ellipse 70% 60% at 50% 110%,rgba(244,114,182,.15),transparent 60%);
+    radial-gradient(ellipse 80% 50% at 20% -10%,var(--aurora-1),transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 10%,var(--aurora-2),transparent 60%),
+    radial-gradient(ellipse 70% 60% at 50% 110%,var(--aurora-3),transparent 60%);
   pointer-events:none;
+  transition:background .4s ease;
 }
 body::after{
   content:'';
@@ -65,11 +105,13 @@ body::after{
   inset:0;
   z-index:-1;
   background-image:
-    linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px);
+    linear-gradient(var(--grid-line) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid-line) 1px,transparent 1px);
   background-size:60px 60px;
   mask-image:radial-gradient(ellipse 100% 80% at 50% 0%,#000 30%,transparent 70%);
+  -webkit-mask-image:radial-gradient(ellipse 100% 80% at 50% 0%,#000 30%,transparent 70%);
   pointer-events:none;
+  transition:background-image .4s ease;
 }
 a{color:inherit;text-decoration:none}
 img{max-width:100%;display:block}
@@ -82,8 +124,9 @@ code{font-family:var(--mono);font-size:.9em}
   z-index:100;
   backdrop-filter:blur(20px) saturate(180%);
   -webkit-backdrop-filter:blur(20px) saturate(180%);
-  background:rgba(8,9,13,.7);
+  background:var(--nav-bg);
   border-bottom:1px solid var(--border);
+  transition:background .4s ease,border-color .4s ease;
 }
 .nav-inner{
   max-width:1200px;
@@ -101,6 +144,7 @@ code{font-family:var(--mono);font-size:.9em}
   font-weight:700;
   font-size:1.05rem;
   letter-spacing:-.01em;
+  flex-shrink:0;
 }
 .logo-mark{
   width:32px;height:32px;
@@ -118,6 +162,66 @@ code{font-family:var(--mono);font-size:.9em}
   font-weight:500;
 }
 .nav-links a:hover{color:var(--text)}
+.nav-actions{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-shrink:0;
+}
+
+/* Theme toggle */
+.theme-toggle{
+  width:40px;height:40px;
+  border-radius:10px;
+  background:var(--surface-2);
+  border:1px solid var(--border-2);
+  cursor:pointer;
+  display:grid;place-items:center;
+  transition:all .25s;
+  color:var(--text);
+  padding:0;
+  font-family:inherit;
+}
+.theme-toggle:hover{
+  background:var(--surface-3);
+  border-color:var(--accent);
+  transform:translateY(-1px);
+}
+.theme-toggle svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+html[data-theme="dark"] .theme-toggle .icon-sun{display:block}
+html[data-theme="dark"] .theme-toggle .icon-moon{display:none}
+html[data-theme="light"] .theme-toggle .icon-sun{display:none}
+html[data-theme="light"] .theme-toggle .icon-moon{display:block}
+
+/* Language selector */
+.lang-switch{
+  display:flex;
+  background:var(--surface-2);
+  border:1px solid var(--border-2);
+  border-radius:10px;
+  padding:3px;
+  gap:2px;
+}
+.lang-switch button{
+  background:none;
+  border:none;
+  color:var(--text-2);
+  font-family:inherit;
+  font-size:.78rem;
+  font-weight:600;
+  padding:6px 11px;
+  border-radius:7px;
+  cursor:pointer;
+  transition:all .2s;
+  letter-spacing:.02em;
+}
+.lang-switch button:hover{color:var(--text)}
+.lang-switch button.active{
+  background:var(--gradient);
+  color:#fff;
+  box-shadow:0 4px 12px -4px rgba(124,92,255,.6);
+}
+
 .nav-cta{
   padding:9px 18px;
   border-radius:10px;
@@ -126,14 +230,22 @@ code{font-family:var(--mono);font-size:.9em}
   font-size:.88rem;
   font-weight:600;
   transition:all .25s;
+  white-space:nowrap;
 }
 .nav-cta:hover{
   background:var(--gradient);
   border-color:transparent;
   transform:translateY(-1px);
   box-shadow:0 8px 24px -8px rgba(124,92,255,.6);
+  color:#fff;
 }
-@media(max-width:760px){.nav-links{display:none}}
+@media(max-width:900px){.nav-links{display:none}}
+@media(max-width:600px){
+  .nav-inner{padding:12px 16px;gap:12px}
+  .logo span{display:none}
+  .nav-cta{padding:8px 14px;font-size:.82rem}
+  .lang-switch button{padding:6px 8px;font-size:.72rem}
+}
 
 /* ============ HERO ============ */
 .hero{
@@ -231,8 +343,8 @@ code{font-family:var(--mono);font-size:.9em}
   backdrop-filter:blur(10px);
 }
 .btn-secondary:hover{
-  background:var(--surface);
-  border-color:rgba(255,255,255,.25);
+  background:var(--surface-3);
+  border-color:var(--accent);
   transform:translateY(-2px);
 }
 
@@ -241,12 +353,13 @@ code{font-family:var(--mono);font-size:.9em}
   max-width:760px;
   margin:0 auto;
   border-radius:var(--radius-lg);
-  background:rgba(13,15,20,.85);
+  background:var(--code-bg);
   border:1px solid var(--border-2);
   box-shadow:var(--shadow),0 0 80px -20px rgba(124,92,255,.4);
   overflow:hidden;
   backdrop-filter:blur(20px);
   text-align:left;
+  transition:background .4s ease,border-color .4s ease;
 }
 .terminal-bar{
   padding:14px 18px;
@@ -254,7 +367,7 @@ code{font-family:var(--mono);font-size:.9em}
   align-items:center;
   gap:8px;
   border-bottom:1px solid var(--border);
-  background:rgba(255,255,255,.02);
+  background:var(--surface);
 }
 .dot{width:12px;height:12px;border-radius:50%}
 .dot.r{background:#ff5f57}
@@ -287,54 +400,6 @@ code{font-family:var(--mono);font-size:.9em}
   margin-left:2px;
 }
 @keyframes blink{50%{opacity:0}}
-
-/* ============ STATS ============ */
-.stats{
-  max-width:1200px;
-  margin:0 auto;
-  padding:40px 24px 80px;
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
-  gap:16px;
-}
-.stat{
-  padding:26px 22px;
-  border-radius:var(--radius);
-  background:var(--surface);
-  border:1px solid var(--border);
-  transition:all .3s;
-  position:relative;
-  overflow:hidden;
-}
-.stat::before{
-  content:'';
-  position:absolute;
-  inset:0;
-  background:var(--gradient);
-  opacity:0;
-  transition:opacity .3s;
-  mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-  -webkit-mask-composite:xor;
-  mask-composite:exclude;
-  padding:1px;
-  border-radius:var(--radius);
-}
-.stat:hover{
-  transform:translateY(-4px);
-  background:var(--surface-2);
-}
-.stat:hover::before{opacity:1}
-.stat-value{
-  font-size:2rem;
-  font-weight:800;
-  letter-spacing:-.02em;
-  margin-bottom:6px;
-}
-.stat-label{
-  font-size:.85rem;
-  color:var(--text-3);
-  font-weight:500;
-}
 
 /* ============ SECTIONS ============ */
 .section{
@@ -381,6 +446,7 @@ code{font-family:var(--mono);font-size:.9em}
   transition:all .35s cubic-bezier(.4,0,.2,1);
   position:relative;
   overflow:hidden;
+  backdrop-filter:blur(10px);
 }
 .card::after{
   content:'';
@@ -467,11 +533,12 @@ code{font-family:var(--mono);font-size:.9em}
 /* ============ CODE BLOCK ============ */
 .code-wrap{
   border-radius:var(--radius-lg);
-  background:rgba(13,15,20,.85);
+  background:var(--code-bg);
   border:1px solid var(--border-2);
   overflow:hidden;
   backdrop-filter:blur(20px);
   box-shadow:var(--shadow);
+  transition:background .4s ease;
 }
 .code-head{
   padding:13px 20px;
@@ -482,7 +549,7 @@ code{font-family:var(--mono);font-size:.9em}
   font-size:.8rem;
   color:var(--text-3);
   font-family:var(--mono);
-  background:rgba(255,255,255,.02);
+  background:var(--surface);
 }
 .code-body{
   padding:22px 24px;
@@ -494,9 +561,11 @@ code{font-family:var(--mono);font-size:.9em}
 }
 .code-body .kw{color:#c084fc}
 .code-body .str{color:#86efac}
-.code-body .cmt{color:#525870}
-.code-body .fn{color:#67e8f9}
-.code-body .num{color:#fbbf24}
+.code-body .cmt{color:var(--text-3)}
+.code-body .fn{color:var(--accent-2)}
+.code-body .num{color:var(--yellow)}
+html[data-theme="light"] .code-body .kw{color:#7c3aed}
+html[data-theme="light"] .code-body .str{color:#059669}
 
 /* ============ PLATFORMS ============ */
 .platforms{
@@ -608,6 +677,7 @@ footer{
   text-align:center;
   color:var(--text-3);
   font-size:.85rem;
+  transition:border-color .4s ease;
 }
 footer a{color:var(--text-2);transition:color .2s}
 footer a:hover{color:var(--accent-2)}
@@ -624,12 +694,15 @@ footer a:hover{color:var(--accent-2)}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-track{background:var(--bg)}
 ::-webkit-scrollbar-thumb{
-  background:rgba(255,255,255,.1);
+  background:var(--scroll-thumb);
   border-radius:5px;
   border:2px solid var(--bg);
 }
 ::-webkit-scrollbar-thumb:hover{background:rgba(124,92,255,.5)}
-::selection{background:rgba(124,92,255,.35);color:#fff}
+::selection{background:var(--selection-bg);color:var(--text)}
+
+/* Font for Chinese */
+html[lang="zh"] body{font-family:'Inter','PingFang SC','Microsoft YaHei','Hiragino Sans GB',sans-serif}
 </style>
 </head>
 <body>
@@ -642,12 +715,23 @@ footer a:hover{color:var(--accent-2)}
       <span>IPA Patcher Lite</span>
     </a>
     <div class="nav-links">
-      <a href="#features">Возможности</a>
-      <a href="#menu">Меню</a>
-      <a href="#platforms">Платформы</a>
-      <a href="#faq">FAQ</a>
+      <a href="#features" data-i18n="nav.features">Возможности</a>
+      <a href="#menu" data-i18n="nav.menu">Меню</a>
+      <a href="#platforms" data-i18n="nav.platforms">Платформы</a>
+      <a href="#faq" data-i18n="nav.faq">FAQ</a>
     </div>
-    <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite" class="nav-cta">GitHub →</a>
+    <div class="nav-actions">
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <div class="lang-switch" id="langSwitch">
+        <button data-lang="ru" class="active">RU</button>
+        <button data-lang="en">EN</button>
+        <button data-lang="zh">CN</button>
+      </div>
+      <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite" class="nav-cta">GitHub →</a>
+    </div>
   </div>
 </nav>
 
@@ -655,24 +739,25 @@ footer a:hover{color:var(--accent-2)}
 <section class="hero">
   <div class="badge">
     <span class="badge-dot"></span>
-    Версия 1.1.4 · GPLv3 · Zero dependencies
+    <span data-i18n="hero.badge">Версия 1.1.4 · GPLv3 · Zero dependencies</span>
   </div>
   <h1>
-    Патчер iOS <span class="gradient-text">.ipa</span> и <span class="gradient-text">.tipa</span><br>
-    на чистом Python
+    <span data-i18n="hero.title1">Патчер iOS</span>
+    <span class="gradient-text">.ipa</span>
+    <span data-i18n="hero.titleAnd">и</span>
+    <span class="gradient-text">.tipa</span><br>
+    <span data-i18n="hero.title2">на чистом Python</span>
   </h1>
-  <p class="lead">
+  <p class="lead" data-i18n="hero.lead">
     Распаковка → редактирование → инъекция твиков → расширенные патчи → пересборка.
     Без компилятора, без внешних зависимостей. Работает на Pythonista 3, a-Shell mini, macOS, Linux и Windows.
   </p>
   <div class="hero-cta">
     <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite" class="btn btn-primary">
-      Начать работу
+      <span data-i18n="hero.cta1">Начать работу</span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
     </a>
-    <a href="#features" class="btn btn-secondary">
-      Узнать больше
-    </a>
+    <a href="#features" class="btn btn-secondary" data-i18n="hero.cta2">Узнать больше</a>
   </div>
 
   <!-- Terminal mockup -->
@@ -685,91 +770,71 @@ footer a:hover{color:var(--accent-2)}
     </div>
     <div class="terminal-body">
       <div><span class="prompt">$</span> <span class="cmd">python3 main.py</span></div>
-      <div><span class="info">→</span> Выбор файла: <span class="cmd">MyApp.ipa</span></div>
-      <div><span class="info">→</span> Распаковка в Temp_ipa/... <span class="ok">✓</span></div>
-      <div><span class="info">→</span> Payload/MyApp.app — <span class="ok">найден</span></div>
-      <div><span class="info">→</span> Меню редактирования (1–17)</div>
-      <div><span class="ok">[1]</span> Имя приложения</div>
-      <div><span class="ok">[6]</span> Замена иконки — <span class="warn">гибридный режим</span></div>
-      <div><span class="ok">[9]</span> Сборка IPA/TIPA... <span class="ok">✓</span></div>
-      <div><span class="info">→</span> Готово: <span class="cmd">Patched_ipa/MyApp_v1.0_tweaked_icon_patched.ipa</span></div>
+      <div><span class="info">→</span> <span data-i18n="term.file">Выбор файла:</span> <span class="cmd">MyApp.ipa</span></div>
+      <div><span class="info">→</span> <span data-i18n="term.unpack">Распаковка в Temp_ipa/...</span> <span class="ok">✓</span></div>
+      <div><span class="info">→</span> Payload/MyApp.app — <span class="ok" data-i18n="term.found">найден</span></div>
+      <div><span class="info">→</span> <span data-i18n="term.menu">Меню редактирования (1–17)</span></div>
+      <div><span class="ok">[1]</span> <span data-i18n="term.m1">Имя приложения</span></div>
+      <div><span class="ok">[6]</span> <span data-i18n="term.m6">Замена иконки</span> — <span class="warn" data-i18n="term.hybrid">гибридный режим</span></div>
+      <div><span class="ok">[9]</span> <span data-i18n="term.build">Сборка IPA/TIPA...</span> <span class="ok">✓</span></div>
+      <div><span class="info">→</span> <span data-i18n="term.done">Готово:</span> <span class="cmd">Patched_ipa/MyApp_v1.0_tweaked_icon_patched.ipa</span></div>
       <div><span class="prompt">$</span> <span class="cursor"></span></div>
     </div>
-  </div>
-</section>
-
-<!-- STATS -->
-<section class="stats reveal">
-  <div class="stat">
-    <div class="stat-value gradient-text">0</div>
-    <div class="stat-label">Внешних зависимостей</div>
-  </div>
-  <div class="stat">
-    <div class="stat-value gradient-text">5</div>
-    <div class="stat-label">Методов замены иконки</div>
-  </div>
-  <div class="stat">
-    <div class="stat-value gradient-text">17</div>
-    <div class="stat-label">Пунктов меню</div>
-  </div>
-  <div class="stat">
-    <div class="stat-value gradient-text">4</div>
-    <div class="stat-label">Поддерживаемых ОС</div>
   </div>
 </section>
 
 <!-- FEATURES -->
 <section class="section" id="features">
   <div class="section-head reveal">
-    <div class="section-eyebrow">Возможности</div>
-    <h2>Всё что нужно для модификации IPA</h2>
-    <p>Полный цикл работы с iOS-приложениями — от распаковки до установки через SideStore, AltStore или TrollStore.</p>
+    <div class="section-eyebrow" data-i18n="features.eyebrow">Возможности</div>
+    <h2 data-i18n="features.title">Всё что нужно для модификации IPA</h2>
+    <p data-i18n="features.sub">Полный цикл работы с iOS-приложениями — от распаковки до установки через SideStore, AltStore или TrollStore.</p>
   </div>
   <div class="grid">
     <div class="card reveal">
       <div class="card-icon">📦</div>
-      <h3>IPA и TIPA</h3>
-      <p>Распаковка и упаковка с сохранением Unix-прав. Автоопределение формата, ZIP_STORED для TrollStore.</p>
+      <h3 data-i18n="f1.t">IPA и TIPA</h3>
+      <p data-i18n="f1.d">Распаковка и упаковка с сохранением Unix-прав. Автоопределение формата, ZIP_STORED для TrollStore.</p>
     </div>
     <div class="card reveal">
       <div class="card-icon">🏪</div>
-      <h3>TrollStore</h3>
-      <p>Автоподготовка entitlements, настройка Info.plist и упаковка без сжатия для быстрой установки.</p>
+      <h3 data-i18n="f2.t">TrollStore</h3>
+      <p data-i18n="f2.d">Автоподготовка entitlements, настройка Info.plist и упаковка без сжатия для быстрой установки.</p>
     </div>
     <div class="card reveal">
       <div class="card-icon">✏️</div>
-      <h3>Info.plist</h3>
-      <p>Имя, версия, номер сборки, Bundle ID. Каскадное обновление во всех PlugIns, Watch и appex.</p>
+      <h3 data-i18n="f3.t">Info.plist</h3>
+      <p data-i18n="f3.d">Имя, версия, номер сборки, Bundle ID. Каскадное обновление во всех PlugIns, Watch и appex.</p>
     </div>
     <div class="card reveal">
       <div class="card-icon">🖼️</div>
-      <h3>Замена иконки</h3>
-      <p>5 методов: гибридный (маскировка Assets.car), только BOM, только loose, стандарт, удаление.</p>
+      <h3 data-i18n="f4.t">Замена иконки</h3>
+      <p data-i18n="f4.d">5 методов: гибридный (маскировка Assets.car), только BOM, только loose, стандарт, удаление.</p>
     </div>
     <div class="card reveal">
       <div class="card-icon">💉</div>
-      <h3>Инъекция твиков</h3>
-      <p>.dylib, .deb, .zip, .tar.* — фреймворки и бандлы автоматически копируются в Frameworks/.</p>
+      <h3 data-i18n="f5.t">Инъекция твиков</h3>
+      <p data-i18n="f5.d">.dylib, .deb, .zip, .tar.* — фреймворки и бандлы автоматически копируются в Frameworks/.</p>
     </div>
     <div class="card reveal">
       <div class="card-icon">🔧</div>
-      <h3>Hex патчер</h3>
-      <p>Встроенный интерактивный Hex-редактор. Поиск, замена, работа по смещению, undo и бэкапы.</p>
+      <h3 data-i18n="f6.t">Hex патчер</h3>
+      <p data-i18n="f6.d">Встроенный интерактивный Hex-редактор. Поиск, замена, работа по смещению, undo и бэкапы.</p>
     </div>
     <div class="card reveal">
       <div class="card-icon">🛠️</div>
-      <h3>Расширенные патчи</h3>
-      <p>Понижение iOS, удаление плагинов, Watch, URL-схем, ограничений по устройствам.</p>
+      <h3 data-i18n="f7.t">Расширенные патчи</h3>
+      <p data-i18n="f7.d">Понижение iOS, удаление плагинов, Watch, URL-схем, ограничений по устройствам.</p>
     </div>
     <div class="card reveal">
       <div class="card-icon">🛡️</div>
-      <h3>Безопасность</h3>
-      <p>Zip Slip защита, сканирование dylib на опасные вызовы, строгий парсинг Mach-O.</p>
+      <h3 data-i18n="f8.t">Безопасность</h3>
+      <p data-i18n="f8.d">Zip Slip защита, сканирование dylib на опасные вызовы, строгий парсинг Mach-O.</p>
     </div>
     <div class="card reveal">
       <div class="card-icon">🌐</div>
-      <h3>Web Transfer</h3>
-      <p>Локальный HTTP-сервер с ПИН-кодом и авто-баном для передачи файлов по Wi-Fi.</p>
+      <h3 data-i18n="f9.t">Web Transfer</h3>
+      <p data-i18n="f9.d">Локальный HTTP-сервер с ПИН-кодом и авто-баном для передачи файлов по Wi-Fi.</p>
     </div>
   </div>
 </section>
@@ -777,37 +842,37 @@ footer a:hover{color:var(--accent-2)}
 <!-- MENU -->
 <section class="section" id="menu">
   <div class="section-head reveal">
-    <div class="section-eyebrow">Интерфейс</div>
-    <h2>17 пунктов меню</h2>
-    <p>Полный контроль над каждым аспектом приложения — от метаданных до бинарного патчинга.</p>
+    <div class="section-eyebrow" data-i18n="menu.eyebrow">Интерфейс</div>
+    <h2 data-i18n="menu.title">17 пунктов меню</h2>
+    <p data-i18n="menu.sub">Полный контроль над каждым аспектом приложения — от метаданных до бинарного патчинга.</p>
   </div>
   <div class="menu-list">
-    <div class="menu-item reveal"><span class="menu-num">01</span><span class="menu-text">Имя приложения</span></div>
-    <div class="menu-item reveal"><span class="menu-num">02</span><span class="menu-text">Версия</span></div>
-    <div class="menu-item reveal"><span class="menu-num">03</span><span class="menu-text">Номер сборки</span></div>
-    <div class="menu-item reveal"><span class="menu-num">04</span><span class="menu-text">Bundle ID</span></div>
-    <div class="menu-item reveal"><span class="menu-num">05</span><span class="menu-text">Файловый шеринг</span></div>
-    <div class="menu-item reveal"><span class="menu-num">06</span><span class="menu-text">Замена иконки</span></div>
-    <div class="menu-item reveal"><span class="menu-num">07</span><span class="menu-text">Инъекция твиков</span></div>
-    <div class="menu-item reveal"><span class="menu-num">08</span><span class="menu-text">Файловый менеджер</span></div>
-    <div class="menu-item reveal"><span class="menu-num">09</span><span class="menu-text">Собрать IPA/TIPA</span></div>
-    <div class="menu-item reveal"><span class="menu-num">10</span><span class="menu-text">Тип пути (@rpath)</span></div>
-    <div class="menu-item reveal"><span class="menu-num">11</span><span class="menu-text">Режим субстрата</span></div>
-    <div class="menu-item reveal"><span class="menu-num">12</span><span class="menu-text">JSON-редактор</span></div>
-    <div class="menu-item reveal"><span class="menu-num">13</span><span class="menu-text">Entitlements</span></div>
-    <div class="menu-item reveal"><span class="menu-num">14</span><span class="menu-text">Расширенные патчи</span></div>
-    <div class="menu-item reveal"><span class="menu-num">15</span><span class="menu-text">Hex патчер</span></div>
-    <div class="menu-item reveal"><span class="menu-num">16</span><span class="menu-text">Прореживание бинарника</span></div>
-    <div class="menu-item reveal"><span class="menu-num">17</span><span class="menu-text">Восстановление из бэкапов</span></div>
+    <div class="menu-item reveal"><span class="menu-num">01</span><span class="menu-text" data-i18n="m1">Имя приложения</span></div>
+    <div class="menu-item reveal"><span class="menu-num">02</span><span class="menu-text" data-i18n="m2">Версия</span></div>
+    <div class="menu-item reveal"><span class="menu-num">03</span><span class="menu-text" data-i18n="m3">Номер сборки</span></div>
+    <div class="menu-item reveal"><span class="menu-num">04</span><span class="menu-text" data-i18n="m4">Bundle ID</span></div>
+    <div class="menu-item reveal"><span class="menu-num">05</span><span class="menu-text" data-i18n="m5">Файловый шеринг</span></div>
+    <div class="menu-item reveal"><span class="menu-num">06</span><span class="menu-text" data-i18n="m6">Замена иконки</span></div>
+    <div class="menu-item reveal"><span class="menu-num">07</span><span class="menu-text" data-i18n="m7">Инъекция твиков</span></div>
+    <div class="menu-item reveal"><span class="menu-num">08</span><span class="menu-text" data-i18n="m8">Файловый менеджер</span></div>
+    <div class="menu-item reveal"><span class="menu-num">09</span><span class="menu-text" data-i18n="m9">Собрать IPA/TIPA</span></div>
+    <div class="menu-item reveal"><span class="menu-num">10</span><span class="menu-text" data-i18n="m10">Тип пути (@rpath)</span></div>
+    <div class="menu-item reveal"><span class="menu-num">11</span><span class="menu-text" data-i18n="m11">Режим субстрата</span></div>
+    <div class="menu-item reveal"><span class="menu-num">12</span><span class="menu-text" data-i18n="m12">JSON-редактор</span></div>
+    <div class="menu-item reveal"><span class="menu-num">13</span><span class="menu-text" data-i18n="m13">Entitlements</span></div>
+    <div class="menu-item reveal"><span class="menu-num">14</span><span class="menu-text" data-i18n="m14">Расширенные патчи</span></div>
+    <div class="menu-item reveal"><span class="menu-num">15</span><span class="menu-text" data-i18n="m15">Hex патчер</span></div>
+    <div class="menu-item reveal"><span class="menu-num">16</span><span class="menu-text" data-i18n="m16">Прореживание бинарника</span></div>
+    <div class="menu-item reveal"><span class="menu-num">17</span><span class="menu-text" data-i18n="m17">Восстановление из бэкапов</span></div>
   </div>
 </section>
 
 <!-- INSTALL -->
 <section class="section" id="install">
   <div class="section-head reveal">
-    <div class="section-eyebrow">Установка</div>
-    <h2>Запуск за 30 секунд</h2>
-    <p>Скопируй репозиторий и запусти — остальное скрипт сделает сам.</p>
+    <div class="section-eyebrow" data-i18n="install.eyebrow">Установка</div>
+    <h2 data-i18n="install.title">Запуск за 30 секунд</h2>
+    <p data-i18n="install.sub">Скопируй репозиторий и запусти — остальное скрипт сделает сам.</p>
   </div>
   <div class="code-wrap reveal">
     <div class="code-head">
@@ -815,14 +880,14 @@ footer a:hover{color:var(--accent-2)}
       <span>install.sh</span>
     </div>
     <div class="code-body">
-<span class="cmt"># Клонируем репозиторий</span>
-<span class="fn">git</span> clone https://github.com/andreygirin144-netizen/IPA-Patcher-Lite.git
-<span class="fn">cd</span> IPA-Patcher-Lite
+<span class="cmt" data-i18n="code.c1"># Клонируем репозиторий</span>
+<span class="fn">git</span> clone https://github.com/andreygirin144-netizen/ipa-patcher.git
+<span class="fn">cd</span> ipa-patcher
 
-<span class="cmt"># Опционально: Pillow для качественной генерации иконок</span>
+<span class="cmt" data-i18n="code.c2"># Опционально: Pillow для качественной генерации иконок</span>
 <span class="fn">pip</span> install Pillow
 
-<span class="cmt"># Запуск</span>
+<span class="cmt" data-i18n="code.c3"># Запуск</span>
 <span class="fn">python3</span> main.py
     </div>
   </div>
@@ -831,9 +896,9 @@ footer a:hover{color:var(--accent-2)}
 <!-- PLATFORMS -->
 <section class="section" id="platforms">
   <div class="section-head reveal">
-    <div class="section-eyebrow">Платформы</div>
-    <h2>Работает везде, где есть Python</h2>
-    <p>Единая кодовая база с автоопределением окружения через sys.platform.</p>
+    <div class="section-eyebrow" data-i18n="platforms.eyebrow">Платформы</div>
+    <h2 data-i18n="platforms.title">Работает везде, где есть Python</h2>
+    <p data-i18n="platforms.sub">Единая кодовая база с автоопределением окружения через sys.platform.</p>
   </div>
   <div class="platforms">
     <div class="platform reveal">
@@ -849,17 +914,17 @@ footer a:hover{color:var(--accent-2)}
     <div class="platform reveal">
       <div class="platform-emoji">🍎</div>
       <h3>macOS</h3>
-      <p>Нативный Python 3</p>
+      <p data-i18n="platforms.native">Нативный Python 3</p>
     </div>
     <div class="platform reveal">
       <div class="platform-emoji">🐧</div>
       <h3>Linux</h3>
-      <p>Нативный Python 3</p>
+      <p data-i18n="platforms.native">Нативный Python 3</p>
     </div>
     <div class="platform reveal">
       <div class="platform-emoji">🪟</div>
       <h3>Windows</h3>
-      <p>Нативный Python 3</p>
+      <p data-i18n="platforms.native">Нативный Python 3</p>
     </div>
   </div>
 </section>
@@ -868,36 +933,36 @@ footer a:hover{color:var(--accent-2)}
 <section class="section" id="faq">
   <div class="section-head reveal">
     <div class="section-eyebrow">FAQ</div>
-    <h2>Частые вопросы</h2>
+    <h2 data-i18n="faq.title">Частые вопросы</h2>
   </div>
   <div class="faq">
     <details class="reveal">
-      <summary>Нужен ли джейлбрейк?</summary>
-      <p>Нет. Установка через AltStore, SideStore или TrollStore работает на стоковой iOS.</p>
+      <summary data-i18n="faq.q1">Нужен ли джейлбрейк?</summary>
+      <p data-i18n="faq.a1">Нет. Установка через AltStore, SideStore или TrollStore работает на стоковой iOS.</p>
     </details>
     <details class="reveal">
-      <summary>Какие платформы поддерживаются?</summary>
-      <p>Pythonista 3 и a-Shell mini на iOS/iPadOS, а также нативный Python на macOS, Linux и Windows.</p>
+      <summary data-i18n="faq.q2">Какие платформы поддерживаются?</summary>
+      <p data-i18n="faq.a2">Pythonista 3 и a-Shell mini на iOS/iPadOS, а также нативный Python на macOS, Linux и Windows.</p>
     </details>
     <details class="reveal">
-      <summary>Можно ли откатить изменения?</summary>
-      <p>Скрипт никогда не изменяет исходный файл — результат всегда сохраняется в новый с суффиксами (_tweaked, _icon, _patched). Точечные правки через Hex-патчер откатываются через менеджер бэкапов.</p>
+      <summary data-i18n="faq.q3">Можно ли откатить изменения?</summary>
+      <p data-i18n="faq.a3">Скрипт никогда не изменяет исходный файл — результат всегда сохраняется в новый с суффиксами (_tweaked, _icon, _patched). Точечные правки через Hex-патчер откатываются через менеджер бэкапов.</p>
     </details>
     <details class="reveal">
-      <summary>Почему инъекция твика не удалась?</summary>
-      <p>Нехватка места в заголовке Mach-O, неподдерживаемая архитектура (32-бит) или исходный файл зашифрован (App Store бинарник без расшифровки).</p>
+      <summary data-i18n="faq.q4">Почему инъекция твика не удалась?</summary>
+      <p data-i18n="faq.a4">Нехватка места в заголовке Mach-O, неподдерживаемая архитектура (32-бит) или исходный файл зашифрован (App Store бинарник без расшифровки).</p>
     </details>
     <details class="reveal">
-      <summary>Какой метод замены иконки выбрать?</summary>
-      <p>Гибридный (пункт 1) — безопасный и эффективный; не трогает Assets.car целиком и не вызывает крашей на iOS 15+.</p>
+      <summary data-i18n="faq.q5">Какой метод замены иконки выбрать?</summary>
+      <p data-i18n="faq.a5">Гибридный (пункт 1) — безопасный и эффективный; не трогает Assets.car целиком и не вызывает крашей на iOS 15+.</p>
     </details>
     <details class="reveal">
-      <summary>Обязателен ли Pillow?</summary>
-      <p>Нет. Без Pillow иконки копируются без ресайза, но функционально работают.</p>
+      <summary data-i18n="faq.q6">Обязателен ли Pillow?</summary>
+      <p data-i18n="faq.a6">Нет. Без Pillow иконки копируются без ресайза, но функционально работают.</p>
     </details>
     <details class="reveal">
-      <summary>Чем отличается .tipa от .ipa?</summary>
-      <p>.tipa — формат для TrollStore, упаковывается без сжатия (ZIP_STORED), содержит специальные entitlements-флаги. Скрипт автоматически определяет формат.</p>
+      <summary data-i18n="faq.q7">Чем отличается .tipa от .ipa?</summary>
+      <p data-i18n="faq.a7">.tipa — формат для TrollStore, упаковывается без сжатия (ZIP_STORED), содержит специальные entitlements-флаги. Скрипт автоматически определяет формат.</p>
     </details>
   </div>
 </section>
@@ -905,24 +970,219 @@ footer a:hover{color:var(--accent-2)}
 <!-- CTA -->
 <section class="cta">
   <div class="cta-box reveal">
-    <h2>Готовы модифицировать <span class="gradient-text">свои приложения?</span></h2>
-    <p>Скачай репозиторий и начни работу за 30 секунд.</p>
+    <h2>
+      <span data-i18n="cta.title1">Готовы модифицировать</span>
+      <span class="gradient-text" data-i18n="cta.title2">свои приложения?</span>
+    </h2>
+    <p data-i18n="cta.sub">Скачай репозиторий и начни работу за 30 секунд.</p>
     <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite" class="btn btn-primary">
-      Открыть на GitHub
+      <span data-i18n="cta.btn">Открыть на GitHub</span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
     </a>
   </div>
 </section>
 
 <footer>
-  <p>IPA Patcher Lite · GPLv3 · Сделано для iOS/iPadOS, macOS, Linux, Windows</p>
+  <p data-i18n="footer.line1">IPA Patcher Lite · GPLv3 · Сделано для iOS/iPadOS, macOS, Linux, Windows</p>
   <p style="margin-top:8px">
-    <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite/edit/main/README.md">Улучшить страницу</a>
+    <a href="https://github.com/andreygirin144-netizen/IPA-Patcher-Lite/edit/main/README.md" data-i18n="footer.improve">Улучшить страницу</a>
   </p>
 </footer>
 
 <script>
-// Scroll reveal
+/* ============ TRANSLATIONS ============ */
+const I18N = {
+  ru:{
+    "nav.features":"Возможности","nav.menu":"Меню","nav.platforms":"Платформы","nav.faq":"FAQ",
+    "hero.badge":"Версия 1.1.4 · GPLv3 · Zero dependencies",
+    "hero.title1":"Патчер iOS","hero.titleAnd":"и","hero.title2":"на чистом Python",
+    "hero.lead":"Распаковка → редактирование → инъекция твиков → расширенные патчи → пересборка. Без компилятора, без внешних зависимостей. Работает на Pythonista 3, a-Shell mini, macOS, Linux и Windows.",
+    "hero.cta1":"Начать работу","hero.cta2":"Узнать больше",
+    "term.file":"Выбор файла:","term.unpack":"Распаковка в Temp_ipa/...","term.found":"найден",
+    "term.menu":"Меню редактирования (1–17)","term.m1":"Имя приложения","term.m6":"Замена иконки",
+    "term.hybrid":"гибридный режим","term.build":"Сборка IPA/TIPA...","term.done":"Готово:",
+    "features.eyebrow":"Возможности","features.title":"Всё что нужно для модификации IPA",
+    "features.sub":"Полный цикл работы с iOS-приложениями — от распаковки до установки через SideStore, AltStore или TrollStore.",
+    "f1.t":"IPA и TIPA","f1.d":"Распаковка и упаковка с сохранением Unix-прав. Автоопределение формата, ZIP_STORED для TrollStore.",
+    "f2.t":"TrollStore","f2.d":"Автоподготовка entitlements, настройка Info.plist и упаковка без сжатия для быстрой установки.",
+    "f3.t":"Info.plist","f3.d":"Имя, версия, номер сборки, Bundle ID. Каскадное обновление во всех PlugIns, Watch и appex.",
+    "f4.t":"Замена иконки","f4.d":"5 методов: гибридный (маскировка Assets.car), только BOM, только loose, стандарт, удаление.",
+    "f5.t":"Инъекция твиков","f5.d":".dylib, .deb, .zip, .tar.* — фреймворки и бандлы автоматически копируются в Frameworks/.",
+    "f6.t":"Hex патчер","f6.d":"Встроенный интерактивный Hex-редактор. Поиск, замена, работа по смещению, undo и бэкапы.",
+    "f7.t":"Расширенные патчи","f7.d":"Понижение iOS, удаление плагинов, Watch, URL-схем, ограничений по устройствам.",
+    "f8.t":"Безопасность","f8.d":"Zip Slip защита, сканирование dylib на опасные вызовы, строгий парсинг Mach-O.",
+    "f9.t":"Web Transfer","f9.d":"Локальный HTTP-сервер с ПИН-кодом и авто-баном для передачи файлов по Wi-Fi.",
+    "menu.eyebrow":"Интерфейс","menu.title":"17 пунктов меню",
+    "menu.sub":"Полный контроль над каждым аспектом приложения — от метаданных до бинарного патчинга.",
+    "m1":"Имя приложения","m2":"Версия","m3":"Номер сборки","m4":"Bundle ID","m5":"Файловый шеринг",
+    "m6":"Замена иконки","m7":"Инъекция твиков","m8":"Файловый менеджер","m9":"Собрать IPA/TIPA",
+    "m10":"Тип пути (@rpath)","m11":"Режим субстрата","m12":"JSON-редактор","m13":"Entitlements",
+    "m14":"Расширенные патчи","m15":"Hex патчер","m16":"Прореживание бинарника","m17":"Восстановление из бэкапов",
+    "install.eyebrow":"Установка","install.title":"Запуск за 30 секунд",
+    "install.sub":"Скопируй репозиторий и запусти — остальное скрипт сделает сам.",
+    "code.c1":"# Клонируем репозиторий","code.c2":"# Опционально: Pillow для качественной генерации иконок","code.c3":"# Запуск",
+    "platforms.eyebrow":"Платформы","platforms.title":"Работает везде, где есть Python",
+    "platforms.sub":"Единая кодовая база с автоопределением окружения через sys.platform.","platforms.native":"Нативный Python 3",
+    "faq.title":"Частые вопросы",
+    "faq.q1":"Нужен ли джейлбрейк?","faq.a1":"Нет. Установка через AltStore, SideStore или TrollStore работает на стоковой iOS.",
+    "faq.q2":"Какие платформы поддерживаются?","faq.a2":"Pythonista 3 и a-Shell mini на iOS/iPadOS, а также нативный Python на macOS, Linux и Windows.",
+    "faq.q3":"Можно ли откатить изменения?","faq.a3":"Скрипт никогда не изменяет исходный файл — результат всегда сохраняется в новый с суффиксами (_tweaked, _icon, _patched). Точечные правки через Hex-патчер откатываются через менеджер бэкапов.",
+    "faq.q4":"Почему инъекция твика не удалась?","faq.a4":"Нехватка места в заголовке Mach-O, неподдерживаемая архитектура (32-бит) или исходный файл зашифрован (App Store бинарник без расшифровки).",
+    "faq.q5":"Какой метод замены иконки выбрать?","faq.a5":"Гибридный (пункт 1) — безопасный и эффективный; не трогает Assets.car целиком и не вызывает крашей на iOS 15+.",
+    "faq.q6":"Обязателен ли Pillow?","faq.a6":"Нет. Без Pillow иконки копируются без ресайза, но функционально работают.",
+    "faq.q7":"Чем отличается .tipa от .ipa?","faq.a7":".tipa — формат для TrollStore, упаковывается без сжатия (ZIP_STORED), содержит специальные entitlements-флаги. Скрипт автоматически определяет формат.",
+    "cta.title1":"Готовы модифицировать","cta.title2":"свои приложения?","cta.sub":"Скачай репозиторий и начни работу за 30 секунд.","cta.btn":"Открыть на GitHub",
+    "footer.line1":"IPA Patcher Lite · GPLv3 · Сделано для iOS/iPadOS, macOS, Linux, Windows","footer.improve":"Улучшить страницу"
+  },
+  en:{
+    "nav.features":"Features","nav.menu":"Menu","nav.platforms":"Platforms","nav.faq":"FAQ",
+    "hero.badge":"Version 1.1.4 · GPLv3 · Zero dependencies",
+    "hero.title1":"iOS patcher for","hero.titleAnd":"and","hero.title2":"pure Python",
+    "hero.lead":"Unpack → edit → inject tweaks → advanced patches → repack. No compiler, no external dependencies. Works on Pythonista 3, a-Shell mini, macOS, Linux and Windows.",
+    "hero.cta1":"Get started","hero.cta2":"Learn more",
+    "term.file":"Select file:","term.unpack":"Unpacking to Temp_ipa/...","term.found":"found",
+    "term.menu":"Edit menu (1–17)","term.m1":"App name","term.m6":"Icon replacement",
+    "term.hybrid":"hybrid mode","term.build":"Building IPA/TIPA...","term.done":"Done:",
+    "features.eyebrow":"Features","features.title":"Everything you need to modify IPA",
+    "features.sub":"Full workflow for iOS apps — from unpacking to installing via SideStore, AltStore or TrollStore.",
+    "f1.t":"IPA & TIPA","f1.d":"Unpack and repack with Unix permissions preserved. Auto format detection, ZIP_STORED for TrollStore.",
+    "f2.t":"TrollStore","f2.d":"Auto entitlements setup, Info.plist configuration and no-compression packaging for fast install.",
+    "f3.t":"Info.plist","f3.d":"Name, version, build number, Bundle ID. Cascading updates across all PlugIns, Watch and appex.",
+    "f4.t":"Icon replacement","f4.d":"5 methods: hybrid (Assets.car masking), BOM only, loose only, standard, removal.",
+    "f5.t":"Tweak injection","f5.d":".dylib, .deb, .zip, .tar.* — frameworks and bundles are auto-copied to Frameworks/.",
+    "f6.t":"Hex patcher","f6.d":"Built-in interactive Hex editor. Search, replace, offset editing, undo and backups.",
+    "f7.t":"Advanced patches","f7.d":"Lower iOS version, remove plugins, Watch, URL schemes, device restrictions.",
+    "f8.t":"Security","f8.d":"Zip Slip protection, dylib scanning for dangerous calls, strict Mach-O parsing.",
+    "f9.t":"Web Transfer","f9.d":"Local HTTP server with PIN and auto-ban for Wi-Fi file transfer.",
+    "menu.eyebrow":"Interface","menu.title":"17 menu items",
+    "menu.sub":"Full control over every aspect of the app — from metadata to binary patching.",
+    "m1":"App name","m2":"Version","m3":"Build number","m4":"Bundle ID","m5":"File sharing",
+    "m6":"Icon replacement","m7":"Tweak injection","m8":"File manager","m9":"Build IPA/TIPA",
+    "m10":"Path type (@rpath)","m11":"Substrate mode","m12":"JSON editor","m13":"Entitlements",
+    "m14":"Advanced patches","m15":"Hex patcher","m16":"Binary thinning","m17":"Restore from backups",
+    "install.eyebrow":"Install","install.title":"Launch in 30 seconds",
+    "install.sub":"Clone the repo and run — the script does the rest.",
+    "code.c1":"# Clone the repository","code.c2":"# Optional: Pillow for high-quality icon generation","code.c3":"# Run",
+    "platforms.eyebrow":"Platforms","platforms.title":"Works wherever Python runs",
+    "platforms.sub":"Single codebase with environment detection via sys.platform.","platforms.native":"Native Python 3",
+    "faq.title":"Frequently asked questions",
+    "faq.q1":"Is jailbreak required?","faq.a1":"No. Installing via AltStore, SideStore or TrollStore works on stock iOS.",
+    "faq.q2":"Which platforms are supported?","faq.a2":"Pythonista 3 and a-Shell mini on iOS/iPadOS, plus native Python on macOS, Linux and Windows.",
+    "faq.q3":"Can I revert changes?","faq.a3":"The script never modifies the original file — the result is always saved as a new file with suffixes (_tweaked, _icon, _patched). Point edits via Hex patcher are revertible through the backup manager.",
+    "faq.q4":"Why did tweak injection fail?","faq.a4":"Not enough space in the Mach-O header, unsupported architecture (32-bit) or the source file is encrypted (App Store binary without decryption).",
+    "faq.q5":"Which icon replacement method to choose?","faq.a5":"Hybrid (item 1) — safe and effective; it doesn't touch Assets.car entirely and doesn't cause crashes on iOS 15+.",
+    "faq.q6":"Is Pillow required?","faq.a6":"No. Without Pillow, icons are copied without resizing but still work.",
+    "faq.q7":"What's the difference between .tipa and .ipa?","faq.a7":".tipa is a TrollStore format, packaged without compression (ZIP_STORED), containing special entitlements flags. The script auto-detects the format.",
+    "cta.title1":"Ready to modify","cta.title2":"your own apps?","cta.sub":"Clone the repo and start in 30 seconds.","cta.btn":"Open on GitHub",
+    "footer.line1":"IPA Patcher Lite · GPLv3 · Made for iOS/iPadOS, macOS, Linux, Windows","footer.improve":"Improve this page"
+  },
+  zh:{
+    "nav.features":"功能","nav.menu":"菜单","nav.platforms":"平台","nav.faq":"常见问题",
+    "hero.badge":"版本 1.1.4 · GPLv3 · 零依赖",
+    "hero.title1":"iOS 补丁工具","hero.titleAnd":"与","hero.title2":"纯 Python 编写",
+    "hero.lead":"解包 → 编辑 → 注入插件 → 高级补丁 → 重新打包。无需编译器，无外部依赖。支持 Pythonista 3、a-Shell mini、macOS、Linux 和 Windows。",
+    "hero.cta1":"开始使用","hero.cta2":"了解更多",
+    "term.file":"选择文件：","term.unpack":"解包到 Temp_ipa/...","term.found":"已找到",
+    "term.menu":"编辑菜单 (1–17)","term.m1":"应用名称","term.m6":"替换图标",
+    "term.hybrid":"混合模式","term.build":"正在构建 IPA/TIPA...","term.done":"完成：",
+    "features.eyebrow":"功能","features.title":"修改 IPA 所需的一切",
+    "features.sub":"iOS 应用的完整工作流——从解包到通过 SideStore、AltStore 或 TrollStore 安装。",
+    "f1.t":"IPA 和 TIPA","f1.d":"解包和打包时保留 Unix 权限。自动检测格式，TrollStore 使用 ZIP_STORED。",
+    "f2.t":"TrollStore","f2.d":"自动设置 entitlements、配置 Info.plist，无压缩打包以便快速安装。",
+    "f3.t":"Info.plist","f3.d":"名称、版本、构建号、Bundle ID。级联更新所有 PlugIns、Watch 和 appex。",
+    "f4.t":"替换图标","f4.d":"5 种方法：混合（Assets.car 屏蔽）、仅 BOM、仅 loose、标准、删除。",
+    "f5.t":"注入插件","f5.d":".dylib、.deb、.zip、.tar.* —— 框架和包会自动复制到 Frameworks/。",
+    "f6.t":"Hex 编辑器","f6.d":"内置交互式 Hex 编辑器。搜索、替换、按偏移编辑、撤销和备份。",
+    "f7.t":"高级补丁","f7.d":"降低 iOS 版本、移除插件、Watch、URL schemes、设备限制。",
+    "f8.t":"安全性","f8.d":"Zip Slip 防护、dylib 危险调用扫描、严格 Mach-O 解析。",
+    "f9.t":"Web Transfer","f9.d":"带 PIN 和自动封禁的本地 HTTP 服务器，用于 Wi-Fi 文件传输。",
+    "menu.eyebrow":"界面","menu.title":"17 个菜单项",
+    "menu.sub":"全面控制应用的每个方面——从元数据到二进制修补。",
+    "m1":"应用名称","m2":"版本","m3":"构建号","m4":"Bundle ID","m5":"文件共享",
+    "m6":"替换图标","m7":"注入插件","m8":"文件管理器","m9":"构建 IPA/TIPA",
+    "m10":"路径类型 (@rpath)","m11":"Substrate 模式","m12":"JSON 编辑器","m13":"Entitlements",
+    "m14":"高级补丁","m15":"Hex 编辑器","m16":"二进制瘦身","m17":"从备份恢复",
+    "install.eyebrow":"安装","install.title":"30 秒内启动",
+    "install.sub":"克隆仓库并运行——其余由脚本完成。",
+    "code.c1":"# 克隆仓库","code.c2":"# 可选：使用 Pillow 生成高质量图标","code.c3":"# 运行",
+    "platforms.eyebrow":"平台","platforms.title":"只要有 Python 就能运行",
+    "platforms.sub":"通过 sys.platform 自动检测环境的单一代码库。","platforms.native":"原生 Python 3",
+    "faq.title":"常见问题",
+    "faq.q1":"需要越狱吗？","faq.a1":"不需要。通过 AltStore、SideStore 或 TrollStore 安装可在未越狱的 iOS 上运行。",
+    "faq.q2":"支持哪些平台？","faq.a2":"iOS/iPadOS 上的 Pythonista 3 和 a-Shell mini，以及 macOS、Linux 和 Windows 上的原生 Python。",
+    "faq.q3":"可以撤销更改吗？","faq.a3":"脚本从不修改原始文件——结果始终保存为带后缀的新文件（_tweaked、_icon、_patched）。Hex 编辑器的点修改可通过备份管理器撤销。",
+    "faq.q4":"为什么插件注入失败？","faq.a4":"Mach-O 头部空间不足、架构不受支持（32 位）或源文件已加密（未解密的 App Store 二进制文件）。",
+    "faq.q5":"选择哪种图标替换方法？","faq.a5":"混合（第 1 项）——安全有效；不会完全破坏 Assets.car，在 iOS 15+ 上不会崩溃。",
+    "faq.q6":"必须使用 Pillow 吗？","faq.a6":"不。没有 Pillow 时图标会直接复制而不缩放，但仍可正常工作。",
+    "faq.q7":".tipa 和 .ipa 有什么区别？","faq.a7":".tipa 是 TrollStore 的格式，无压缩打包（ZIP_STORED），包含特殊的 entitlements 标志。脚本会自动检测格式。",
+    "cta.title1":"准备好修改","cta.title2":"你自己的应用了吗？","cta.sub":"克隆仓库，30 秒内开始使用。","cta.btn":"在 GitHub 打开",
+    "footer.line1":"IPA Patcher Lite · GPLv3 · 为 iOS/iPadOS、macOS、Linux、Windows 打造","footer.improve":"改进此页面"
+  }
+};
+
+/* ============ THEME ============ */
+const html = document.documentElement;
+const themeToggle = document.getElementById('themeToggle');
+
+function applyTheme(theme){
+  html.setAttribute('data-theme', theme);
+  try{ localStorage.setItem('ipa-theme', theme); }catch(e){}
+}
+
+function initTheme(){
+  let saved = null;
+  try{ saved = localStorage.getItem('ipa-theme'); }catch(e){}
+  if(saved === 'light' || saved === 'dark'){
+    applyTheme(saved);
+  } else {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(prefersDark ? 'dark' : 'light');
+  }
+}
+
+themeToggle.addEventListener('click', ()=>{
+  const current = html.getAttribute('data-theme');
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+});
+
+/* ============ LANGUAGE ============ */
+const langSwitch = document.getElementById('langSwitch');
+const langButtons = langSwitch.querySelectorAll('button');
+
+function applyLang(lang){
+  const dict = I18N[lang] || I18N.ru;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const key = el.getAttribute('data-i18n');
+    if(dict[key] !== undefined){
+      el.textContent = dict[key];
+    }
+  });
+  html.setAttribute('lang', lang);
+  langButtons.forEach(b=>b.classList.toggle('active', b.dataset.lang === lang));
+  try{ localStorage.setItem('ipa-lang', lang); }catch(e){}
+  document.title = lang === 'zh' ? 'IPA Patcher Lite — iOS .ipa/.tipa 补丁工具'
+               : lang === 'en' ? 'IPA Patcher Lite — iOS .ipa & .tipa patcher'
+               : 'IPA Patcher Lite — патчер iOS .ipa и .tipa';
+}
+
+langButtons.forEach(btn=>{
+  btn.addEventListener('click', ()=> applyLang(btn.dataset.lang));
+});
+
+function initLang(){
+  let saved = null;
+  try{ saved = localStorage.getItem('ipa-lang'); }catch(e){}
+  if(saved && I18N[saved]){
+    applyLang(saved);
+  } else {
+    const nav = (navigator.language || 'ru').toLowerCase();
+    if(nav.startsWith('zh')) applyLang('zh');
+    else if(nav.startsWith('ru')) applyLang('ru');
+    else applyLang('en');
+  }
+}
+
+/* ============ REVEAL ============ */
 const io = new IntersectionObserver((entries)=>{
   entries.forEach(e=>{
     if(e.isIntersecting){
@@ -931,12 +1191,15 @@ const io = new IntersectionObserver((entries)=>{
     }
   });
 },{threshold:0.1,rootMargin:'0px 0px -50px 0px'});
-document.querySelectorAll('.reveal').forEach((el,i)=>{
-  el.style.transitionDelay = (i%6)*60 + 'ms';
-  io.observe(el);
-});
 
-// Smooth anchor offset (sticky nav)
+function initReveal(){
+  document.querySelectorAll('.reveal').forEach((el,i)=>{
+    el.style.transitionDelay = (i%6)*60 + 'ms';
+    io.observe(el);
+  });
+}
+
+/* ============ SMOOTH ANCHORS ============ */
 document.querySelectorAll('a[href^="#"]').forEach(a=>{
   a.addEventListener('click',e=>{
     const id = a.getAttribute('href');
@@ -951,8 +1214,8 @@ document.querySelectorAll('a[href^="#"]').forEach(a=>{
   });
 });
 
-// Terminal typing effect (lightweight)
-(function(){
+/* ============ TERMINAL TYPING ============ */
+function initTerminal(){
   const lines = document.querySelectorAll('.terminal-body > div');
   lines.forEach((l,i)=>{
     l.style.opacity = '0';
@@ -963,7 +1226,13 @@ document.querySelectorAll('a[href^="#"]').forEach(a=>{
       l.style.transform = 'none';
     }, 300 + i*150);
   });
-})();
+}
+
+/* ============ INIT ============ */
+initTheme();
+initLang();
+initReveal();
+initTerminal();
 </script>
 </body>
 </html>
