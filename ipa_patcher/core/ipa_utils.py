@@ -20,6 +20,21 @@ except ImportError:
     HAVE_TQDM = False
 
 
+def get_user_tmp_dir():
+    home = os.path.expanduser('~')
+    if os.path.basename(home).lower() == 'documents':
+        docs = home
+    else:
+        docs = os.path.join(home, 'Documents')
+    
+    target = os.path.join(docs, 'tmp')
+    try:
+        os.makedirs(target, exist_ok=True)
+        return target
+    except Exception:
+        return TEMP_DIR
+
+
 class ProgressBar:
     def __init__(self, total, description="Progress", width=50):
         if HAVE_TQDM:
@@ -259,196 +274,287 @@ def find_app_dir(payload_path):
 
 
 def smart_find_in_tmp(extensions):
-    tmp_dir = TEMP_DIR
+    user_tmp = get_user_tmp_dir()
     found = []
-    if not os.path.isdir(tmp_dir):
-        return found
-    
-    for f in os.listdir(tmp_dir):
-        full = os.path.join(tmp_dir, f)
-        if os.path.isfile(full):
-            for ext in extensions:
-                if f.lower().endswith(f'.{ext.lower()}'):
-                    found.append((f, full))
-    
-    if not PYTHONISTA:
-        current_dir = os.getcwd()
-        for f in os.listdir(current_dir):
-            full = os.path.join(current_dir, f)
+    seen = set()
+
+    search_dirs = [user_tmp, os.getcwd(), TEMP_DIR]
+    for sdir in search_dirs:
+        if not os.path.isdir(sdir):
+            continue
+        for f in os.listdir(sdir):
+            full = os.path.join(sdir, f)
             if os.path.isfile(full):
                 for ext in extensions:
                     if f.lower().endswith(f'.{ext.lower()}'):
-                        if full not in [p for _, p in found]:
+                        if full not in seen:
                             found.append((f, full))
-    
+                            seen.add(full)
     return found
 
 
 def pick_ipa_file():
     if PYTHONISTA and dialogs:
         try:
-            path = dialogs.pick_document(types=["public.data"])
-        except:
+            path = dialogs.pick_document(types=["public.data", "public.item", "com.apple.itunes.ipa"])
+        except Exception:
             path = None
         if path:
             if not (path.lower().endswith('.ipa') or path.lower().endswith('.tipa')):
-                print("Ошибка: нужен .ipa или .tipa файл.")
+                print("Ошибка: нужен .ipa или .tipa файл.")
                 return pick_ipa_file()
             return path
 
+    user_tmp = get_user_tmp_dir()
     found = smart_find_in_tmp(['ipa', 'tipa'])
     if found:
-        print(f"\n--- Доступные IPA/TIPA в {TEMP_DIR} ---")
+        print(f"\n--- Доступные IPA/TIPA в {user_tmp} ---")
         for i, (name, _) in enumerate(found, 1):
             try:
-                size = os.path.getsize(os.path.join(TEMP_DIR, name))
+                size = os.path.getsize(os.path.join(user_tmp, name))
                 size_str = f"({size / (1024*1024):.1f} MB)"
-            except:
+            except Exception:
                 size_str = ""
             print(f"  {i:>3}) {name} {size_str}")
         print("  0) Ввести путь вручную")
+
+        try:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            pass
+
         while True:
             try:
-                ch = input("Выберите файл: ").strip()
-                if ch == '0' or not ch:
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                ch = input(prompt).strip()
+                
+                if not ch:
+                    if len(found) == 1:
+                        return found[0][1]
+                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    continue
+                
+                if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
-                    return found[num-1][1]
-                print("Неверный номер.")
+                    return found[num - 1][1]
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В {TEMP_DIR} не найдено .ipa или .tipa файлов.")
-        if not PYTHONISTA:
-            print("  Для a-shell положите файл в:")
-            print(f"    {TEMP_DIR}")
-            print("  Или запустите патчер из папки с файлом.")
+        print(f"В папке {user_tmp} не найдено .ipa или .tipa файлов.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
-    path = input("Введите полный путь к .ipa: ").strip().strip('"')
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+
+    path = input("\nВведите полный путь к .ipa: ").strip().strip('"')
+    if path and path.isdigit() and found:
+        idx = int(path) - 1
+        if 0 <= idx < len(found):
+            return found[idx][1]
     return os.path.expanduser(path) if path else None
 
 
 def pick_tweak_file():
     if PYTHONISTA and dialogs:
         try:
-            path = dialogs.pick_document(types=["public.data", "public.zip", "com.apple.dylib"])
-        except:
+            path = dialogs.pick_document(types=[
+                "public.item",
+                "public.data",
+                "public.archive",
+                "public.executable",
+                "com.apple.mach-o-binary"
+            ])
+        except Exception:
             path = None
         if path:
-            ext = os.path.splitext(path)[1].lower()
-            if ext not in ('.dylib', '.zip', '.deb', '.tar', '.lzma', '.xz', '.gz', '.tgz'):
-                print("Ошибка: поддерживаются .dylib, .zip, .deb, .tar, .lzma, .xz, .gz, .tgz")
-                return pick_tweak_file()
             return path
 
-    found = smart_find_in_tmp(['dylib', 'zip', 'deb', 'tar', 'lzma', 'xz', 'gz', 'tgz'])
+    user_tmp = get_user_tmp_dir()
+    found = smart_find_in_tmp(['dylib', 'zip', 'deb', 'tar', 'lzma', 'xz', 'gz', 'tgz', 'zst'])
     if found:
-        print(f"\n--- Доступные твики в {TEMP_DIR} ---")
+        print(f"\n--- Доступные твики в {user_tmp} ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
-        while True:
-            try:
-                ch = input("Выберите файл: ").strip()
-                if ch == '0' or not ch:
-                    break
-                num = int(ch)
-                if 1 <= num <= len(found):
-                    return found[num-1][1]
-                print("Неверный номер.")
-            except ValueError:
-                print("Введите число.")
-    else:
-        print(f"В {TEMP_DIR} не найдено подходящих файлов твиков.")
-        if not PYTHONISTA:
-            print(f"  Для a-shell положите файл в {TEMP_DIR}")
 
-    path = input("Введите полный путь к твику/архиву: ").strip().strip('"')
-    return os.path.expanduser(path) if path else None
-
-
-def pick_icon_file():
-    if PYTHONISTA and dialogs:
         try:
-            path = dialogs.pick_document(types=["public.png"])
-        except:
-            path = None
-        if path:
-            if not path.lower().endswith('.png'):
-                print("Ошибка: нужен PNG файл.")
-                return pick_icon_file()
-            return path
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            pass
 
-    found = smart_find_in_tmp(['png'])
-    if found:
-        print(f"\n--- Доступные PNG в {TEMP_DIR} ---")
-        for i, (name, _) in enumerate(found, 1):
-            print(f"  {i}) {name}")
-        print("  0) Ввести путь вручную")
         while True:
             try:
-                ch = input("Выберите файл: ").strip()
-                if ch == '0' or not ch:
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                ch = input(prompt).strip()
+                if not ch:
+                    if len(found) == 1:
+                        return found[0][1]
+                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    continue
+                if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
-                    return found[num-1][1]
-                print("Неверный номер.")
+                    return found[num - 1][1]
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В {TEMP_DIR} не найдено PNG файлов.")
-        if not PYTHONISTA:
-            print(f"  Для a-shell положите файл в {TEMP_DIR}")
+        print(f"В папке {user_tmp} не найдено подходящих файлов твиков.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
-    path = input("Введите полный путь к PNG: ").strip().strip('"')
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+
+    path = input("\nВведите полный путь к твику/архиву (.deb, .dylib, .zst...): ").strip().strip('"')
+    if path and path.isdigit() and found:
+        idx = int(path) - 1
+        if 0 <= idx < len(found):
+            return found[idx][1]
     return os.path.expanduser(path) if path else None
 
 
 def pick_substrate_file():
     if PYTHONISTA and dialogs:
         try:
-            path = dialogs.pick_document(types=["com.apple.dylib"])
-        except:
+            path = dialogs.pick_document(types=[
+                "public.item",
+                "public.data",
+                "public.archive",
+                "public.executable",
+                "com.apple.mach-o-binary"
+            ])
+        except Exception:
             path = None
         if path:
-            if not path.lower().endswith('.dylib'):
-                print("Ошибка: нужен .dylib файл.")
-                return pick_substrate_file()
             return path
 
-    found = smart_find_in_tmp(['dylib'])
+    user_tmp = get_user_tmp_dir()
+    found = smart_find_in_tmp(['dylib', 'deb', 'zip', 'zst'])
     if found:
-        print(f"\n--- Доступные libsubstrate в {TEMP_DIR} ---")
+        print(f"\n--- Доступные файлы субстрата в {user_tmp} ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
+
+        try:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            pass
+
         while True:
             try:
-                ch = input("Выберите файл: ").strip()
-                if ch == '0' or not ch:
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                ch = input(prompt).strip()
+                if not ch:
+                    if len(found) == 1:
+                        return found[0][1]
+                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    continue
+                if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
-                    return found[num-1][1]
-                print("Неверный номер.")
+                    return found[num - 1][1]
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В {TEMP_DIR} не найдено .dylib для субстрата.")
-        if not PYTHONISTA:
-            print(f"  Для a-shell положите файл в {TEMP_DIR}")
+        print(f"В папке {user_tmp} не найдено файлов субстрата.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
-    path = input("Введите полный путь к libsubstrate.dylib: ").strip().strip('"')
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+
+    path = input("\nВведите полный путь к субстрату (.dylib, .deb или .zst): ").strip().strip('"')
+    if path and path.isdigit() and found:
+        idx = int(path) - 1
+        if 0 <= idx < len(found):
+            return found[idx][1]
+    return os.path.expanduser(path) if path else None
+
+
+def pick_icon_file():
+    if PYTHONISTA and dialogs:
+        try:
+            path = dialogs.pick_document(types=["public.png", "public.image"])
+        except Exception:
+            path = None
+        if path:
+            if not path.lower().endswith('.png'):
+                print("Ошибка: нужен PNG файл.")
+                return pick_icon_file()
+            return path
+
+    user_tmp = get_user_tmp_dir()
+    found = smart_find_in_tmp(['png'])
+    if found:
+        print(f"\n--- Доступные PNG в {user_tmp} ---")
+        for i, (name, _) in enumerate(found, 1):
+            print(f"  {i}) {name}")
+        print("  0) Ввести путь вручную")
+
+        try:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            pass
+
+        while True:
+            try:
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                ch = input(prompt).strip()
+                if not ch:
+                    if len(found) == 1:
+                        return found[0][1]
+                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    continue
+                if ch == '0':
+                    break
+                num = int(ch)
+                if 1 <= num <= len(found):
+                    return found[num - 1][1]
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
+            except ValueError:
+                print("Введите число.")
+    else:
+        print(f"В папке {user_tmp} не найдено PNG файлов.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
+
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+
+    path = input("\nВведите полный путь к PNG: ").strip().strip('"')
+    if path and path.isdigit() and found:
+        idx = int(path) - 1
+        if 0 <= idx < len(found):
+            return found[idx][1]
     return os.path.expanduser(path) if path else None
 
 
 def pick_cert_zip():
     if PYTHONISTA and dialogs:
         try:
-            path = dialogs.pick_document(types=["public.zip"])
-        except:
+            path = dialogs.pick_document(types=["public.zip", "public.archive"])
+        except Exception:
             path = None
         if path:
             if not path.lower().endswith('.zip'):
@@ -456,27 +562,50 @@ def pick_cert_zip():
                 return pick_cert_zip()
             return path
 
+    user_tmp = get_user_tmp_dir()
     found = smart_find_in_tmp(['zip'])
     if found:
-        print(f"\n--- Доступные сертификаты в {TEMP_DIR} ---")
+        print(f"\n--- Доступные сертификаты в {user_tmp} ---")
         for i, (name, _) in enumerate(found, 1):
             print(f"  {i}) {name}")
         print("  0) Ввести путь вручную")
+
+        try:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            pass
+
         while True:
             try:
-                ch = input("Выберите файл: ").strip()
-                if ch == '0' or not ch:
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                ch = input(prompt).strip()
+                if not ch:
+                    if len(found) == 1:
+                        return found[0][1]
+                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    continue
+                if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
-                    return found[num-1][1]
-                print("Неверный номер.")
+                    return found[num - 1][1]
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В {TEMP_DIR} не найдено .zip архивов.")
-        if not PYTHONISTA:
-            print(f"  Для a-shell положите файл в {TEMP_DIR}")
+        print(f"В папке {user_tmp} не найдено .zip архивов.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
-    path = input("Введите полный путь к .zip архиву с сертификатом: ").strip().strip('"')
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
+
+    path = input("\nВведите полный путь к .zip архиву с сертификатом: ").strip().strip('"')
+    if path and path.isdigit() and found:
+        idx = int(path) - 1
+        if 0 <= idx < len(found):
+            return found[idx][1]
     return os.path.expanduser(path) if path else None
