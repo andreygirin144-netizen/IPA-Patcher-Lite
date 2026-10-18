@@ -17,33 +17,63 @@ def safe_patch_dylib_path(binary_path, old_path, new_path, quiet=False):
             log_message(f"Failed to read binary: {e}", 'ERROR')
         return False
     
-    if len(data) < 4:
-        return False
-    
-    old_without_null = old_path.encode('utf-8')
-    pos = data.find(old_without_null)
-    
-    if pos == -1:
-        return False
-    
-    end_pos = pos
-    while end_pos < len(data) and data[end_pos] != 0:
-        end_pos += 1
-    
-    zero_padding_end = end_pos
-    while zero_padding_end < len(data) and data[zero_padding_end] == 0:
-        zero_padding_end += 1
-    
-    available_len = zero_padding_end - pos
+    old_bytes = old_path.encode('utf-8')
     new_bytes = new_path.encode('utf-8') + b'\x00'
+    len_new = len(new_bytes)
     
-    if len(new_bytes) > available_len:
-        if not quiet:
-            log_message(f"Not enough space: need {len(new_bytes)} bytes, available {available_len}", 'WARN')
+    modified = False
+    pos = 0
+    
+    while True:
+        pos = data.find(old_bytes, pos)
+        if pos == -1:
+            break
+        
+        end_of_old = pos + len(old_bytes)
+        
+        if end_of_old >= len(data) or data[end_of_old] != 0:
+            pos = end_of_old
+            continue
+        
+        aligned_original_end = (end_of_old + 7) & ~7
+        original_available = aligned_original_end - pos
+        
+        if len_new <= original_available:
+            available_end = aligned_original_end
+            available_len = original_available
+        else:
+            extra_end = aligned_original_end
+            extra_count = 0
+            MAX_EXTRA = 32
+            
+            while (extra_end < len(data) and
+                   data[extra_end] == 0 and
+                   extra_count < MAX_EXTRA):
+                extra_end += 1
+                extra_count += 1
+            
+            aligned_extra_end = extra_end & ~7
+            available_len = aligned_extra_end - pos
+            
+            if len_new > available_len:
+                if not quiet:
+                    log_message(
+                        f"Not enough space at 0x{pos:08X}: "
+                        f"need {len_new}, available {available_len}",
+                        'WARN'
+                    )
+                pos = end_of_old
+                continue
+            
+            available_end = aligned_extra_end
+        
+        padded_new = new_bytes + b'\x00' * (available_len - len_new)
+        data[pos:available_end] = padded_new
+        modified = True
+        pos = pos + available_len
+    
+    if not modified:
         return False
-    
-    padded_new = new_bytes + b'\x00' * (available_len - len(new_bytes))
-    data[pos:pos + available_len] = padded_new
     
     try:
         with open(binary_path, 'wb') as f:
@@ -58,6 +88,21 @@ def safe_patch_dylib_path(binary_path, old_path, new_path, quiet=False):
         return False
 
 
+def _is_ascii_context(data, idx, length):
+    if idx > 0:
+        prev = data[idx - 1]
+        if prev != 0 and not (32 <= prev <= 126):
+            return False
+    
+    end = idx + length
+    if end < len(data):
+        nxt = data[end]
+        if nxt != 0 and not (32 <= nxt <= 126):
+            return False
+    
+    return True
+
+
 def check_substrate_dependencies(binary_path):
     if not os.path.isfile(binary_path):
         return True
@@ -66,7 +111,6 @@ def check_substrate_dependencies(binary_path):
         file_size = os.path.getsize(binary_path)
         if file_size == 0:
             return True
-        
         if file_size > 50 * 1024 * 1024:
             log_message(f"File too large for dependency check: {os.path.basename(binary_path)}", 'WARN')
             return True
@@ -79,10 +123,6 @@ def check_substrate_dependencies(binary_path):
         b'rm -rf',
         b'/bin/sh',
         b'/usr/bin/',
-        b'exec(',
-        b'system(',
-        b'popen(',
-        b'subprocess',
         b'_system\x00',
         b'_popen\x00',
         b'_posix_spawn\x00',
@@ -91,37 +131,22 @@ def check_substrate_dependencies(binary_path):
         b'_vfork\x00',
         b'_kill\x00',
         b'_ptrace\x00',
-        b'_sysctl\x00',
-        b'_proc_info\x00',
-        b'_vm_allocate\x00',
-        b'_vm_deallocate\x00',
         b'_task_for_pid\x00',
-        b'_thread_create\x00',
-        b'_thread_suspend\x00',
-        b'_thread_resume\x00',
         b'_mach_vm_allocate\x00',
         b'_mach_vm_deallocate\x00',
-        b'_host_get_io_master\x00',
-        b'_IOServiceMatching\x00',
-        b'_IOServiceGetMatchingServices\x00',
-        b'_IOConnectCallMethod\x00',
     ]
     
     try:
-        def scan_data(data, is_mmap=False):
+        def scan_data(data):
             for pattern in suspicious_patterns:
                 pos = 0
                 while True:
-                    if is_mmap:
-                        idx = data.find(pattern, pos)
-                    else:
-                        idx = data.find(pattern, pos)
-                    
+                    idx = data.find(pattern, pos)
                     if idx == -1:
                         break
                     
                     if pattern.endswith(b'\x00'):
-                        if idx == 0 or data[idx-1] == 0:
+                        if idx == 0 or data[idx - 1] == 0:
                             log_message(
                                 f"Suspicious system symbol found in {os.path.basename(binary_path)}: "
                                 f"{pattern.decode('utf-8', errors='ignore')} at offset {hex(idx)}",
@@ -129,12 +154,13 @@ def check_substrate_dependencies(binary_path):
                             )
                             return False
                     else:
-                        log_message(
-                            f"Suspicious text pattern found in {os.path.basename(binary_path)}: "
-                            f"{pattern.decode('utf-8', errors='ignore')} at offset {hex(idx)}",
-                            'WARN'
-                        )
-                        return False
+                        if _is_ascii_context(data, idx, len(pattern)):
+                            log_message(
+                                f"Suspicious text pattern found in {os.path.basename(binary_path)}: "
+                                f"{pattern.decode('utf-8', errors='ignore')} at offset {hex(idx)}",
+                                'WARN'
+                            )
+                            return False
                     
                     pos = idx + len(pattern)
             return True
@@ -143,11 +169,11 @@ def check_substrate_dependencies(binary_path):
             import mmap
             with open(binary_path, 'rb') as f:
                 with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as data:
-                    return scan_data(data, is_mmap=True)
+                    return scan_data(data)
         else:
             with open(binary_path, 'rb') as f:
                 data = f.read()
-                return scan_data(data, is_mmap=False)
+                return scan_data(data)
             
     except Exception as e:
         log_message(f"Failed to check dependencies: {e}", 'WARN')
@@ -176,33 +202,31 @@ def check_nested_calls(binary_path):
             import mmap
             with open(binary_path, 'rb') as f:
                 with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as data:
-                    for pattern in nested_patterns:
-                        pos = 0
-                        while True:
-                            idx = data.find(pattern, pos)
-                            if idx == -1:
-                                break
-                            if idx == 0 or data[idx-1] in (0, 32, 9, 10, 13):
-                                log_message(f"Nested dangerous call found: {pattern.decode('utf-8', errors='ignore')}", 'WARN')
-                                return False
-                            pos = idx + len(pattern)
+                    return _scan_nested(data, nested_patterns)
         else:
             with open(binary_path, 'rb') as f:
                 data = f.read()
-                for pattern in nested_patterns:
-                    pos = 0
-                    while True:
-                        idx = data.find(pattern, pos)
-                        if idx == -1:
-                            break
-                        if idx == 0 or data[idx-1] in (0, 32, 9, 10, 13):
-                            log_message(f"Nested dangerous call found: {pattern.decode('utf-8', errors='ignore')}", 'WARN')
-                            return False
-                        pos = idx + len(pattern)
-        return True
+                return _scan_nested(data, nested_patterns)
     except Exception as e:
         log_message(f"Failed to check nested calls: {e}", 'WARN')
         return True
+
+
+def _scan_nested(data, patterns):
+    for pattern in patterns:
+        pos = 0
+        while True:
+            idx = data.find(pattern, pos)
+            if idx == -1:
+                break
+            
+            if _is_ascii_context(data, idx, len(pattern)):
+                log_message(f"Nested dangerous call found: {pattern.decode('utf-8', errors='ignore')}", 'WARN')
+                return False
+            
+            pos = idx + len(pattern)
+    
+    return True
 
 
 def patch_tweak_substrate_dependencies(tweak_binary_path):
@@ -226,15 +250,11 @@ def patch_tweak_substrate_dependencies(tweak_binary_path):
         ("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate", "@executable_path/sb.dylib"),
         ("@rpath/CydiaSubstrate.framework/CydiaSubstrate", "@executable_path/sb.dylib"),
         ("/usr/lib/libsubstrate.dylib", "@executable_path/sb.dylib"),
-        ("/usr/lib/libhooker.dylib", "@executable_path/sb.dylib"),
-        ("/usr/lib/TweakInject.dylib", "@executable_path/sb.dylib"),
-        ("/usr/lib/TweakLoader.dylib", "@executable_path/sb.dylib"),
         ("/usr/lib/libellekit.dylib", "@executable_path/sb.dylib"),
-        ("/usr/lib/libinjector.dylib", "@executable_path/sb.dylib"),
-        ("/usr/lib/libblackjack.dylib", "@executable_path/sb.dylib"),
-        ("/usr/lib/libroothide.dylib", "@executable_path/sb.dylib"),
-        ("/usr/local/lib/libhooker.dylib", "@executable_path/sb.dylib"),
         ("/usr/local/lib/libellekit.dylib", "@executable_path/sb.dylib"),
+        ("/opt/lib/libellekit.dylib", "@executable_path/sb.dylib"),
+        ("/var/jb/usr/lib/libellekit.dylib", "@executable_path/sb.dylib"),
+        ("/var/jb/usr/lib/libsubstrate.dylib", "@executable_path/sb.dylib"),
     ]
     
     modified = False
@@ -253,8 +273,8 @@ def find_substrate_file(script_dir):
         os.path.join(script_dir, "assets", "libsubstrate.dylib"),
         os.path.join(script_dir, "libsubstrate.dylib"),
         os.path.join(os.path.dirname(script_dir), "libsubstrate.dylib"),
-        os.path.join(script_dir, "assets", "libhooker.dylib"),
-        os.path.join(script_dir, "libhooker.dylib"),
+        os.path.join(script_dir, "assets", "libellekit.dylib"),
+        os.path.join(script_dir, "libellekit.dylib"),
         os.path.join(os.path.dirname(script_dir), "assets", "libsubstrate.dylib"),
         os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "assets", "libsubstrate.dylib"),
         os.path.join(os.path.expanduser("~/Documents"), "ipa_patcher", "libsubstrate.dylib"),
@@ -275,11 +295,10 @@ def inject_substrate(app_dir, script_dir, substrate_source=None):
         if src is None:
             log_message("libsubstrate.dylib not found in script directory", 'ERROR')
             color_print("[ERROR] libsubstrate.dylib not found in script folder", 'red')
-            color_print("[INFO] Скачайте libsubstrate.dylib и положите в:", 'yellow')
+            color_print("[INFO] Скачайте libsubstrate.dylib и положите в:", 'yellow')
             color_print(f"  1. {os.path.join(script_dir, 'libsubstrate.dylib')}", 'white')
             color_print(f"  2. {os.path.join(script_dir, 'assets', 'libsubstrate.dylib')}", 'white')
             color_print(f"  3. {os.path.join(os.path.expanduser('~/Documents/ipa_patcher'), 'libsubstrate.dylib')}", 'white')
-            color_print("[INFO] Или используйте режим 'manual' в пункте 11 для выбора своего файла", 'yellow')
             return None
     else:
         src = substrate_source
