@@ -132,7 +132,7 @@ def get_adaptive_delay(ipa_path):
             base_delay = 0.003
         elif size_mb > 100:
             base_delay = 0.001
-    except:
+    except Exception:
         pass
     return min(base_delay, 0.01)
 
@@ -153,7 +153,7 @@ def get_icon_names_from_plist(app_dir):
         return []
     try:
         plist = load_plist(info_plist_path)
-    except:
+    except Exception:
         return []
     icon_names = []
     icons = plist.get("CFBundleIcons")
@@ -189,7 +189,7 @@ def add_icons_to_plist(app_dir, icon_names):
         return False
     try:
         plist = load_plist(info_plist_path)
-    except:
+    except Exception:
         return False
     clean_names = []
     for name in icon_names:
@@ -269,7 +269,7 @@ def deep_patch_string_in_bundle(app_dir, old_str, new_str, desc="строка"):
                                 fw.write(new_content)
                             color_print(f"  {desc.capitalize()} заменена в файле: {os.path.relpath(file_path, app_dir)}", 'green')
                             found = True
-                    except:
+                    except Exception:
                         pass
     
     return found
@@ -324,6 +324,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
     plist_changes = {}
     
     assets_dir = os.path.join(script_dir, "assets")
+    os.makedirs(assets_dir, exist_ok=True)
     sb_in_app = os.path.join(app_dir, "sb.dylib")
     
     if not custom_substrate_path and os.path.exists(assets_dir):
@@ -332,6 +333,11 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             if os.path.exists(p):
                 custom_substrate_path = p
                 break
+        if not custom_substrate_path:
+            for f in sorted(os.listdir(assets_dir)):
+                if f.endswith('.dylib'):
+                    custom_substrate_path = os.path.join(assets_dir, f)
+                    break
     
     backup_info_plist(app_dir)
     
@@ -597,7 +603,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                                 custom_substrate_path = p
                                 break
                         if not custom_substrate_path and os.path.exists(assets_dir):
-                            for f in os.listdir(assets_dir):
+                            for f in sorted(os.listdir(assets_dir)):
                                 if f.endswith('.dylib'):
                                     custom_substrate_path = os.path.join(assets_dir, f)
                                     break
@@ -717,7 +723,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                                 try:
                                     size = os.path.getsize(file_path)
                                     size_str = format_file_size(size)
-                                except:
+                                except Exception:
                                     size_str = "? B"
                                 all_items.append((f"{rel_root}{file_name} ({size_str})", False))
                         
@@ -752,7 +758,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         if os.path.exists(list_file):
                             os.remove(list_file)
                             color_print("[INFO] Временный файл списка удалён.", 'green')
-                    except:
+                    except Exception:
                         pass
                         
                 except Exception as e:
@@ -949,7 +955,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print("  Расширенные патчи: ПРИМЕНЕНЫ", 'green')
                     has_changes = True
                 if hex_patcher_used:
-                    color_print("  Hex патчер: ИЗМЕНЕНИЯ ВНЕСЕНЫ В БИНАРНИК", 'green')
+                    color_print("  Hex патчер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
                     has_changes = True
                 if "file_manager_changes" in real_changes:
                     color_print("  Файловый менеджер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
@@ -1034,8 +1040,6 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             assets_dir = os.path.join(script_dir, "assets")
             os.makedirs(assets_dir, exist_ok=True)
             
-            has_existing_sb = os.path.exists(sb_in_app)
-            
             available_subs = []
             for f in sorted(os.listdir(assets_dir)):
                 if f.endswith('.dylib'):
@@ -1053,7 +1057,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Доступные субстраты в папке assets:", 'yellow')
                 for idx, sub_name in enumerate(available_subs, 1):
                     full_p = os.path.join(assets_dir, sub_name)
-                    is_active = (custom_substrate_path == full_p) or (not custom_substrate_path and sub_name in ('libellekit.dylib', 'libsubstrate.dylib') and substrate_mode != 'none')
+                    is_active = (custom_substrate_path == full_p) or (not custom_substrate_path and sub_name in available_subs and substrate_mode != 'none' and idx == 1)
                     marker = " [* активен]" if is_active and substrate_mode != 'none' else ""
                     color_print(f"  {idx}) {sub_name}{marker}", 'green' if marker else 'white')
             else:
@@ -1113,39 +1117,65 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                             
                         color_print(f"[SUCCESS] {os.path.basename(picked)} сохранен в assets и установлен в .app!", 'green')
                     else:
-                        color_print(f"[INFO] Извлечение ядра ElleKit из {os.path.basename(picked)}...", 'cyan')
-                        sub_temp = tempfile.mkdtemp(prefix="ellekit_extract_")
+                        color_print(f"[INFO] Извлечение субстрата из {os.path.basename(picked)}...", 'cyan')
+                        sub_temp = tempfile.mkdtemp(prefix="sub_import_")
                         try:
                             from core.tweak_injector import safe_extract_archive
                             safe_extract_archive(picked, sub_temp)
                             
-                            target_file = None
+                            found_dylibs = []
                             for root, _, files in os.walk(sub_temp):
                                 for f in files:
-                                    if f == 'libellekit.dylib':
+                                    if f.endswith('.dylib'):
                                         candidate = os.path.join(root, f)
-                                        if not os.path.islink(candidate):
-                                            target_file = candidate
-                                            break
-                                if target_file:
-                                    break
+                                        real_path = candidate
+                                        if os.path.islink(candidate):
+                                            target = os.readlink(candidate)
+                                            t_name = os.path.basename(target)
+                                            for r2, _, f2 in os.walk(sub_temp):
+                                                if t_name in f2 and not os.path.islink(os.path.join(r2, t_name)):
+                                                    real_path = os.path.join(r2, t_name)
+                                                    break
+                                            else:
+                                                continue
+                                        if os.path.isfile(real_path) and real_path not in [x[1] for x in found_dylibs]:
+                                            found_dylibs.append((f, real_path))
                             
-                            if target_file and os.path.exists(target_file):
-                                dest = os.path.join(assets_dir, "libellekit.dylib")
-                                shutil.copy2(target_file, dest)
-                                os.chmod(dest, 0o755)
-                                custom_substrate_path = dest
-                                substrate_mode = 'active'
-                                
-                                try:
-                                    shutil.copy2(dest, sb_in_app)
-                                    os.chmod(sb_in_app, 0o755)
-                                except Exception:
-                                    pass
-                                    
-                                color_print("[SUCCESS] Движок libellekit.dylib сохранен в assets и установлен в .app!", 'green')
+                            if not found_dylibs:
+                                color_print("[ERROR] В архиве не найдено .dylib файлов!", 'red')
+                                continue
+                            
+                            selected_sub = None
+                            if len(found_dylibs) == 1:
+                                selected_sub = found_dylibs[0]
                             else:
-                                color_print("[ERROR] libellekit.dylib не найден внутри архива!", 'red')
+                                color_print("\nНайдено несколько библиотек в архиве:", 'cyan')
+                                for i, (d_name, d_path) in enumerate(found_dylibs, 1):
+                                    try:
+                                        d_size = format_file_size(os.path.getsize(d_path))
+                                    except Exception:
+                                        d_size = ""
+                                    print(f"  {i}) {d_name} ({d_size})")
+                                sel_idx = ask_input("Выберите номер библиотеки-субстрата", "1")
+                                try:
+                                    selected_sub = found_dylibs[int(sel_idx) - 1]
+                                except Exception:
+                                    selected_sub = found_dylibs[0]
+                            
+                            d_name, d_path = selected_sub
+                            target_file = os.path.join(assets_dir, d_name)
+                            shutil.copy2(d_path, target_file)
+                            os.chmod(target_file, 0o755)
+                            custom_substrate_path = target_file
+                            substrate_mode = 'active'
+                            
+                            try:
+                                shutil.copy2(target_file, sb_in_app)
+                                os.chmod(sb_in_app, 0o755)
+                            except Exception:
+                                pass
+                                
+                            color_print(f"[SUCCESS] Субстрат {d_name} успешно сохранен в assets и установлен в .app!", 'green')
                         except Exception as e:
                             color_print(f"[ERROR] Ошибка извлечения: {e}", 'red')
                         finally:
@@ -1626,7 +1656,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     old_bundle = changes.get('bundle_old', original.get('CFBundleIdentifier', ''))
                     color_print(f"  Bundle ID: {old_bundle} -> {changes['bundle_id']}", 'green')
                 if "file_support" in changes:
-                    color_print(f"  Файловый шеринг: {'ВКЛЮЧЕН'}", 'green')
+                    color_print("  Файловый шеринг: ВКЛЮЧЕН", 'green')
                 if "icon" in changes:
                     color_print("  Иконка: ЗАМЕНЕНА", 'green')
                 if "tweak" in changes:
@@ -1665,7 +1695,7 @@ def clean_non_standard_dirs(app_dir):
     if os.path.exists(signed_by_esign):
         try:
             os.remove(signed_by_esign)
-            color_print(f"Удален артефакт чужой подписи: SignedByEsign", 'green')
+            color_print("Удален артефакт чужой подписи: SignedByEsign", 'green')
         except Exception as e:
             log_message(f"Ошибка удаления SignedByEsign: {e}", 'WARN')
 
