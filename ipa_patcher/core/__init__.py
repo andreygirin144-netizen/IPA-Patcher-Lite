@@ -14,16 +14,62 @@ from .macho import (
     get_main_executable,
     is_ipa_encrypted,
     inject_code_signature,
+    verify_binary_architecture,
 )
-from .plist_editor import load_plist, load_plist_safe, save_plist, save_plist_safe
-from .substrate import safe_patch_dylib_path, inject_substrate, patch_tweak_substrate_dependencies
-from .tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak, verify_binary_architecture
-from .entitlements import generate_custom_entitlements, extract_team_id
-from .advanced_patches import apply_advanced_patches, check_patch_availability
+
+from .plist_editor import (
+    load_plist,
+    load_plist_safe,
+    save_plist,
+    save_plist_safe,
+    backup_info_plist,
+    restore_info_plist,
+    has_info_plist_backup,
+    cleanup_info_plist_backup,
+    update_version_in_extensions,
+    add_file_support,
+)
+
+from .substrate import (
+    safe_patch_dylib_path,
+    inject_substrate,
+    patch_tweak_substrate_dependencies,
+    find_substrate_file,
+    check_substrate_dependencies,
+    check_nested_calls,
+)
+
+from .tweak_injector import (
+    inject_tweaks,
+    check_header_space,
+    count_modules_in_tweak,
+    safe_extract_archive,
+    detect_tweak_type,
+    copy_all_tweak_components,
+    verify_dylib_headers,
+    parse_deb_control,
+    resolve_dependencies,
+    is_ios,
+    reset_ios_cache,
+    patch_all_macho_in_dir,
+)
+
+from .entitlements import (
+    generate_custom_entitlements,
+    extract_team_id,
+)
+
+from .advanced_patches import (
+    apply_advanced_patches,
+    check_patch_availability,
+)
+
 from .patch_strings import patch_strings_in_binary
+
 from .ipa_utils import (
     extract_ipa_with_progress,
     pack_ipa_with_progress,
+    pack_ipa_with_compression,
     make_temp_ipa_dir,
     get_platform_temp_dir,
     find_app_dir,
@@ -37,19 +83,64 @@ from .ipa_utils import (
     extract_tipa_with_progress,
     pack_tipa_with_progress,
 )
-from .signature import clean_signature_files, sign_app_bundle_with_path, open_tipa_with_trollstore, prepare_tipa_entitlements, merge_tipa_entitlements
+
+from .signature import (
+    clean_signature_files,
+    sign_app_bundle_with_path,
+    open_tipa_with_trollstore,
+    prepare_tipa_entitlements,
+    merge_tipa_entitlements,
+)
+
 from .constants import (
+    VERSION,
     MIN_HEADER_PADDING,
+    LC_SEGMENT,
+    LC_SEGMENT_64,
     LC_LOAD_DYLIB,
     LC_RPATH,
     LC_CODE_SIGNATURE,
+    LC_ENCRYPTION_INFO,
+    LC_ENCRYPTION_INFO_64,
     MH_MAGIC_64,
     MH_CIGAM_64,
     MH_MAGIC_32,
     MH_CIGAM_32,
     FAT_MAGIC,
     FAT_CIGAM,
-    VERSION,
+    FAT_MAGIC_64,
+    FAT_CIGAM_64,
+    CPU_TYPE_ARM,
+    CPU_TYPE_ARM64,
+    CPU_TYPE_ARM64_32,
+    CPU_TYPE_X86_64,
+    PAGE_SIZE_ARM64,
+    PAGE_SIZE_ARM64E,
+    PAGE_SIZE_ARM32,
+    PAGE_SIZE_X86_64,
+    PAGE_SIZE_DEFAULT,
+    SIGNATURE_DIRS,
+    SIGNATURE_FILES,
+    UNWANTED_DIRS,
+    SYSTEM_DYLIB_PATHS,
+    SUBSTRATE_PATHS_TO_REPLACE,
+    SUBSTRATE_REPLACEMENT_TARGET,
+    TWEAK_EXTENSIONS,
+    ARCHIVE_EXTENSIONS,
+    TROLLSTORE_ENTITLEMENTS,
+    FREE_ACCOUNT_ENTITLEMENTS,
+    PAID_ACCOUNT_ENTITLEMENTS_OPTIONAL,
+    FORBIDDEN_ENTITLEMENTS,
+    FILE_SUPPORT_MODES,
+    FILE_SUPPORT_ALWAYS,
+    PATCH_TYPES,
+    ADVANCED_PATCH_NAMES,
+)
+
+from .zstd_lite import (
+    decompress,
+    decompress_file,
+    is_zstd,
 )
 
 __all__ = [
@@ -67,24 +158,50 @@ __all__ = [
     'get_main_executable',
     'is_ipa_encrypted',
     'inject_code_signature',
+    'verify_binary_architecture',
+
     'load_plist',
     'load_plist_safe',
     'save_plist',
     'save_plist_safe',
+    'backup_info_plist',
+    'restore_info_plist',
+    'has_info_plist_backup',
+    'cleanup_info_plist_backup',
+    'update_version_in_extensions',
+    'add_file_support',
+
     'safe_patch_dylib_path',
     'inject_substrate',
     'patch_tweak_substrate_dependencies',
+    'find_substrate_file',
+    'check_substrate_dependencies',
+    'check_nested_calls',
+
     'inject_tweaks',
     'check_header_space',
     'count_modules_in_tweak',
-    'verify_binary_architecture',
+    'safe_extract_archive',
+    'detect_tweak_type',
+    'copy_all_tweak_components',
+    'verify_dylib_headers',
+    'parse_deb_control',
+    'resolve_dependencies',
+    'is_ios',
+    'reset_ios_cache',
+    'patch_all_macho_in_dir',
+
     'generate_custom_entitlements',
     'extract_team_id',
+
     'apply_advanced_patches',
     'check_patch_availability',
+
     'patch_strings_in_binary',
+
     'extract_ipa_with_progress',
     'pack_ipa_with_progress',
+    'pack_ipa_with_compression',
     'make_temp_ipa_dir',
     'get_platform_temp_dir',
     'find_app_dir',
@@ -97,20 +214,57 @@ __all__ = [
     'is_tipa_file',
     'extract_tipa_with_progress',
     'pack_tipa_with_progress',
+
     'clean_signature_files',
     'sign_app_bundle_with_path',
     'open_tipa_with_trollstore',
     'prepare_tipa_entitlements',
     'merge_tipa_entitlements',
+
+    'decompress',
+    'decompress_file',
+    'is_zstd',
+
+    'VERSION',
     'MIN_HEADER_PADDING',
+    'LC_SEGMENT',
+    'LC_SEGMENT_64',
     'LC_LOAD_DYLIB',
     'LC_RPATH',
     'LC_CODE_SIGNATURE',
+    'LC_ENCRYPTION_INFO',
+    'LC_ENCRYPTION_INFO_64',
     'MH_MAGIC_64',
     'MH_CIGAM_64',
     'MH_MAGIC_32',
     'MH_CIGAM_32',
     'FAT_MAGIC',
     'FAT_CIGAM',
-    'VERSION',
+    'FAT_MAGIC_64',
+    'FAT_CIGAM_64',
+    'CPU_TYPE_ARM',
+    'CPU_TYPE_ARM64',
+    'CPU_TYPE_ARM64_32',
+    'CPU_TYPE_X86_64',
+    'PAGE_SIZE_ARM64',
+    'PAGE_SIZE_ARM64E',
+    'PAGE_SIZE_ARM32',
+    'PAGE_SIZE_X86_64',
+    'PAGE_SIZE_DEFAULT',
+    'SIGNATURE_DIRS',
+    'SIGNATURE_FILES',
+    'UNWANTED_DIRS',
+    'SYSTEM_DYLIB_PATHS',
+    'SUBSTRATE_PATHS_TO_REPLACE',
+    'SUBSTRATE_REPLACEMENT_TARGET',
+    'TWEAK_EXTENSIONS',
+    'ARCHIVE_EXTENSIONS',
+    'TROLLSTORE_ENTITLEMENTS',
+    'FREE_ACCOUNT_ENTITLEMENTS',
+    'PAID_ACCOUNT_ENTITLEMENTS_OPTIONAL',
+    'FORBIDDEN_ENTITLEMENTS',
+    'FILE_SUPPORT_MODES',
+    'FILE_SUPPORT_ALWAYS',
+    'PATCH_TYPES',
+    'ADVANCED_PATCH_NAMES',
 ]
