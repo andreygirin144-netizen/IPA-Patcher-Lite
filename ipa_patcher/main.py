@@ -66,7 +66,8 @@ log = logging.getLogger(__name__)
 hex_patcher_used = False
 UNDO_LOG_FILE = "undo_log.json"
 
-substrate_mode = 'auto'
+substrate_mode = 'active'
+custom_substrate_path = None
 use_rpath = False
 use_loader_path = False
 
@@ -220,7 +221,7 @@ def deep_patch_string_in_bundle(app_dir, old_str, new_str, desc="строка"):
     len_new = len(new_bytes)
     
     if len_new > len_old:
-        color_print(f"[WARN] Новый {desc} длиннее старого ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
+        color_print(f"[WARN] Новый {desc} длиннее старого ({len_new} > {len_old}). Глубокая замена пропущена.", 'yellow')
         return False
     
     padded_new = new_bytes + b'\x00' * (len_old - len_new)
@@ -254,7 +255,7 @@ def deep_patch_string_in_bundle(app_dir, old_str, new_str, desc="строка"):
             if is_macho_binary(file_path):
                 count = patch_strings_in_binary(file_path, [(old_bytes, padded_new)])
                 if count > 0:
-                    color_print(f"  {desc.capitalize()} заменена в бинарнике: {f} ({count} вхождений)", 'green')
+                    color_print(f"  {desc.capitalize()} заменена в бинарнике: {f} ({count} вхождений)", 'green')
                     found = True
                 continue
             else:
@@ -266,7 +267,7 @@ def deep_patch_string_in_bundle(app_dir, old_str, new_str, desc="строка"):
                             new_content = content.replace(old_bytes, padded_new)
                             with open(file_path, 'wb') as fw:
                                 fw.write(new_content)
-                            color_print(f"  {desc.capitalize()} заменена в файле: {os.path.relpath(file_path, app_dir)}", 'green')
+                            color_print(f"  {desc.capitalize()} заменена в файле: {os.path.relpath(file_path, app_dir)}", 'green')
                             found = True
                     except:
                         pass
@@ -310,7 +311,7 @@ def prepare_tipa_info_plist(plist_data, app_dir):
 
 
 def edit_menu(plist_data, app_dir, script_dir, temp_dir):
-    global hex_patcher_used, substrate_mode, use_rpath, use_loader_path
+    global hex_patcher_used, substrate_mode, custom_substrate_path, use_rpath, use_loader_path
     original = plist_data.copy()
     changes = {}
     modified = False
@@ -322,14 +323,29 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
     info_plist_path = os.path.join(app_dir, "Info.plist")
     plist_changes = {}
     
+    assets_dir = os.path.join(script_dir, "assets")
+    sb_in_app = os.path.join(app_dir, "sb.dylib")
+    
+    if not custom_substrate_path and os.path.exists(assets_dir):
+        for candidate in ("libellekit.dylib", "libsubstrate.dylib"):
+            p = os.path.join(assets_dir, candidate)
+            if os.path.exists(p):
+                custom_substrate_path = p
+                break
+    
     backup_info_plist(app_dir)
     
     while True:
-        mode_display = {
-            'auto': 'ДА (авто)',
-            'manual': 'ВЫБРАТЬ СВОЙ',
-            'none': 'НЕТ'
-        }[substrate_mode]
+        has_existing_sb = os.path.exists(sb_in_app)
+        
+        if substrate_mode == 'none':
+            mode_display = 'НЕТ (для автономных твиков)'
+        elif custom_substrate_path and os.path.exists(custom_substrate_path):
+            mode_display = f"{os.path.basename(custom_substrate_path)}"
+        elif has_existing_sb:
+            mode_display = "sb.dylib (уже в .app)"
+        else:
+            mode_display = "не выбран"
         
         if use_rpath:
             path_display = "@rpath"
@@ -346,22 +362,22 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print("2. Изменить версию")
         print(f"   Текущая: {plist_data.get('CFBundleShortVersionString', '1.0')}")
         print("3. Изменить номер сборки")
-        print(f"   Текущий: {plist_data.get('CFBundleVersion', '1')}")
+        print(f"   Текущий: {plist_data.get('CFBundleVersion', '1')}")
         print("4. Изменить Bundle ID")
-        print(f"   Текущий: {plist_data.get('CFBundleIdentifier', 'не задан')}")
-        print("5. Включить файловый шеринг")
+        print(f"   Текущий: {plist_data.get('CFBundleIdentifier', 'не задан')}")
+        print("5. Включить файловый шеринг")
         print("6. Заменить иконку")
-        print("7. Инъекция твиков (.dylib, .zip, .deb, .tar, .lzma, .xz)")
-        print("8. Файловый менеджер (просмотр/редактирование файлов .app)")
+        print("7. Инъекция твиков (.dylib, .zip, .deb, .tar, .lzma, .xz, .zst)")
+        print("8. Файловый менеджер (просмотр/редактирование файлов .app)")
         print("9. Применить изменения и собрать IPA/TIPA")
         print(f"10. Тип пути: {path_display}")
-        print("11. Режим субстрата: " + mode_display)
+        print(f"11. Субстрат: {mode_display}")
         print("12. Расширенное редактирование Info.plist (JSON)")
         print("13. Настроить права (Entitlements)")
-        print("14. Расширенные патчи (понижение iOS, удаление плагинов и ограничений)")
+        print("14. Расширенные патчи (понижение iOS, удаление плагинов и ограничений)")
         print("15. Hex патчер (замена строк/HEX)")
         print("16. Прореживание бинарника (удаление 32-битных архитектур)")
-        print("17. Восстановить из резервных копий (Info.plist + бинарники)")
+        print("17. Восстановить из резервных копий (Info.plist + бинарники)")
         print("0. Выход без сохранения")
         print("=" * 50)
         choice = ask_input("Ваш выбор", "9")
@@ -381,7 +397,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             if new_ver and new_ver != old_ver:
                 color_print("\nВыберите способ замены версии:", 'cyan')
                 print("1. Только Info.plist (безопасно)")
-                print("2. Глубокая замена (во всех файлах)")
+                print("2. Глубокая замена (во всех файлах)")
                 mode = ask_input("Ваш выбор", "1")
                 
                 if mode == "2":
@@ -409,11 +425,11 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 
         elif choice == "4":
             old_id = plist_data.get("CFBundleIdentifier", "")
-            new_id = ask_input("Новый Bundle ID", old_id)
+            new_id = ask_input("Новый Bundle ID", old_id)
             if new_id and new_id != old_id:
                 color_print("\nВыберите способ замены Bundle ID:", 'cyan')
                 print("1. Только Info.plist (безопасно)")
-                print("2. Глубокая замена (во всех файлах)")
+                print("2. Глубокая замена (во всех файлах)")
                 mode = ask_input("Ваш выбор", "1")
                 
                 if mode == "2":
@@ -432,10 +448,10 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Bundle ID изменен в Info.plist", 'green')
                 
         elif choice == "5":
-            color_print("\nВыберите режим файлового шеринга:", 'cyan')
-            print("1. Старый (iTunes File Sharing) - только UIFileSharingEnabled")
-            print("2. Современный (iOS 14+) - только LSSupportsOpeningDocumentsInPlace")
-            print("3. Гибридный (рекомендуется) - оба ключа")
+            color_print("\nВыберите режим файлового шеринга:", 'cyan')
+            print("1. Старый (iTunes File Sharing) - только UIFileSharingEnabled")
+            print("2. Современный (iOS 14+) - только LSSupportsOpeningDocumentsInPlace")
+            print("3. Гибридный (рекомендуется) - оба ключа")
             fs_mode = ask_input("Ваш выбор", "3")
             
             if fs_mode == "1":
@@ -443,18 +459,18 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 if "LSSupportsOpeningDocumentsInPlace" in plist_data:
                     del plist_data["LSSupportsOpeningDocumentsInPlace"]
                 changes["file_support"] = "legacy"
-                color_print("Файловый шеринг: СТАРЫЙ режим (iTunes)", 'green')
+                color_print("Файловый шеринг: СТАРЫЙ режим (iTunes)", 'green')
             elif fs_mode == "2":
                 plist_data["LSSupportsOpeningDocumentsInPlace"] = True
                 if "UIFileSharingEnabled" in plist_data:
                     del plist_data["UIFileSharingEnabled"]
                 changes["file_support"] = "modern"
-                color_print("Файловый шеринг: СОВРЕМЕННЫЙ режим (iOS 14+)", 'green')
+                color_print("Файловый шеринг: СОВРЕМЕННЫЙ режим (iOS 14+)", 'green')
             else:
                 plist_data["UIFileSharingEnabled"] = True
                 plist_data["LSSupportsOpeningDocumentsInPlace"] = True
                 changes["file_support"] = "hybrid"
-                color_print("Файловый шеринг: ГИБРИДНЫЙ режим (рекомендуется)", 'green')
+                color_print("Файловый шеринг: ГИБРИДНЫЙ режим (рекомендуется)", 'green')
             
             plist_data["UISupportsDocumentBrowser"] = True
             modified = True
@@ -464,7 +480,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             img_path = pick_icon_file()
             if img_path:
                 if not img_path.lower().endswith('.png'):
-                    color_print("Ошибка: поддерживаются только PNG файлы.", 'red')
+                    color_print("Ошибка: поддерживаются только PNG файлы.", 'red')
                     continue
                 
                 if modified or changes:
@@ -472,13 +488,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         import plistlib
                         with open(info_plist_path, 'wb') as f:
                             plistlib.dump(plist_data, f, fmt=plistlib.FMT_BINARY)
-                        color_print("[INFO] Info.plist сохранен перед заменой иконки", 'green')
+                        color_print("[INFO] Info.plist сохранен перед заменой иконки", 'green')
                     except Exception as e:
                         log_message(f"Failed to save plist before icon replacement: {e}", 'WARN')
                 
                 color_print("\nВыберите метод замены иконки:", 'cyan')
-                print("1. Гибридный (рекомендуется) - маскирует Assets.car + loose-иконки")
-                print("2. Только маскировка Assets.car (без замены файлов)")
+                print("1. Гибридный (рекомендуется) - маскирует Assets.car + loose-иконки")
+                print("2. Только маскировка Assets.car (без замены файлов)")
                 print("3. Только loose-иконки + Info.plist")
                 print("4. Только стандартная замена")
                 print("5. Удалить Assets.car (Возможен вылет на IOS/iPadOS 15+!)")
@@ -490,7 +506,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 success = False
                 
                 if method == "1":
-                    color_print("[INFO] Выбран гибридный режим", 'blue')
+                    color_print("[INFO] Выбран гибридный режим", 'blue')
                     success = replace_icon_with_priority(app_dir, img_path, remove_assets, auto_increment)
                 elif method == "2":
                     color_print("[INFO] Выбрана маскировка Assets.car", 'blue')
@@ -514,7 +530,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     else:
                         continue
                 else:
-                    color_print("Неверный выбор", 'red')
+                    color_print("Неверный выбор", 'red')
                     continue
                 
                 if success:
@@ -527,13 +543,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 else:
                     color_print("[ERROR] Не удалось заменить иконку", 'red')
             else:
-                color_print("Иконка не заменена (файл не выбран)", 'red')
+                color_print("Иконка не заменена (файл не выбран)", 'red')
                 
         elif choice == "7":
             color_print("\nПроверка расшифровки IPA...", 'blue')
             encrypted = is_ipa_encrypted(app_dir, plist_data)
             if encrypted is None:
-                color_print("Не удалось проверить, продолжаем на свой страх и риск.", 'yellow')
+                color_print("Не удалось проверить, продолжаем на свой страх и риск.", 'yellow')
                 if not ask_yes_no("Продолжить инъекцию?", default=False):
                     continue
             elif encrypted:
@@ -542,10 +558,10 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 color_print("IPA расшифрован. Инъекция разрешена.", 'green')
                 
-            color_print("\nВыберите .dylib, .zip, .deb, .tar, .lzma или .xz с твиками.", 'blue')
+            color_print("\nВыберите .dylib, .zip, .deb, .tar, .lzma, .xz или .zst с твиками.", 'blue')
             tweak_path = pick_tweak_file()
             if not tweak_path:
-                color_print("Файл не выбран.", 'red')
+                color_print("Файл не выбран.", 'red')
                 continue
             
             if tweak_path.endswith('.dylib'):
@@ -559,30 +575,43 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         b'\xbe\xba\xfe\xca'
                     )
                     if magic not in valid_magic:
-                        color_print("[WARN] Файл не является валидным Mach-O бинарником!", 'yellow')
-                        if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
+                        color_print("[WARN] Файл не является валидным Mach-O бинарником!", 'yellow')
+                        if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
                             continue
-                except:
+                except Exception:
                     pass
             
-            substrate_source = None
-            if substrate_mode == 'auto':
-                substrate_source = None
-                color_print("Будет встроен стандартный libsubstrate.dylib", 'yellow')
-            elif substrate_mode == 'manual':
-                color_print("Выберите файл libsubstrate.dylib:", 'blue')
-                sub_path = pick_substrate_file()
-                if sub_path:
-                    substrate_source = sub_path
-                    color_print("Будет встроен выбранный libsubstrate.dylib", 'yellow')
-                else:
-                    color_print("Субстрат не выбран. Инъекция отменена.", 'red')
-                    continue
-            else:
-                substrate_source = None
+            if substrate_mode == 'none':
                 color_print("Субстрат НЕ будет встроен.", 'yellow')
+                if os.path.exists(sb_in_app):
+                    try:
+                        os.remove(sb_in_app)
+                    except Exception:
+                        pass
+            else:
+                if not os.path.exists(sb_in_app):
+                    if not custom_substrate_path or not os.path.exists(custom_substrate_path):
+                        for candidate in ("libellekit.dylib", "libsubstrate.dylib"):
+                            p = os.path.join(assets_dir, candidate)
+                            if os.path.exists(p):
+                                custom_substrate_path = p
+                                break
+                        if not custom_substrate_path and os.path.exists(assets_dir):
+                            for f in os.listdir(assets_dir):
+                                if f.endswith('.dylib'):
+                                    custom_substrate_path = os.path.join(assets_dir, f)
+                                    break
+
+                    if custom_substrate_path and os.path.exists(custom_substrate_path):
+                        shutil.copy2(custom_substrate_path, sb_in_app)
+                        os.chmod(sb_in_app, 0o755)
+                        color_print(f"[INFO] Субстрат ({os.path.basename(custom_substrate_path)}) установлен как sb.dylib", 'green')
+                    else:
+                        color_print("[WARN] Субстрат не найден в assets! Инъекция без субстрата.", 'yellow')
+                else:
+                    color_print(f"[INFO] Используется установленный субстрат: sb.dylib", 'green')
             
-            color_print("\nТекущий тип пути:", 'cyan')
+            color_print("\nТекущий тип пути:", 'cyan')
             if use_rpath:
                 current_path = "@rpath/"
             elif use_loader_path:
@@ -594,8 +623,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             color_print("\nВыберите тип пути для инъекции:", 'cyan')
             print("  [Enter] @executable_path/  - относительно папки .app (по умолчанию)")
             print("  1) @rpath/            - относительно RPATH (если задан)")
-            print("  2) @loader_path/      - относительно текущего файла")
-            print("  3) Использовать текущий путь (без изменений)")
+            print("  2) @loader_path/      - относительно текущего файла")
+            print("  3) Использовать текущий путь (без изменений)")
             
             path_choice = ask_input("Ваш выбор", "")
             
@@ -613,27 +642,28 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print("Выбран путь: @loader_path/", 'green')
             elif path_choice == "3":
                 current = "@rpath/" if use_rpath else "@loader_path/" if use_loader_path else "@executable_path/"
-                color_print(f"Используется текущий путь: {current}", 'yellow')
+                color_print(f"Используется текущий путь: {current}", 'yellow')
             else:
-                color_print("Неверный выбор. Используется @executable_path/", 'yellow')
+                color_print("Неверный выбор. Используется @executable_path/", 'yellow')
                 use_rpath = False
                 use_loader_path = False
                 
             module_count = count_modules_in_tweak(tweak_path)
-            color_print(f"[INFO] Обнаружено примерно {module_count} модулей в архиве", 'blue')
+            color_print(f"[INFO] Обнаружено примерно {module_count} модулей в архиве", 'blue')
             
             color_print("\nПроверка свободного места в заголовке бинарника...", 'blue')
             if not check_binary_header_space(app_dir, plist_data, estimated_tweaks=module_count):
                 color_print("ВНИМАНИЕ: В заголовке бинарника может не хватить места!", 'yellow')
-                color_print(f"Обнаружено {module_count} модулей, требуется ~{module_count * 48 + 16} байт", 'yellow')
+                color_print(f"Обнаружено {module_count} модулей, требуется ~{module_count * 48 + 16} байт", 'yellow')
                 color_print("Инъекция возможна, но если не хватит места - бинарник будет поврежден.", 'yellow')
-                if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
+                if not ask_yes_no("Продолжить инъекцию на свой риск?", default=False):
                     continue
                     
-            if not ask_yes_no("Инъектировать выбранный твик?", default=True):
+            if not ask_yes_no("Инъектировать выбранный твик?", default=True):
                 continue
                 
-            ok, msg = inject_tweaks(app_dir, tweak_path, plist_data, script_dir)
+            enable_sub = (substrate_mode != 'none')
+            ok, msg = inject_tweaks(app_dir, tweak_path, plist_data, script_dir, enable_substrate=enable_sub)
             if ok:
                 tweak_injected = True
                 changes["tweak"] = True
@@ -649,13 +679,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     import plistlib
                     with open(info_plist_path, 'wb') as f:
                         plistlib.dump(plist_data, f, fmt=plistlib.FMT_BINARY)
-                    color_print("[INFO] Info.plist сохранен на диск перед входом в файловый менеджер", 'green')
+                    color_print("[INFO] Info.plist сохранен на диск перед входом в файловый менеджер", 'green')
                 except Exception as e:
                     log_message(f"Failed to save plist before file manager: {e}", 'WARN')
             
-            color_print("\nВыберите режим просмотра файлов .app:", 'cyan')
-            print("  1) Простой список файлов (текстовый файл)")
-            print("  2) Интерактивный файловый менеджер")
+            color_print("\nВыберите режим просмотра файлов .app:", 'cyan')
+            print("  1) Простой список файлов (текстовый файл)")
+            print("  2) Интерактивный файловый менеджер")
             print("  0) Назад")
             
             view_mode = ask_input("Ваш выбор", "1")
@@ -667,7 +697,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 try:
                     with open(list_file, 'w', encoding='utf-8') as out_f:
                         out_f.write("=" * 60 + "\n")
-                        out_f.write(f"СПИСОК ФАЙЛОВ В .app\n")
+                        out_f.write(f"СПИСОК ФАЙЛОВ В .app\n")
                         out_f.write(f"Приложение: {os.path.basename(app_dir)}\n")
                         out_f.write("=" * 60 + "\n\n")
                         
@@ -700,28 +730,28 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         out_f.write("\n" + "=" * 60 + "\n")
                         out_f.write(f"Всего: {len(all_items)} элементов\n")
                     
-                    color_print(f"\n[INFO] Список файлов создан: {list_file}", 'blue')
+                    color_print(f"\n[INFO] Список файлов создан: {list_file}", 'blue')
                     
                     if PYTHONISTA:
                         try:
                             import editor
                             if hasattr(editor, 'open_file'):
                                 editor.open_file(list_file)
-                                color_print("Редактор открыт. Закройте вкладку и нажмите Enter в консоли.", 'blue')
+                                color_print("Редактор открыт. Закройте вкладку и нажмите Enter в консоли.", 'blue')
                             else:
-                                color_print("Откройте файл в текстовом редакторе.", 'yellow')
-                        except:
-                            color_print("Откройте файл в текстовом редакторе.", 'yellow')
+                                color_print("Откройте файл в текстовом редакторе.", 'yellow')
+                        except Exception:
+                            color_print("Откройте файл в текстовом редакторе.", 'yellow')
                     else:
-                        color_print(f"Файл: {list_file}", 'white')
-                        color_print("Откройте его в любом текстовом редакторе.", 'yellow')
+                        color_print(f"Файл: {list_file}", 'white')
+                        color_print("Откройте его в любом текстовом редакторе.", 'yellow')
                     
                     input("\nНажмите Enter для продолжения...")
                     
                     try:
                         if os.path.exists(list_file):
                             os.remove(list_file)
-                            color_print("[INFO] Временный файл списка удалён.", 'green')
+                            color_print("[INFO] Временный файл списка удалён.", 'green')
                     except:
                         pass
                         
@@ -757,10 +787,10 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     modified = True
                     changes["file_manager_changes"] = fm_changes
                     file_manager_changes = fm_changes
-                    color_print("[INFO] Изменения из файлового менеджера сохранены.", 'green')
+                    color_print("[INFO] Изменения из файлового менеджера сохранены.", 'green')
             
             else:
-                color_print("Неверный выбор.", 'red')
+                color_print("Неверный выбор.", 'red')
                 
         elif choice == "9":
             real_changes = {}
@@ -873,7 +903,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             
             if modified or icon_replaced or tweak_injected or ("custom_edit" in real_changes) or ("entitlements" in real_changes) or ("advanced_patched" in real_changes) or hex_patcher_used or ("file_manager_changes" in real_changes) or deep_version_mode or deep_bundle_mode:
                 
-                color_print("\n--- Сводка изменений ---", 'cyan')
+                color_print("\n--- Сводка изменений ---", 'cyan')
                 has_changes = False
                 
                 if "name" in real_changes:
@@ -897,22 +927,17 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     has_changes = True
                 if "file_support" in real_changes:
                     mode_map = {
-                        'legacy': 'СТАРЫЙ (iTunes)',
-                        'modern': 'СОВРЕМЕННЫЙ (iOS 14+)',
-                        'hybrid': 'ГИБРИДНЫЙ (рекомендуется)'
+                        'legacy': 'СТАРЫЙ (iTunes)',
+                        'modern': 'СОВРЕМЕННЫЙ (iOS 14+)',
+                        'hybrid': 'ГИБРИДНЫЙ (рекомендуется)'
                     }
-                    color_print(f"  Файловый шеринг: {mode_map.get(real_changes['file_support'], 'ВКЛЮЧЕН')}", 'green')
+                    color_print(f"  Файловый шеринг: {mode_map.get(real_changes['file_support'], 'ВКЛЮЧЕН')}", 'green')
                     has_changes = True
                 if "icon" in real_changes:
                     color_print("  Иконка приложения: ЗАМЕНЕНА", 'green')
                     has_changes = True
                 if "tweak" in real_changes:
-                    substrate_status = {
-                        'auto': 'встроен стандартный',
-                        'manual': 'встроен пользовательский',
-                        'none': 'не встроен'
-                    }.get(real_changes.get("substrate_mode", 'auto'), 'встроен стандартный')
-                    color_print(f"  Твики: ИНЪЕКТИРОВАНЫ (субстрат: {substrate_status})", 'green')
+                    color_print(f"  Твики: ИНЪЕКТИРОВАНЫ (субстрат: {mode_display})", 'green')
                     has_changes = True
                 if "custom_edit" in real_changes:
                     color_print("  Расширенное редактирование Info.plist: ДА", 'green')
@@ -927,10 +952,10 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print("  Hex патчер: ИЗМЕНЕНИЯ ВНЕСЕНЫ В БИНАРНИК", 'green')
                     has_changes = True
                 if "file_manager_changes" in real_changes:
-                    color_print("  Файловый менеджер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
+                    color_print("  Файловый менеджер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
                     count = len(real_changes.get("file_manager_changes", []))
                     if count > 0:
-                        color_print(f"    Изменено файлов: {count}", 'white')
+                        color_print(f"    Изменено файлов: {count}", 'white')
                         for fm_change in real_changes.get("file_manager_changes", []):
                             if fm_change['type'] == 'macho_path_change':
                                 color_print(f"      - Путь зависимости: {fm_change['old']} -> {fm_change['new']}", 'white')
@@ -949,20 +974,20 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     has_changes = True
                 
                 if not has_changes:
-                    color_print("  (нет изменений для отображения)", 'yellow')
+                    color_print("  (нет изменений для отображения)", 'yellow')
                 
                 current_version = plist_data.get('CFBundleVersion', 'не указана')
                 color_print(f"  Текущая версия сборки: {current_version}", 'cyan')
                 
                 if ask_yes_no("\nПрименить изменения и собрать IPA/TIPA?", default=True):
                     if deep_version_mode and "version" in real_changes:
-                        color_print("Глубокая замена версии в бинарниках и файлах...", 'blue')
+                        color_print("Глубокая замена версии в бинарниках и файлах...", 'blue')
                         old_ver = changes.get('version_old', original.get("CFBundleShortVersionString", "1.0"))
                         if not deep_patch_version(app_dir, old_ver, real_changes["version"]):
                             color_print("[WARN] Не удалось выполнить глубокую замену версии", 'yellow')
                     
                     if deep_bundle_mode and "bundle_id" in real_changes:
-                        color_print("Глубокая замена Bundle ID в бинарниках и файлах...", 'blue')
+                        color_print("Глубокая замена Bundle ID в бинарниках и файлах...", 'blue')
                         old_bundle = changes.get('bundle_old', original.get("CFBundleIdentifier", ""))
                         if not deep_patch_bundle_id(app_dir, old_bundle, real_changes["bundle_id"]):
                             color_print("[WARN] Не удалось выполнить глубокую замену Bundle ID", 'yellow')
@@ -971,7 +996,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 else:
                     continue
             else:
-                color_print("Изменений нет. Сборка без изменений.", 'yellow')
+                color_print("Изменений нет. Сборка без изменений.", 'yellow')
                 return plist_data, modified, original.get("CFBundleIdentifier", ""), icon_replaced, tweak_injected, False, changes, deep_bundle_mode, deep_version_mode
                 
         elif choice == "10":
@@ -982,11 +1007,11 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             else:
                 current = "@executable_path"
             
-            color_print(f"\nТекущий тип пути: {current}", 'yellow')
-            color_print("Выберите новый тип пути:", 'cyan')
+            color_print(f"\nТекущий тип пути: {current}", 'yellow')
+            color_print("Выберите новый тип пути:", 'cyan')
             print("  1) @executable_path/  - относительно папки .app")
             print("  2) @rpath/            - относительно RPATH (если задан)")
-            print("  3) @loader_path/      - относительно текущего файла")
+            print("  3) @loader_path/      - относительно текущего файла")
             
             path_choice = ask_input("Ваш выбор", "1")
             
@@ -1003,18 +1028,160 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 use_loader_path = True
                 color_print("Тип пути изменен на: @loader_path/", 'green')
             else:
-                color_print("Неверный выбор. Оставляем текущий.", 'yellow')
+                color_print("Неверный выбор. Оставляем текущий.", 'yellow')
             
         elif choice == "11":
-            if substrate_mode == 'auto':
-                substrate_mode = 'manual'
-                color_print("Режим субстрата: ВЫБРАТЬ СВОЙ (при инъекции будет запрошен файл)", 'blue')
-            elif substrate_mode == 'manual':
-                substrate_mode = 'none'
-                color_print("Режим субстрата: НЕ ВСТРАИВАТЬ", 'blue')
+            assets_dir = os.path.join(script_dir, "assets")
+            os.makedirs(assets_dir, exist_ok=True)
+            
+            has_existing_sb = os.path.exists(sb_in_app)
+            
+            available_subs = []
+            for f in sorted(os.listdir(assets_dir)):
+                if f.endswith('.dylib'):
+                    available_subs.append(f)
+            
+            color_print("\n--- УПРАВЛЕНИЕ СУБСТРАТАМИ В ASSETS ---", 'cyan')
+            if has_existing_sb:
+                try:
+                    sb_sz = format_file_size(os.path.getsize(sb_in_app))
+                except Exception:
+                    sb_sz = ""
+                color_print(f"[!] В приложении УЖЕ установлен субстрат: sb.dylib ({sb_sz})", 'yellow')
+
+            if available_subs:
+                color_print("Доступные субстраты в папке assets:", 'yellow')
+                for idx, sub_name in enumerate(available_subs, 1):
+                    full_p = os.path.join(assets_dir, sub_name)
+                    is_active = (custom_substrate_path == full_p) or (not custom_substrate_path and sub_name in ('libellekit.dylib', 'libsubstrate.dylib') and substrate_mode != 'none')
+                    marker = " [* активен]" if is_active and substrate_mode != 'none' else ""
+                    color_print(f"  {idx}) {sub_name}{marker}", 'green' if marker else 'white')
             else:
-                substrate_mode = 'auto'
-                color_print("Режим субстрата: АВТО (стандартный из папки скрипта)", 'blue')
+                color_print("В папке assets пока нет файлов субстрата (.dylib).", 'yellow')
+            
+            print("")
+            print("  i) Импортировать новый (.deb или .dylib) в assets")
+            print("  n) Отключить субстрат (режим 'БЕЗ субстрата')")
+            if has_existing_sb:
+                print("  d) Удалить установленный sb.dylib из приложения")
+            print("  0) Назад")
+            
+            sub_choice = ask_input("Ваш выбор", "1" if available_subs else "i")
+            
+            if sub_choice == "0":
+                pass
+            elif sub_choice.lower() == "d" and has_existing_sb:
+                if ask_yes_no("Подтвердить удаление sb.dylib из приложения?", default=True):
+                    try:
+                        os.remove(sb_in_app)
+                        color_print("[SUCCESS] sb.dylib удален из .app", 'green')
+                    except Exception as e:
+                        color_print(f"[ERROR] Ошибка удаления: {e}", 'red')
+            elif sub_choice.lower() == "n":
+                if has_existing_sb:
+                    if ask_yes_no("В приложении найден sb.dylib. Удалить его из .app?", default=True):
+                        try:
+                            os.remove(sb_in_app)
+                            color_print("[INFO] Субстрат sb.dylib удален из .app", 'green')
+                        except Exception as e:
+                            color_print(f"[ERROR] Не удалось удалить sb.dylib: {e}", 'red')
+                substrate_mode = 'none'
+                custom_substrate_path = None
+                color_print("[INFO] Режим: БЕЗ субстрата.", 'yellow')
+            elif sub_choice.lower() == "i":
+                if has_existing_sb:
+                    color_print("\n[WARN] В приложении уже есть sb.dylib.", 'yellow')
+                    if not ask_yes_no("Заменить текущий субстрат на импортируемый?", default=True):
+                        color_print("Импорт отменен.", 'yellow')
+                        continue
+                
+                color_print("\nВыберите файл (.deb архив или .dylib):", 'blue')
+                picked = pick_substrate_file()
+                if picked and os.path.exists(picked):
+                    if picked.endswith('.dylib'):
+                        target_file = os.path.join(assets_dir, os.path.basename(picked))
+                        shutil.copy2(picked, target_file)
+                        os.chmod(target_file, 0o755)
+                        custom_substrate_path = target_file
+                        substrate_mode = 'active'
+                        
+                        try:
+                            shutil.copy2(target_file, sb_in_app)
+                            os.chmod(sb_in_app, 0o755)
+                        except Exception:
+                            pass
+                            
+                        color_print(f"[SUCCESS] {os.path.basename(picked)} сохранен в assets и установлен в .app!", 'green')
+                    else:
+                        color_print(f"[INFO] Извлечение ядра ElleKit из {os.path.basename(picked)}...", 'cyan')
+                        sub_temp = tempfile.mkdtemp(prefix="ellekit_extract_")
+                        try:
+                            from core.tweak_injector import safe_extract_archive
+                            safe_extract_archive(picked, sub_temp)
+                            
+                            target_file = None
+                            for root, _, files in os.walk(sub_temp):
+                                for f in files:
+                                    if f == 'libellekit.dylib':
+                                        candidate = os.path.join(root, f)
+                                        if not os.path.islink(candidate):
+                                            target_file = candidate
+                                            break
+                                if target_file:
+                                    break
+                            
+                            if target_file and os.path.exists(target_file):
+                                dest = os.path.join(assets_dir, "libellekit.dylib")
+                                shutil.copy2(target_file, dest)
+                                os.chmod(dest, 0o755)
+                                custom_substrate_path = dest
+                                substrate_mode = 'active'
+                                
+                                try:
+                                    shutil.copy2(dest, sb_in_app)
+                                    os.chmod(sb_in_app, 0o755)
+                                except Exception:
+                                    pass
+                                    
+                                color_print("[SUCCESS] Движок libellekit.dylib сохранен в assets и установлен в .app!", 'green')
+                            else:
+                                color_print("[ERROR] libellekit.dylib не найден внутри архива!", 'red')
+                        except Exception as e:
+                            color_print(f"[ERROR] Ошибка извлечения: {e}", 'red')
+                        finally:
+                            shutil.rmtree(sub_temp, ignore_errors=True)
+                else:
+                    color_print("Файл не выбран.", 'yellow')
+            else:
+                if sub_choice.isdigit():
+                    num = int(sub_choice) - 1
+                    if 0 <= num < len(available_subs):
+                        chosen_name = available_subs[num]
+                        chosen_path = os.path.join(assets_dir, chosen_name)
+                        
+                        if has_existing_sb:
+                            color_print("\n[WARN] В приложении уже установлен sb.dylib.", 'yellow')
+                            if not ask_yes_no(f"Удалить текущий и заменить на {chosen_name}?", default=True):
+                                color_print("Отменено. Текущий субстрат сохранен.", 'yellow')
+                                continue
+                            try:
+                                os.remove(sb_in_app)
+                            except Exception:
+                                pass
+                        
+                        custom_substrate_path = chosen_path
+                        substrate_mode = 'active'
+                        
+                        try:
+                            shutil.copy2(custom_substrate_path, sb_in_app)
+                            os.chmod(sb_in_app, 0o755)
+                            color_print(f"[SUCCESS] Субстрат {chosen_name} скопирован в приложение как sb.dylib!", 'green')
+                        except Exception as e:
+                            color_print(f"[WARN] Не удалось скопировать в .app: {e}", 'yellow')
+                    else:
+                        color_print("Неверный номер.", 'red')
+                else:
+                    color_print("Неверный ввод.", 'red')
                 
         elif choice == "12":
             json_path = os.path.join(temp_dir, "info_plist_edit.json")
@@ -1023,25 +1190,25 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 f.write("--- Info.plist (JSON) ---\n")
                 f.write(current_json)
                 f.write("\n--- End ---\n")
-            color_print(f"\nФайл для редактирования создан: {json_path}", 'blue')
+            color_print(f"\nФайл для редактирования создан: {json_path}", 'blue')
             if PYTHONISTA:
                 try:
                     import editor
                     if hasattr(editor, 'open_file'):
                         editor.open_file(json_path)
-                        color_print("Редактор открыт. Закройте вкладку и нажмите Enter в консоли.", 'blue')
+                        color_print("Редактор открыт. Закройте вкладку и нажмите Enter в консоли.", 'blue')
                     else:
-                        color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
-                except:
-                    color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
+                        color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
+                except Exception:
+                    color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
             else:
-                color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
+                color_print("Откройте этот файл в любом текстовом редакторе, отредактируйте и сохраните.", 'yellow')
             input("Нажмите Enter после завершения редактирования...")
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 if not content or not content.strip():
-                    color_print("Файл пуст. Изменений не внесено.", 'yellow')
+                    color_print("Файл пуст. Изменений не внесено.", 'yellow')
                     continue
                 lines = content.splitlines()
                 json_lines = []
@@ -1050,7 +1217,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         json_lines.append(line)
                 new_json = '\n'.join(json_lines)
                 if not new_json or not new_json.strip():
-                    color_print("Файл не содержит JSON данных. Изменений не внесено.", 'yellow')
+                    color_print("Файл не содержит JSON данных. Изменений не внесено.", 'yellow')
                     continue
                 if new_json.strip() != current_json.strip():
                     new_data = json.loads(new_json)
@@ -1077,7 +1244,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                             changes["bundle_deep"] = deep_bundle_mode
                             color_print(f"\nОбнаружено изменение Bundle ID: {old_bundle_id} -> {new_bundle_id}", 'cyan')
                             print("1. Только Info.plist (безопасно)")
-                            print("2. Глубокая замена (во всех файлах)")
+                            print("2. Глубокая замена (во всех файлах)")
                             mode = ask_input("Ваш выбор", "1")
                             if mode == "2":
                                 deep_bundle_mode = True
@@ -1095,7 +1262,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                             changes["version_deep"] = deep_version_mode
                             color_print(f"\nОбнаружено изменение версии: {old_version} -> {new_version}", 'cyan')
                             print("1. Только Info.plist (безопасно)")
-                            print("2. Глубокая замена (во всех файлах)")
+                            print("2. Глубокая замена (во всех файлах)")
                             mode = ask_input("Ваш выбор", "1")
                             if mode == "2":
                                 deep_version_mode = True
@@ -1122,7 +1289,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     else:
                         color_print("Ошибка: JSON должен быть объектом (словарем).", 'red')
                 else:
-                    color_print("Изменений в JSON не обнаружено.", 'yellow')
+                    color_print("Изменений в JSON не обнаружено.", 'yellow')
             except json.JSONDecodeError as e:
                 color_print(f"Ошибка парсинга JSON: {e}", 'red')
             except Exception as e:
@@ -1131,22 +1298,22 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 if os.path.exists(json_path):
                     try:
                         os.remove(json_path)
-                        color_print("[INFO] Временный JSON-файл удален.", 'green')
-                    except:
+                        color_print("[INFO] Временный JSON-файл удален.", 'green')
+                    except Exception:
                         pass
                 
         elif choice == "13":
             bundle_id = plist_data.get("CFBundleIdentifier")
             if not bundle_id:
-                color_print("Bundle ID не найден в Info.plist!", 'red')
+                color_print("Bundle ID не найден в Info.plist!", 'red')
                 continue
-            color_print("\nНастройка entitlements.plist...", 'blue')
+            color_print("\nНастройка entitlements.plist...", 'blue')
             if generate_custom_entitlements(app_dir, bundle_id):
                 color_print("Entitlements настроены успешно!", 'green')
                 changes["entitlements"] = True
                 modified = True
             else:
-                color_print("Ошибка настройки entitlements", 'red')
+                color_print("Ошибка настройки entitlements", 'red')
                 
         elif choice == "14":
             color_print("\n--- РАСШИРЕННЫЕ ПАТЧИ ---", 'cyan')
@@ -1156,11 +1323,11 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             color_print("\nДоступные патчи:", 'yellow')
             names = {
                 "lower_ios": "Понижение iOS",
-                "remove_supported_devices": "Удаление ограничений по моделям",
+                "remove_supported_devices": "Удаление ограничений по моделям",
                 "remove_plugins": "Удаление плагинов",
                 "remove_watch": "Удаление Apple Watch",
                 "remove_url_schemes": "Удаление URL-схем",
-                "fix_white_icon": "Фикс белой иконки"
+                "fix_white_icon": "Фикс белой иконки"
             }
             for key, value in available.items():
                 status = "Доступно" if value else "Нет данных"
@@ -1180,7 +1347,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 "remove_plugins": available["remove_plugins"] and ask_yes_no("Удалить все плагины приложения (для бесплатных аккаунтов)?", default=False),
                 "remove_watch": available["remove_watch"] and ask_yes_no("Удалить плагины для Apple Watch?", default=False),
                 "remove_url_schemes": available["remove_url_schemes"] and ask_yes_no("Удалить кастомные URL-схемы (полезно для клонов)?", default=False),
-                "fix_white_icon": available["fix_white_icon"] and ask_yes_no("Применить фикс белой иконки?", default=False)
+                "fix_white_icon": available["fix_white_icon"] and ask_yes_no("Применить фикс белой иконки?", default=False)
             }
             
             if apply_advanced_patches(app_dir, plist_data, adv_options):
@@ -1190,7 +1357,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     changes["min_os"] = adv_options["lower_ios"]
                 color_print("[SUCCESS] Расширенные патчи успешно применены!", 'green')
             else:
-                color_print("Никаких изменений не внесено.", 'yellow')
+                color_print("Никаких изменений не внесено.", 'yellow')
                 
         elif choice == "15":
             if 'app_dir' in locals() and app_dir and os.path.exists(app_dir):
@@ -1199,29 +1366,29 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     modified = True
                     color_print("[INFO] Hex-патчер: изменения применены", 'green')
                 else:
-                    color_print("[INFO] Hex-патчер: изменений не было", 'yellow')
+                    color_print("[INFO] Hex-патчер: изменений не было", 'yellow')
             else:
-                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA/TIPA.", 'red')
+                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA/TIPA.", 'red')
                 
         elif choice == "16":
             color_print("\n--- ПРОРЕЖИВАНИЕ БИНАРНИКА ---", 'cyan')
             print("=" * 50)
             color_print("Эта операция удаляет 32-битные архитектуры (ARMv7/v7s)", 'yellow')
             color_print("из FAT бинарника, оставляя только ARM64/ARM64e.", 'yellow')
-            color_print("Это освобождает место в заголовке для инъекций твиков.", 'yellow')
+            color_print("Это освобождает место в заголовке для инъекций твиков.", 'yellow')
             print("")
             
             if not app_dir or not os.path.exists(app_dir):
-                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA/TIPA.", 'red')
+                color_print("[ERROR] Папка .app не найдена. Сначала распакуйте IPA/TIPA.", 'red')
                 continue
             
             main_executable = get_main_executable(app_dir, plist_data)
             if not main_executable:
-                color_print("[ERROR] Не удалось найти основной бинарник!", 'red')
+                color_print("[ERROR] Не удалось найти основной бинарник!", 'red')
                 continue
             
             if not is_macho_binary(main_executable):
-                color_print("[ERROR] Файл не является Mach-O бинарником!", 'red')
+                color_print("[ERROR] Файл не является Mach-O бинарником!", 'red')
                 continue
             
             if not is_fat_binary(main_executable):
@@ -1247,15 +1414,15 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         break
                 
                 if not has_32bit:
-                    color_print("[INFO] 32-битные архитектуры не найдены. Прореживание не требуется.", 'green')
+                    color_print("[INFO] 32-битные архитектуры не найдены. Прореживание не требуется.", 'green')
                     if ask_yes_no("Показать информацию о архитектурах?", default=False):
                         try:
                             summary = get_macho_summary(main_executable)
                             color_print(f"\n[INFO] Информация о бинарнике:", 'blue')
-                            color_print(f"  Тип: {'FAT' if summary.get('is_fat') else 'Тонкий'}", 'white')
+                            color_print(f"  Тип: {'FAT' if summary.get('is_fat') else 'Тонкий'}", 'white')
                             color_print(f"  Архитектуры: {', '.join(summary.get('archs', []))}", 'white')
                             color_print(f"  Размер: {format_file_size(summary.get('size', 0))}", 'white')
-                        except:
+                        except Exception:
                             pass
                     continue
                     
@@ -1265,8 +1432,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             
             color_print("\n[WARN] ВНИМАНИЕ:", 'red')
             color_print("  - Удаление 32-битных архитектур может сделать приложение", 'yellow')
-            color_print("    несовместимым со старыми 32-битными устройствами.", 'yellow')
-            color_print("  - Операция необратима без резервной копии.", 'yellow')
+            color_print("    несовместимым со старыми 32-битными устройствами.", 'yellow')
+            color_print("  - Операция необратима без резервной копии.", 'yellow')
             print("")
             
             if not ask_yes_no("Выполнить прореживание бинарника?", default=False):
@@ -1297,15 +1464,15 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         saved_mb = (old_size - new_size) / (1024 * 1024)
                         if saved_mb > 0:
                             color_print(f"[INFO] Освобождено: {saved_mb:.2f} MB", 'green')
-                except:
+                except Exception:
                     pass
                 
                 if os.path.exists(backup_path):
-                    if ask_yes_no("Удалить бэкап? (рекомендуется оставить на случай проблем)", default=False):
+                    if ask_yes_no("Удалить бэкап? (рекомендуется оставить на случай проблем)", default=False):
                         try:
                             os.remove(backup_path)
                             color_print("[INFO] Бэкап удален.", 'green')
-                        except:
+                        except Exception:
                             pass
                     else:
                         color_print(f"[INFO] Бэкап сохранен: {backup_path}", 'green')
@@ -1325,13 +1492,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                             color_print(f"[ERROR] Не удалось восстановить бэкап: {e}", 'red')
                 
         elif choice == "17":
-            color_print("\n--- ВОССТАНОВЛЕНИЕ ИЗ РЕЗЕРВНЫХ КОПИЙ ---", 'cyan')
+            color_print("\n--- ВОССТАНОВЛЕНИЕ ИЗ РЕЗЕРВНЫХ КОПИЙ ---", 'cyan')
             print("=" * 50)
             
             restored_any = False
             
             if has_info_plist_backup(app_dir):
-                if ask_yes_no("Восстановить Info.plist из резервной копии?", default=False):
+                if ask_yes_no("Восстановить Info.plist из резервной копии?", default=False):
                     if restore_info_plist(app_dir):
                         plist_data = load_plist(info_plist_path)
                         original = plist_data.copy()
@@ -1352,9 +1519,9 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     else:
                         color_print("[ERROR] Не удалось восстановить Info.plist", 'red')
             else:
-                color_print("[INFO] Резервная копия Info.plist не найдена", 'yellow')
+                color_print("[INFO] Резервная копия Info.plist не найдена", 'yellow')
             
-            color_print("\nПоиск резервных копий бинарников...", 'blue')
+            color_print("\nПоиск резервных копий бинарников...", 'blue')
             
             binary_backups = []
             if os.path.exists(BACKUP_DIR):
@@ -1364,17 +1531,17 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         binary_backups.append(full_path)
             
             if binary_backups:
-                color_print(f"\nНайдено резервных копий: {len(binary_backups)}", 'cyan')
+                color_print(f"\nНайдено резервных копий: {len(binary_backups)}", 'cyan')
                 for i, backup in enumerate(binary_backups, 1):
                     try:
                         size = os.path.getsize(backup)
                         size_str = format_file_size(size)
                         color_print(f"  {i}. {os.path.basename(backup)} ({size_str})", 'white')
-                    except:
+                    except Exception:
                         color_print(f"  {i}. {os.path.basename(backup)}", 'white')
                 
                 print("")
-                if ask_yes_no("Восстановить все найденные резервные копии бинарников?", default=False):
+                if ask_yes_no("Восстановить все найденные резервные копии бинарников?", default=False):
                     restored_count = 0
                     for backup in binary_backups:
                         backup_name = os.path.basename(backup)
@@ -1395,7 +1562,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                             except Exception as e:
                                 color_print(f"[ERROR] Не удалось восстановить {original_name}: {e}", 'red')
                         else:
-                            color_print(f"[WARN] Оригинальный файл не найден: {original_name}", 'yellow')
+                            color_print(f"[WARN] Оригинальный файл не найден: {original_name}", 'yellow')
                     
                     if restored_count > 0:
                         color_print(f"\n[SUCCESS] Восстановлено бинарников: {restored_count}", 'green')
@@ -1433,20 +1600,20 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                                         except Exception as e:
                                             color_print(f"[ERROR] Не удалось восстановить: {e}", 'red')
                                 else:
-                                    color_print(f"[ERROR] Оригинальный файл не найден: {original_name}", 'red')
+                                    color_print(f"[ERROR] Оригинальный файл не найден: {original_name}", 'red')
                             elif choice_num != 0:
-                                color_print("Неверный номер", 'red')
+                                color_print("Неверный номер", 'red')
                         except ValueError:
-                            color_print("Неверный ввод", 'red')
+                            color_print("Неверный ввод", 'red')
             else:
-                color_print("[INFO] Резервных копий бинарников не найдено", 'yellow')
+                color_print("[INFO] Резервных копий бинарников не найдено", 'yellow')
             
             if not restored_any:
                 color_print("[INFO] Ничего не было восстановлено", 'yellow')
                 
         elif choice == "0":
             if modified:
-                color_print("\n--- СВОДКА ИЗМЕНЕНИЙ ---", 'cyan')
+                color_print("\n--- СВОДКА ИЗМЕНЕНИЙ ---", 'cyan')
                 color_print("=" * 50, 'cyan')
                 if "name" in changes:
                     color_print(f"  Имя: {original.get('CFBundleName')} -> {changes['name']}", 'green')
@@ -1459,11 +1626,11 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     old_bundle = changes.get('bundle_old', original.get('CFBundleIdentifier', ''))
                     color_print(f"  Bundle ID: {old_bundle} -> {changes['bundle_id']}", 'green')
                 if "file_support" in changes:
-                    color_print(f"  Файловый шеринг: {'ВКЛЮЧЕН'}", 'green')
+                    color_print(f"  Файловый шеринг: {'ВКЛЮЧЕН'}", 'green')
                 if "icon" in changes:
                     color_print("  Иконка: ЗАМЕНЕНА", 'green')
                 if "tweak" in changes:
-                    color_print("  Твики: ИНЪЕКТИРОВАНЫ", 'green')
+                    color_print(f"  Твики: ИНЪЕКТИРОВАНЫ (субстрат: {mode_display})", 'green')
                 if "custom_edit" in changes:
                     color_print("  Расширенное редактирование Info.plist: ДА", 'green')
                 if "entitlements" in changes:
@@ -1473,18 +1640,18 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 if hex_patcher_used:
                     color_print("  Hex патчер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
                 if "file_manager_changes" in changes:
-                    color_print("  Файловый менеджер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
+                    color_print("  Файловый менеджер: ИЗМЕНЕНИЯ ВНЕСЕНЫ", 'green')
                 if "thinned" in changes:
                     color_print("  Прореживание бинарника: ВЫПОЛНЕНО", 'green')
                 if "restored_backups" in changes:
                     color_print("  Резервные копии: ВОССТАНОВЛЕНЫ", 'green')
                 color_print("=" * 50, 'cyan')
-                if not ask_yes_no("Выйти без сохранения?", default=False):
+                if not ask_yes_no("Выйти без сохранения?", default=False):
                     continue
             color_print("Выход без сохранения.", 'yellow')
             sys.exit(0)
         else:
-            color_print("Неверный ввод.", 'red')
+            color_print("Неверный ввод.", 'red')
 
 
 def clean_non_standard_dirs(app_dir):
@@ -1498,7 +1665,7 @@ def clean_non_standard_dirs(app_dir):
     if os.path.exists(signed_by_esign):
         try:
             os.remove(signed_by_esign)
-            color_print(f"Удален артефакт чужой подписи: SignedByEsign", 'green')
+            color_print(f"Удален артефакт чужой подписи: SignedByEsign", 'green')
         except Exception as e:
             log_message(f"Ошибка удаления SignedByEsign: {e}", 'WARN')
 
@@ -1519,7 +1686,7 @@ def update_ext_bundle_id(plist_path, old_parent, new_parent):
 
 
 def main():
-    global substrate_mode, use_rpath, use_loader_path
+    global substrate_mode, custom_substrate_path, use_rpath, use_loader_path
     ensure_directories()
     if PYTHONISTA:
         console.clear()
@@ -1531,12 +1698,12 @@ def main():
     
     ipa_path = pick_ipa_file()
     if ipa_path is None or not os.path.isfile(ipa_path):
-        color_print("Файл не найден или выбор отменён", 'red')
+        color_print("Файл не найден или выбор отменён", 'red')
         sys.exit(1)
     
     is_tipa = is_tipa_file(ipa_path)
     if is_tipa:
-        color_print("[INFO] Обнаружен .tipa (TrollStore) файл", 'cyan')
+        color_print("[INFO] Обнаружен .tipa (TrollStore) файл", 'cyan')
     
     temp_dir = make_temp_ipa_dir()
     log.info("Временная папка: %s", temp_dir)
@@ -1557,13 +1724,13 @@ def main():
         payload_path = os.path.join(temp_dir, "Payload")
         app_dir = find_app_dir(payload_path)
         if not app_dir:
-            color_print("Не найдена .app директория", 'red')
+            color_print("Не найдена .app директория", 'red')
             sys.exit(1)
         
-        color_print(f"Найдено приложение: {os.path.basename(app_dir)}", 'green')
+        color_print(f"Найдено приложение: {os.path.basename(app_dir)}", 'green')
         info_plist_path = os.path.join(app_dir, "Info.plist")
         if not os.path.isfile(info_plist_path):
-            color_print("Info.plist не найден", 'red')
+            color_print("Info.plist не найден", 'red')
             sys.exit(1)
         
         plist = load_plist(info_plist_path)
@@ -1571,11 +1738,11 @@ def main():
         if is_tipa:
             prepare_tipa_info_plist(plist, app_dir)
             merge_tipa_entitlements(app_dir, None, None, silent=True)
-            color_print("[INFO] Добавлены настройки для TrollStore", 'green')
+            color_print("[INFO] Добавлены настройки для TrollStore", 'green')
         
         old_bundle_id = plist.get("CFBundleIdentifier", "")
         if old_bundle_id:
-            log.info("Текущий Bundle ID: %s", old_bundle_id)
+            log.info("Текущий Bundle ID: %s", old_bundle_id)
         old_version = plist.get("CFBundleShortVersionString", "1.0")
         if old_version:
             log.info("Текущая версия: %s", old_version)
@@ -1649,7 +1816,7 @@ def main():
                     os.chmod(docs_dir, 0o755)
             except Exception as e:
                 log_message(f"Не удалось создать папку Documents: {e}", 'WARN')
-            color_print("Создана папка Documents для файлового шеринга", 'green')
+            color_print("Создана папка Documents для файлового шеринга", 'green')
         
         app_basename = os.path.splitext(os.path.basename(ipa_path))[0]
         
@@ -1680,9 +1847,9 @@ def main():
             pack_tipa_with_progress(temp_dir, output_path)
         else:
             color_print("\n--- Выбор уровня сжатия ---", 'cyan')
-            print("  1) Без сжатия (быстро, большой размер)")
+            print("  1) Без сжатия (быстро, большой размер)")
             print("  2) Стандартное сжатие (рекомендуется)")
-            print("  3) Максимальное сжатие (медленно, маленький размер)")
+            print("  3) Максимальное сжатие (медленно, маленький размер)")
             
             compress_choice = ask_input("Ваш выбор", "2")
             
@@ -1727,20 +1894,20 @@ def main():
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 color_print(f"[INFO] Временная папка удалена: {temp_dir}", 'green')
-            except:
+            except Exception:
                 pass
         
         if os.path.exists(UNDO_LOG_FILE):
             try:
                 os.remove(UNDO_LOG_FILE)
-                color_print("[INFO] Временный undo_log.json удален для очистки места", 'green')
-            except:
+                color_print("[INFO] Временный undo_log.json удален для очистки места", 'green')
+            except Exception:
                 pass
         
         cleanup_info_plist_backup(app_dir)
     
     color_print("\nГотово!", 'green')
-    color_print(f"Файл: {os.path.basename(output_path)}", 'blue')
+    color_print(f"Файл: {os.path.basename(output_path)}", 'blue')
     color_print(f"Папка: {PATCHED_DIR}", 'blue')
 
 
