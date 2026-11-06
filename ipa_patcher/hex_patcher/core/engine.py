@@ -26,7 +26,7 @@ class PatchEngine:
             app_dir = self.app_dir
         if not app_dir:
             return ""
-        
+
         info_path = os.path.join(app_dir, "Info.plist")
         if os.path.isfile(info_path):
             try:
@@ -40,20 +40,20 @@ class PatchEngine:
                             return binary_path
             except Exception:
                 pass
-        
+
         for f in os.listdir(app_dir):
             file_path = os.path.join(app_dir, f)
             if os.path.isfile(file_path):
                 try:
                     with open(file_path, 'rb') as fp:
                         magic = fp.read(4)
-                        if magic in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', 
+                        if magic in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf',
                                      b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'):
                             if not f.endswith('.dylib') and '.framework' not in f:
                                 return file_path
                 except:
                     continue
-        
+
         for f in os.listdir(app_dir):
             file_path = os.path.join(app_dir, f)
             if os.path.isfile(file_path):
@@ -65,14 +65,13 @@ class PatchEngine:
                                 return file_path
                 except:
                     continue
-        
+
         return ""
 
     def preview_context(self, file_path: str, offset: int, match_len: int, context: int = 16) -> str:
         with open(file_path, 'rb') as f:
-            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            data = mm[:]
-            mm.close()
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                data = mm[:]
         return HexUtils.preview_context(data, offset, match_len, context)
 
     def _find_matches(self, file_path: str, search_bytes: bytes, use_mask: bool = False,
@@ -88,7 +87,25 @@ class PatchEngine:
         if dry_run:
             changes = []
             with open(file_path, 'rb') as f:
-                mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                    for off in offsets:
+                        old_bytes = mm[off:off + len(search_bytes)]
+                        if use_mask and not HexUtils.match_mask(old_bytes, values, masks):
+                            continue
+                        if old_bytes == replace_bytes:
+                            continue
+                        changes.append({
+                            "offset": off,
+                            "old": HexUtils.bytes_to_hex(old_bytes).replace(" ", ""),
+                            "new": HexUtils.bytes_to_hex(replace_bytes).replace(" ", "")
+                        })
+            return changes
+
+        backup = self.backup_mgr.create(file_path)
+        changes = []
+
+        with open(file_path, 'r+b') as f:
+            with mmap.mmap(f.fileno(), 0) as mm:
                 for off in offsets:
                     old_bytes = mm[off:off + len(search_bytes)]
                     if use_mask and not HexUtils.match_mask(old_bytes, values, masks):
@@ -100,28 +117,8 @@ class PatchEngine:
                         "old": HexUtils.bytes_to_hex(old_bytes).replace(" ", ""),
                         "new": HexUtils.bytes_to_hex(replace_bytes).replace(" ", "")
                     })
-                mm.close()
-            return changes
-
-        backup = self.backup_mgr.create(file_path)
-        changes = []
-
-        with open(file_path, 'r+b') as f:
-            mm = mmap.mmap(f.fileno(), 0)
-            for off in offsets:
-                old_bytes = mm[off:off + len(search_bytes)]
-                if use_mask and not HexUtils.match_mask(old_bytes, values, masks):
-                    continue
-                if old_bytes == replace_bytes:
-                    continue
-                changes.append({
-                    "offset": off,
-                    "old": HexUtils.bytes_to_hex(old_bytes).replace(" ", ""),
-                    "new": HexUtils.bytes_to_hex(replace_bytes).replace(" ", "")
-                })
-                mm[off:off + len(replace_bytes)] = replace_bytes
-            mm.flush()
-            mm.close()
+                    mm[off:off + len(replace_bytes)] = replace_bytes
+                mm.flush()
 
         self.last_changes = changes
         return changes
@@ -136,9 +133,9 @@ class PatchEngine:
             else:
                 search_bytes = HexUtils.hex_to_bytes(search_hex)
                 values, masks = list(search_bytes), [0xFF] * len(search_bytes)
-            
+
             replace_bytes = HexUtils.hex_to_bytes(replace_hex)
-            
+
             if len(search_bytes) != len(replace_bytes):
                 raise ValidationError("Length mismatch")
             if not use_mask and search_bytes == replace_bytes:
@@ -147,7 +144,7 @@ class PatchEngine:
             raise PatchError(str(e))
 
         matches = self._find_matches(file_path, search_bytes, use_mask, values, masks)
-        
+
         if not matches:
             raise SearchError("No matches found")
 
@@ -176,18 +173,18 @@ class PatchEngine:
         try:
             search_bytes = search_str.encode(encoding)
             replace_bytes = replace_str.encode(encoding)
-            
+
             if len(replace_bytes) > len(search_bytes):
                 raise ValidationError("Replace longer than search")
             if search_bytes == replace_bytes:
                 raise ValidationError("No changes (same string)")
-            
+
             replace_bytes += b'\x00' * (len(search_bytes) - len(replace_bytes))
         except Exception as e:
             raise PatchError(str(e))
 
         matches = self._find_matches(file_path, search_bytes)
-        
+
         if not matches:
             raise SearchError("No matches found")
 
@@ -218,12 +215,10 @@ class PatchEngine:
             raise PatchError(str(e))
 
         with open(file_path, 'rb') as f:
-            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            if offset + len(replace_bytes) > mm.size():
-                mm.close()
-                raise PatchError("Offset out of bounds")
-            old_bytes = mm[offset:offset + len(replace_bytes)]
-            mm.close()
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                if offset + len(replace_bytes) > mm.size():
+                    raise PatchError("Offset out of bounds")
+                old_bytes = mm[offset:offset + len(replace_bytes)]
 
         if old_bytes == replace_bytes:
             raise PatchError("No changes (same bytes)")
@@ -236,12 +231,11 @@ class PatchEngine:
             }]
 
         backup = self.backup_mgr.create(file_path)
-        
+
         with open(file_path, 'r+b') as f:
-            mm = mmap.mmap(f.fileno(), 0)
-            mm[offset:offset + len(replace_bytes)] = replace_bytes
-            mm.flush()
-            mm.close()
+            with mmap.mmap(f.fileno(), 0) as mm:
+                mm[offset:offset + len(replace_bytes)] = replace_bytes
+                mm.flush()
 
         return [{
             "offset": offset,
@@ -258,10 +252,10 @@ class PatchEngine:
 
     def apply_json_patches(self, patch_path: str, dry_run: bool = False, stop_on_error: bool = False) -> bool:
         from ..json_patcher import JsonPatcher
-        
+
         data = JsonPatcher.load(patch_path)
         patches = data.get("patches", [])
-        
+
         all_changes = []
         file_cache = {}
 
@@ -272,7 +266,7 @@ class PatchEngine:
             JsonPatcher.validate(patch)
 
             file_target = patch.get("file", "Executable")
-            
+
             if file_target not in file_cache:
                 if file_target == "Executable":
                     target_file = self.get_main_binary_path()
@@ -299,15 +293,15 @@ class PatchEngine:
                                     if found:
                                         break
                                 if not found:
-                                    color_print(f"[WARN] Файл не найден: {file_target}", 'yellow')
+                                    color_print(f"[WARN] Файл не найден: {file_target}", 'yellow')
                                     continue
-                
+
                 if not target_file or not os.path.isfile(target_file):
-                    color_print(f"[WARN] Файл не найден: {file_target}", 'yellow')
+                    color_print(f"[WARN] Файл не найден: {file_target}", 'yellow')
                     continue
-            
+
             file_cache[file_target] = target_file
-            color_print(f"[INFO] Применяем патч к файлу: {os.path.basename(target_file)}", 'blue')
+            color_print(f"[INFO] Применяем патч к файлу: {os.path.basename(target_file)}", 'blue')
 
             target_file = file_cache[file_target]
             ptype = patch.get("type", "hex")
@@ -333,14 +327,14 @@ class PatchEngine:
                     arch_name = patch.get("arch", "arm64")
                     arch_offset = 0
                     macho_info = MachOAnalyzer.check_info(target_file)
-                    
+
                     if macho_info and macho_info.type == "Fat Binary":
                         arch_offset = MachOAnalyzer.get_arch_offset(target_file, arch_name)
                         if arch_offset is None:
                             raise MachOError(f"Architecture {arch_name} not found")
                     elif macho_info and macho_info.offsets:
                         arch_offset = macho_info.offsets[0]
-                    
+
                     changes = self.apply_va(
                         target_file, int(patch["address"], 16), patch["bytes"],
                         arch_offset, dry_run
@@ -350,7 +344,7 @@ class PatchEngine:
 
                 if not dry_run and changes:
                     all_changes.append({"file": target_file, "changes": changes})
-                    color_print(f"[SUCCESS] Патч применён к {os.path.basename(target_file)}", 'green')
+                    color_print(f"[SUCCESS] Патч применён к {os.path.basename(target_file)}", 'green')
 
             except PatchError as e:
                 if stop_on_error:
