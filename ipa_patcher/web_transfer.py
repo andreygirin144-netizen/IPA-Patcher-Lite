@@ -61,6 +61,7 @@ class SecurityManager:
         self.banned_ips = {}
         self.active_connections = 0
         self.connection_lock = threading.Lock()
+        self.rate_lock = threading.Lock()
         self._load_blacklist()
 
     def _load_blacklist(self):
@@ -80,10 +81,11 @@ class SecurityManager:
 
     def check_rate_limit(self, ip):
         now = time.time()
-        self.rate_limiter[ip] = [t for t in self.rate_limiter[ip] if now - t < 60]
-        if len(self.rate_limiter[ip]) >= CONFIG['RATE_LIMIT']:
-            return False
-        self.rate_limiter[ip].append(now)
+        with self.rate_lock:
+            self.rate_limiter[ip] = [t for t in self.rate_limiter[ip] if now - t < 60]
+            if len(self.rate_limiter[ip]) >= CONFIG['RATE_LIMIT']:
+                return False
+            self.rate_limiter[ip].append(now)
         return True
 
     def check_ban(self, ip):
@@ -96,11 +98,12 @@ class SecurityManager:
         return False
 
     def record_failed_attempt(self, ip):
-        self.failed_attempts[ip] += 1
-        if self.failed_attempts[ip] >= CONFIG['BAN_THRESHOLD']:
-            self.banned_ips[ip] = time.time()
-            self._save_blacklist()
-            audit_log(f"IP {ip} забанен за брутфорс ПИН-кода", 'WARN')
+        with self.rate_lock:
+            self.failed_attempts[ip] += 1
+            if self.failed_attempts[ip] >= CONFIG['BAN_THRESHOLD']:
+                self.banned_ips[ip] = time.time()
+                self._save_blacklist()
+                audit_log(f"IP {ip} забанен за брутфорс ПИН-кода", 'WARN')
 
     def validate_token(self, token):
         if not token:
@@ -253,7 +256,9 @@ def is_allowed_extension(filename):
 
 def is_safe_path(path):
     try:
-        return os.path.realpath(path).startswith(os.path.realpath(FILES_DIR))
+        real_base = os.path.realpath(FILES_DIR)
+        real_path = os.path.realpath(path)
+        return real_path == real_base or real_path.startswith(real_base + os.sep)
     except:
         return False
 
@@ -743,7 +748,7 @@ def stop_server():
     STOP_SERVER = True
     log_message("Сервер остановлен по команде с веб-страницы", 'INFO')
     audit_log("Сервер остановлен по команде с веб-страницы", 'INFO')
-    
+
     def shutdown_server():
         time.sleep(0.1)
         if SERVER_INSTANCE:
@@ -752,7 +757,7 @@ def stop_server():
                 SERVER_INSTANCE.server_close()
             except:
                 pass
-    
+
     threading.Thread(target=shutdown_server, daemon=True).start()
 
 
@@ -760,7 +765,7 @@ def print_header():
     clear_screen()
     width = 45
     title = f"IPA PATCHER LITE TRANSFER v{VERSION}"
-    
+
     color_print("=" * width, 'cyan')
     color_print(title.center(width), 'cyan')
     color_print("=" * width, 'cyan')
@@ -877,7 +882,7 @@ def clear_log():
     clear_screen()
     color_print("  ОЧИСТКА ЛОГОВ", 'cyan')
     print()
-    
+
     choice = input("  Очистить логи системы и загрузок? (y/n): ").strip().lower()
     if choice == 'y':
         try:
@@ -889,7 +894,7 @@ def clear_log():
                 color_print("  Папка с логами не найдена.", 'yellow')
         except Exception as e:
             color_print(f"  Ошибка очистки логов: {e}", 'red')
-    
+
     input("\n  Нажмите Enter для продолжения...")
 
 
@@ -900,7 +905,7 @@ def clear_files():
     print()
     color_print(f"  Внимание! Все файлы в {shorten_path(FILES_DIR)} будут безвозвратно удалены.", 'orange')
     print()
-    
+
     choice = input("  Удалить все загруженные файлы? (y/n): ").strip().lower()
     if choice == 'y':
         try:
@@ -913,7 +918,7 @@ def clear_files():
                 color_print("  Папка с файлами не найдена.", 'yellow')
         except Exception as e:
             color_print(f"  Ошибка при очистке папки: {e}", 'red')
-            
+
     input("\n  Нажмите Enter для продолжения...")
 
 
@@ -1104,7 +1109,7 @@ def open_files_folder():
     try:
         files = []
         if os.path.exists(FILES_DIR):
-            files = [f for f in os.listdir(FILES_DIR) 
+            files = [f for f in os.listdir(FILES_DIR)
                      if os.path.isfile(os.path.join(FILES_DIR, f)) and not f.startswith('.')]
 
         if not files:
