@@ -9,7 +9,7 @@
 [![a-Shell mini](https://img.shields.io/badge/a--Shell-mini-FF8C00?style=flat-square)](https://apps.apple.com/app/a-shell-mini/id1543537943)
 [![Platform](https://img.shields.io/badge/Platform-iOS%2FiPadOS%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square)]()
 [![No Dependencies](https://img.shields.io/badge/Зависимости-0%20(Zero--pip)-22C55E?style=flat-square)]()
-[![Version](https://img.shields.io/badge/Версия-1.1.5-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Версия-1.1.6-blue?style=flat-square)]()
 [![License GPLv3](https://img.shields.io/badge/License-GPLv3-red?style=flat-square)](LICENSE)
 
 **Распаковка → редактирование → умный менеджер ElleKit → инъекция твиков (`.deb` / `.zst` / `.dylib`) → расширенные патчи → Hex-патчер → редактор баз данных SQLite → пересборка `.ipa` / `.tipa`**
