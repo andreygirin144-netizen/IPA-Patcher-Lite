@@ -1,14 +1,22 @@
 # -*- coding: utf-8 -*-
 import os
 import sqlite3
+import textwrap
 
 from utils import color_print, ask_input, ask_yes_no, log_message
 from .backups import backup_file, find_backups, restore_backup
 from .utils import format_file_size
 
 
-def _get_tables(cursor):
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+def _get_tables(cursor, show_all_system=False):
+    if show_all_system:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
+    else:
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type IN ('table', 'view') 
+              AND (name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence');
+        """)
     return [row[0] for row in cursor.fetchall()]
 
 
@@ -17,7 +25,7 @@ def _get_columns(cursor, table_name):
     return [row[1] for row in cursor.fetchall()]
 
 
-def _render_vertical_table(columns, rows, max_val_width=22):
+def _render_vertical_table(columns, rows, val_col_width=20):
     if not rows:
         return "  (Таблица пуста)"
 
@@ -25,39 +33,27 @@ def _render_vertical_table(columns, rows, max_val_width=22):
     header_val = "ЗНАЧЕНИЕ"
 
     w1 = max(len(str(c)) for c in columns + [header_col])
+    w2 = val_col_width
     tables_output = []
 
     for r in rows:
         display_num = r[0]
         data = r[1:]
 
-        clean_vals = []
-        for val in data:
-            if val is None:
-                s = "NULL"
-            else:
-                s = str(val).replace('\n', ' ').replace('\r', '').strip()
-            if len(s) > max_val_width:
-                s = s[:max_val_width - 3] + "..."
-            clean_vals.append(s)
-
-        w2 = max(len(str(v)) for v in clean_vals + [header_val])
-        w2 = max(w2, 10)
-
         title = f"ЗАПИСЬ #{display_num}"
-
-        if len(title) > (w1 + w2 + 3):
-            w2 = len(title) - w1 - 3
+        current_w2 = w2
+        if len(title) > (w1 + current_w2 + 3):
+            current_w2 = len(title) - w1 - 3
 
         box1 = w1 + 2
-        box2 = w2 + 2
+        box2 = current_w2 + 2
         total_inner = box1 + box2 + 1
 
-        top_border    = "┌" + "─" * total_inner + "┐"
-        title_line    = "│ " + f"{title:^{total_inner - 2}}" + " │"
-        header_sep    = "├" + "─" * box1 + "┬" + "─" * box2 + "┤"
-        headers_line  = f"│ {header_col:<{w1}} │ {header_val:<{w2}} │"
-        row_sep       = "├" + "─" * box1 + "┼" + "─" * box2 + "┤"
+        top_border = "┌" + "─" * total_inner + "┐"
+        title_line = "│ " + f"{title:^{total_inner - 2}}" + " │"
+        header_sep = "├" + "─" * box1 + "┬" + "─" * box2 + "┤"
+        headers_line = f"│ {header_col:<{w1}} │ {header_val:<{current_w2}} │"
+        row_sep = "├" + "─" * box1 + "┼" + "─" * box2 + "┤"
         bottom_border = "└" + "─" * box1 + "┴" + "─" * box2 + "┘"
 
         table_lines = [
@@ -67,9 +63,31 @@ def _render_vertical_table(columns, rows, max_val_width=22):
             headers_line
         ]
 
-        for col_name, val_str in zip(columns, clean_vals):
+        for col_name, val in zip(columns, data):
             table_lines.append(row_sep)
-            table_lines.append(f"│ {col_name:<{w1}} │ {val_str:<{w2}} │")
+            
+            if val is None:
+                val_lines = ["NULL"]
+            else:
+                val_str = str(val).strip()
+                val_lines = []
+                for paragraph in val_str.splitlines():
+                    wrapped = textwrap.wrap(
+                        paragraph, 
+                        width=current_w2, 
+                        break_long_words=True, 
+                        break_on_hyphens=False
+                    )
+                    if not wrapped:
+                        val_lines.append("")
+                    else:
+                        val_lines.extend(wrapped)
+                if not val_lines:
+                    val_lines = [""]
+
+            for line_idx, line_text in enumerate(val_lines):
+                c_name = col_name if line_idx == 0 else ""
+                table_lines.append(f"│ {c_name:<{w1}} │ {line_text:<{current_w2}} │")
 
         table_lines.append(bottom_border)
         tables_output.append("\n".join("  " + l for l in table_lines))
@@ -106,7 +124,7 @@ def _render_horizontal_grid(headers, rows, max_col_width=18):
                 col_widths[i] = max(col_widths[i], len(r[i]))
 
     top_line = "┌" + "┬".join("─" * (w + 2) for w in col_widths) + "┐"
-    row_sep  = "├" + "┼".join("─" * (w + 2) for w in col_widths) + "┤"
+    row_sep = "├" + "┼".join("─" * (w + 2) for w in col_widths) + "┤"
     bot_line = "└" + "┴".join("─" * (w + 2) for w in col_widths) + "┘"
 
     header_line = "│ " + " │ ".join(f"{clean_headers[i]:<{col_widths[i]}}" for i in range(num_cols)) + " │"
@@ -124,7 +142,7 @@ def _render_horizontal_grid(headers, rows, max_col_width=18):
 def _restore_db_backup_dialog(file_path: str) -> bool:
     backups = find_backups(file_path)
     if not backups:
-        color_print("[INFO] Резервные копии для этого файла не найдены.", 'yellow')
+        color_print("[INFO] Резервные копии для этого файла не найдены.", 'yellow')
         return False
 
     color_print(f"\nДоступные резервные копии ({len(backups)}):", 'cyan')
@@ -154,16 +172,15 @@ def _restore_db_backup_dialog(file_path: str) -> bool:
                         except Exception:
                             pass
 
-                
                 if restore_backup(file_path, selected_backup, create_backup=False):
                     color_print("[SUCCESS] База данных успешно восстановлена!", 'green')
                     return True
                 else:
                     color_print("[ERROR] Не удалось восстановить базу данных.", 'red')
         else:
-            color_print("Неверный номер копии.", 'red')
+            color_print("Неверный номер копии.", 'red')
     except ValueError:
-        color_print("Неверный ввод.", 'red')
+        color_print("Неверный ввод.", 'red')
 
     return False
 
@@ -173,22 +190,24 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
         with open(file_path, 'rb') as f:
             header = f.read(16)
             if not header.startswith(b'SQLite format 3\x00'):
-                color_print("[ERROR] Это не валидный файл SQLite базы данных.", 'red')
+                color_print("[ERROR] Это не валидный файл SQLite базы данных.", 'red')
                 return False
     except Exception as e:
-        color_print(f"[ERROR] Ошибка чтения файла: {e}", 'red')
+        color_print(f"[ERROR] Ошибка чтения файла: {e}", 'red')
         return False
 
     color_print(f"\n[INFO] Открытие базы данных SQLite: {file_name}", 'blue')
     conn = None
     any_modified = False
+    show_all_system = False
 
     try:
         conn = sqlite3.connect(file_path)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA writable_schema = ON;")
 
         while True:
-            tables = _get_tables(cursor)
+            tables = _get_tables(cursor, show_all_system=show_all_system)
             backups = find_backups(file_path)
 
             color_print("\nТаблицы в базе данных:", 'cyan')
@@ -196,24 +215,42 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
                 for i, table in enumerate(tables, 1):
                     cursor.execute(f"SELECT COUNT(*) FROM {table}")
                     count = cursor.fetchone()[0]
-                    color_print(f"  {i:>2}) {table} (строк: {count})", 'white')
+                    if table == "sqlite_sequence":
+                        color_print(f"  {i:>2}) {table} [AUTOINCREMENT] (строк: {count})", 'yellow')
+                    elif table.startswith("sqlite_"):
+                        color_print(f"  {i:>2}) {table} [SYSTEM] (строк: {count})", 'magenta')
+                    else:
+                        color_print(f"  {i:>2}) {table} (строк: {count})", 'white')
             else:
-                color_print("  (В базе данных нет пользовательских таблиц)", 'yellow')
+                color_print("  (В базе данных нет таблиц)", 'yellow')
 
             print("")
+            color_print("   m) Редактировать sqlite_master (Схема / DDL / Триггеры)", 'green')
+            if not show_all_system:
+                print("   s) Показать скрытые системные таблицы")
+            else:
+                print("   s) Скрыть системные таблицы")
             if backups:
-                color_print(f"   r) Восстановить базу из бэкапа ({len(backups)} копий доступно)", 'yellow')
+                color_print(f"   r) Восстановить базу из бэкапа ({len(backups)} копий доступно)", 'yellow')
             print("   0) Назад / Выход")
 
-            choice = ask_input("Выберите действие или номер таблицы", "0")
+            choice = ask_input("Выберите действие или номер таблицы", "0")
             if choice == "0":
                 break
+            elif choice.lower() == "m":
+                if _edit_table(conn, cursor, 'sqlite_master', file_path):
+                    any_modified = True
+                continue
+            elif choice.lower() == "s":
+                show_all_system = not show_all_system
+                continue
             elif choice.lower() == "r" and backups:
                 conn.close()
                 if _restore_db_backup_dialog(file_path):
                     any_modified = True
                 conn = sqlite3.connect(file_path)
                 cursor = conn.cursor()
+                cursor.execute("PRAGMA writable_schema = ON;")
                 continue
 
             try:
@@ -222,12 +259,12 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
                     if _edit_table(conn, cursor, tables[idx], file_path):
                         any_modified = True
                 else:
-                    color_print("Неверный номер таблицы.", 'red')
+                    color_print("Неверный номер таблицы.", 'red')
             except ValueError:
-                color_print("Неверный ввод.", 'red')
+                color_print("Неверный ввод.", 'red')
 
     except Exception as e:
-        color_print(f"[ERROR] Ошибка при работе с базой данных: {e}", 'red')
+        color_print(f"[ERROR] Ошибка при работе с базой данных: {e}", 'red')
         log_message(f"SQLite Error: {e}", 'ERROR')
     finally:
         if conn:
@@ -237,6 +274,7 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
 
 
 def _edit_table(conn, cursor, table_name, file_path) -> bool:
+    cursor.execute("PRAGMA writable_schema = ON;")
     columns = _get_columns(cursor, table_name)
     if not columns:
         color_print(f"Не удалось получить схему таблицы {table_name}.", 'red')
@@ -269,26 +307,28 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
                 formatted_rows.append([display_num] + data_values)
 
             if view_mode == "vertical":
-                print(_render_vertical_table(columns, formatted_rows))
+                print(_render_vertical_table(columns, formatted_rows, val_col_width=20))
             else:
                 headers = ["No"] + columns
                 print(_render_horizontal_grid(headers, formatted_rows, max_col_width=18))
 
         backups = find_backups(file_path)
+        has_next = (offset + limit < total_rows)
 
         print("\nМеню:")
         print("  1) Редактировать запись по номеру (#)")
         print("  v) Переключить вид (Вертикальная / Горизонтальная сетка)")
-        print("  2) Выполнить кастомный SQL-запрос (UPDATE/DELETE)")
+        print("  2) Выполнить кастомный SQL-запрос (UPDATE/DELETE)")
         if backups:
             print(f"  r) Восстановить базу из бэкапа ({len(backups)} доступно)")
-        if offset + limit < total_rows:
-            print("  n) Следующая страница")
+        if has_next:
+            print("  n) Следующая страница [Enter]")
         if offset > 0:
             print("  p) Предыдущая страница")
         print("  0) Назад к списку таблиц")
 
-        action = ask_input("Ваш выбор", "0").lower()
+        default_act = "n" if has_next else "0"
+        action = ask_input("Ваш выбор", default_act).lower()
 
         if action == "0":
             break
@@ -298,13 +338,14 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
                 table_modified = True
             conn = sqlite3.connect(file_path)
             cursor = conn.cursor()
+            cursor.execute("PRAGMA writable_schema = ON;")
             offset = 0
             continue
         elif action == "v":
             view_mode = "horizontal" if view_mode == "vertical" else "vertical"
             offset = 0
             continue
-        elif action == "n" and offset + limit < total_rows:
+        elif (action == "n" or action == "") and has_next:
             offset += limit
         elif action == "p" and offset > 0:
             offset = max(0, offset - limit)
@@ -316,7 +357,7 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
 
             target_idx = int(num_str) - offset - 1
             if not (0 <= target_idx < len(rows)):
-                color_print(f"Запись #{num_str} не найдена на текущей странице.", 'red')
+                color_print(f"Запись #{num_str} не найдена на текущей странице.", 'red')
                 continue
 
             target_tuple = rows[target_idx]
@@ -326,7 +367,13 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
             color_print(f"\nРедактирование записи #{num_str}:", 'cyan')
             for i, col in enumerate(columns):
                 val = target_data[i]
-                color_print(f"  {i+1:>2}) {col} = {val} ({type(val).__name__})", 'white')
+                val_str = str(val)
+                if '\n' in val_str or len(val_str) > 40:
+                    color_print(f"  {i+1:>2}) {col} ({type(val).__name__}) = ", 'white')
+                    for line in val_str.splitlines():
+                        print(f"       {line}")
+                else:
+                    color_print(f"  {i+1:>2}) {col} = {val} ({type(val).__name__})", 'white')
 
             col_idx_str = ask_input("Введите номер поля для изменения (или 0 для отмены)", "0")
             if col_idx_str == "0":
@@ -338,7 +385,7 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
                     col_name = columns[col_idx]
                     old_val = target_data[col_idx]
 
-                    new_val_str = ask_input(f"Новое значение для {col_name} (сейчас: {old_val})")
+                    new_val_str = ask_input(f"Новое значение для {col_name} (сейчас: {old_val})")
                     if not new_val_str and not ask_yes_no("Установить пустую строку?", default=False):
                         continue
 
@@ -360,13 +407,13 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
                     color_print(f"[SUCCESS] Поле {col_name} обновлено: {old_val} -> {new_val}", 'green')
                     table_modified = True
                 else:
-                    color_print("Неверный номер поля.", 'red')
+                    color_print("Неверный номер поля.", 'red')
             except ValueError:
-                color_print("Неверный ввод.", 'red')
+                color_print("Неверный ввод.", 'red')
 
         elif action == "2":
             color_print("\nВНИМАНИЕ: Выполнение сырых SQL-запросов может повредить структуру!", 'yellow')
-            query = ask_input("Введите SQL-запрос (например: UPDATE player_profile SET coins = 999999)")
+            query = ask_input(f"Введите SQL-запрос (например: UPDATE {table_name} SET ...)")
             if query:
                 if ask_yes_no("Выполнить запрос?", default=False):
                     try:
