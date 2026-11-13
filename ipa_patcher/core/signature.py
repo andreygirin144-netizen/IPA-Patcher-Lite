@@ -31,9 +31,9 @@ def clean_signature_files(app_path):
 
 
 def sign_app_bundle_with_path(ipa_path, bundle_id):
-    color_print("\n" + "=" * 50, 'cyan')
-    color_print("ЭКСПОРТ IPA В СЛУЖБЫ ПЕРЕПОДПИСИ", 'cyan')
-    color_print("=" * 50, 'cyan')
+    color_print("\n" + "=" * 49, 'cyan')
+    color_print("        ЭКСПОРТ IPA В СЛУЖБЫ ПЕРЕПОДПИСИ", 'cyan')
+    color_print("=" * 49, 'cyan')
 
     if not os.path.exists(ipa_path):
         log_message(f"IPA not found: {ipa_path}", 'ERROR')
@@ -120,9 +120,9 @@ def prepare_tipa_entitlements(app_dir, silent=False):
 
 
 def open_tipa_with_trollstore(tipa_path):
-    color_print("\n" + "=" * 50, 'cyan')
+    color_print("\n" + "=" * 49, 'cyan')
     color_print("УСТАНОВКА .tipa ЧЕРЕЗ TROLLSTORE", 'cyan')
-    color_print("=" * 50, 'cyan')
+    color_print("=" * 49, 'cyan')
 
     if not os.path.exists(tipa_path):
         log_message(f"TIPA not found: {tipa_path}", 'ERROR')
