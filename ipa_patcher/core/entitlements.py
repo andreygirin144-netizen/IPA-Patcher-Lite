@@ -63,9 +63,9 @@ def generate_custom_entitlements(app_dir, bundle_id):
         log_message("Team ID not found, using placeholder (will be replaced by signer)", 'WARN')
         color_print("[WARN] Team ID не найден, используется заглушка (будет заменена при подписи)", 'yellow')
 
-    color_print("\n" + "=" * 40, 'cyan')
-    color_print("   НАСТРОЙКА ПРАВ (Entitlements) v1.1.6", 'cyan')
-    color_print("=" * 40, 'cyan')
+    color_print("\n" + "=" * 49, 'cyan')
+    color_print("      НАСТРОЙКА ПРАВ (Entitlements) v1.1.7", 'cyan')
+    color_print("=" * 49, 'cyan')
     color_print("1. Бесплатный Apple ID (Free Developer Account)", 'white')
     color_print("2. Платный Apple ID ($99 Developer Account)", 'white')
 
@@ -74,7 +74,7 @@ def generate_custom_entitlements(app_dir, bundle_id):
 
     color_print(f"\nРежим: {'[ПЛАТНЫЙ]' if is_paid else '[БЕСПЛАТНЫЙ]'} аккаунт. Настройка опций:", 
                 'green' if is_paid else 'yellow')
-    color_print("-" * 40, 'cyan')
+    color_print("-" * 49, 'cyan')
 
     if ask_yes_no("Включить 'get-task-allow' (Нужно для JIT/эмуляторов и отладки твиков)?", default=True):
         entitlements_data["get-task-allow"] = True
@@ -110,10 +110,10 @@ def generate_custom_entitlements(app_dir, bundle_id):
         with open(entitlements_path, "wb") as f:
             plistlib.dump(entitlements_data, f)
         log_message(f"entitlements.plist saved: {entitlements_path}", 'INFO')
-        color_print("\n" + "=" * 40, 'cyan')
+        color_print("\n" + "=" * 49, 'cyan')
         color_print("[SUCCESS] entitlements.plist успешно создан!", 'green')
         color_print(f"[INFO] Путь: {entitlements_path}", 'blue')
-        color_print("=" * 40, 'cyan')
+        color_print("=" * 49, 'cyan')
         return True
     except Exception as e:
         log_message(f"Failed to save entitlements.plist: {e}", 'ERROR')
