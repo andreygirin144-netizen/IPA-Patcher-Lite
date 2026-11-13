@@ -83,10 +83,7 @@ def list_all_archs(binary_path):
             data = f.read()
         slices = get_arch_slices(data)
         if slices:
-            result = []
-            for s in slices:
-                result.append(parse_arch_name(s['cputype'], s['cpusubtype']))
-            return result
+            return [parse_arch_name(s['cputype'], s['cpusubtype']) for s in slices]
         if len(data) >= 12:
             magic = struct.unpack_from('<I', data, 0)[0]
             if magic in (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32):
@@ -118,9 +115,12 @@ def is_macho_binary(file_path):
 def is_fat_binary(binary_path):
     try:
         with open(binary_path, 'rb') as f:
-            magic = struct.unpack_from('>I', f.read(4))[0]
+            magic_bytes = f.read(4)
+            if len(magic_bytes) < 4:
+                return False
+            magic = struct.unpack_from('>I', magic_bytes)[0]
             return magic in (FAT_MAGIC, FAT_CIGAM, FAT_MAGIC_64, FAT_CIGAM_64)
-    except:
+    except Exception:
         return False
 
 
@@ -128,31 +128,31 @@ def thin_binary_to_arm64(binary_path):
     try:
         with open(binary_path, 'rb') as f:
             data = bytearray(f.read())
-        
+
         if len(data) < 8:
             return False
-        
+
         magic = struct.unpack_from('>I', data, 0)[0]
         if magic not in (FAT_MAGIC, FAT_CIGAM, FAT_MAGIC_64, FAT_CIGAM_64):
             return True
-        
+
         slices = get_arch_slices(data)
         if not slices:
             return False
-        
+
         arm64_slice = None
         for s in slices:
             if is_arm64_slice(s['cputype'], s['cpusubtype']):
                 arm64_slice = data[s['offset']:s['offset'] + s['size']]
                 break
-        
+
         if arm64_slice is None or len(arm64_slice) < 4:
             log_message("No arm64 slice found in FAT binary", 'WARN')
             return False
-        
+
         with open(binary_path, 'wb') as f:
             f.write(arm64_slice)
-        
+
         os.chmod(binary_path, 0o755)
         log_message(f"Binary thinned to arm64 only: {os.path.basename(binary_path)}", 'INFO')
         return True
@@ -174,10 +174,10 @@ def get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds)
     min_section_offset = None
     cmd_offset = offset + header_size
     max_offset = len(data)
-    
+
     if ncmds > 1000:
         return None
-    
+
     for _ in range(ncmds):
         if cmd_offset + 8 > offset + header_size + sizeofcmds or cmd_offset + 8 > max_offset:
             break
@@ -205,8 +205,9 @@ def get_min_section_offset(data, offset, endian, ncmds, header_size, sizeofcmds)
                 if foff_off + 4 <= max_offset:
                     foff = struct.unpack_from(endian + 'I', data, foff_off)[0]
                     if foff > 0:
-                        if min_section_offset is None or foff < min_section_offset:
-                            min_section_offset = foff
+                        abs_foff = offset + foff
+                        if min_section_offset is None or abs_foff < min_section_offset:
+                            min_section_offset = abs_foff
         cmd_offset += cmdsize_cur
     return min_section_offset
 
@@ -284,7 +285,7 @@ def _inject_load_dylib_into_slice(data, offset, dylib_install_name):
 
         if insert_at + len(new_cmd) > max_offset:
             return False
-            
+
         data[insert_at:insert_at + len(new_cmd)] = new_cmd
         new_ncmds = ncmds + 1
         new_sizeofcmds = sizeofcmds + len(new_cmd)
@@ -306,7 +307,7 @@ def inject_lc_load_dylib(binary_path, dylib_install_name):
 
     if len(data) < 4:
         return False
-        
+
     magic = struct.unpack_from('>I', data, 0)[0]
     success = False
     if magic in (FAT_MAGIC, FAT_CIGAM, FAT_MAGIC_64, FAT_CIGAM_64):
@@ -387,12 +388,12 @@ def _inject_rpath_into_slice(data, offset, rpath_path):
             return False
         available_space = min_section_offset - insert_at
         if available_space < len(new_cmd):
-            log_message(f"Not enough space for LC_RPATH: need {len(new_cmd)} bytes", 'ERROR')
+            log_message(f"Not enough space for LC_RPATH: need {len(new_cmd)} bytes, available {available_space}", 'ERROR')
             return False
 
         if insert_at + len(new_cmd) > max_offset:
             return False
-            
+
         data[insert_at:insert_at + len(new_cmd)] = new_cmd
         new_ncmds = ncmds + 1
         new_sizeofcmds = sizeofcmds + len(new_cmd)
@@ -414,7 +415,7 @@ def inject_rpath(binary_path, rpath_path):
 
     if len(data) < 4:
         return False
-        
+
     magic = struct.unpack_from('>I', data, 0)[0]
     success = False
     if magic in (FAT_MAGIC, FAT_CIGAM, FAT_MAGIC_64, FAT_CIGAM_64):
@@ -570,7 +571,7 @@ def inject_code_signature(binary_path, super_blob):
 
     if len(data) < 4 or not super_blob:
         return False
-        
+
     magic = struct.unpack_from('>I', data, 0)[0]
     if magic in (FAT_MAGIC, FAT_CIGAM, FAT_MAGIC_64, FAT_CIGAM_64):
         slices = get_arch_slices(data)
