@@ -21,6 +21,8 @@ from .constants import (
     MH_CIGAM_32,
     FAT_MAGIC,
     FAT_CIGAM,
+    FAT_MAGIC_64,
+    FAT_CIGAM_64,
 )
 from .macho import (
     get_main_executable,
@@ -31,7 +33,6 @@ from .macho import (
     is_fat_binary,
     thin_binary_to_arm64,
     verify_binary_architecture,
-    get_macho_summary,
     get_min_section_offset,
     get_arch_slices,
     is_arm64_slice,
@@ -186,7 +187,7 @@ def _extract_with_libarchive(archive_path, extract_dir):
             if raw_path:
                 path_str = raw_path.decode('utf-8', errors='ignore')
                 target_candidate = os.path.realpath(os.path.join(extract_dir, path_str))
-                if not target_candidate.startswith(real_extract):
+                if not (target_candidate == real_extract or target_candidate.startswith(real_extract + os.sep)):
                     continue
             libarchive.archive_read_extract(a, entry, 6)
     finally:
@@ -389,8 +390,9 @@ def check_header_space(main_executable, required_bytes):
             data = bytearray(f.read())
         if len(data) < 4:
             return True
+
         magic_be = struct.unpack_from('>I', data, 0)[0]
-        if magic_be in (FAT_MAGIC, FAT_CIGAM):
+        if magic_be in (FAT_MAGIC, FAT_CIGAM, FAT_MAGIC_64, FAT_CIGAM_64):
             slices = get_arch_slices(data)
             for s in slices:
                 if not is_arm64_slice(s['cputype'], s['cpusubtype']):
@@ -412,7 +414,7 @@ def check_header_space(main_executable, required_bytes):
                 if insert_at > len(data):
                     continue
                 min_section_offset = get_min_section_offset(data, slice_offset, endian, ncmds, header_size, sizeofcmds)
-                if min_section_offset is None or min_section_offset <= insert_at or min_section_offset > len(data):
+                if min_section_offset is None or min_section_offset < insert_at or min_section_offset > len(data):
                     continue
                 available = min_section_offset - insert_at
                 if available < required_bytes:
@@ -420,8 +422,8 @@ def check_header_space(main_executable, required_bytes):
                     return False
             return True
         else:
-            if magic_be in (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32):
-                magic = struct.unpack_from('<I', data, 0)[0]
+            magic = struct.unpack_from('<I', data, 0)[0]
+            if magic in (MH_MAGIC_64, MH_CIGAM_64, MH_MAGIC_32, MH_CIGAM_32):
                 endian = '>' if magic in (MH_CIGAM_64, MH_CIGAM_32) else '<'
                 is_64 = magic in (MH_MAGIC_64, MH_CIGAM_64)
                 header_size = 32 if is_64 else 28
@@ -435,7 +437,7 @@ def check_header_space(main_executable, required_bytes):
                 if insert_at > len(data):
                     return True
                 min_section_offset = get_min_section_offset(data, 0, endian, ncmds, header_size, sizeofcmds)
-                if min_section_offset is None or min_section_offset <= insert_at or min_section_offset > len(data):
+                if min_section_offset is None or min_section_offset < insert_at or min_section_offset > len(data):
                     return True
                 available = min_section_offset - insert_at
                 if available < required_bytes:
@@ -586,7 +588,7 @@ def resolve_dependencies(deps, source_root, frameworks_dir, copied_dylibs, copie
         dep_framework_name = dep + '.framework'
 
         found = False
-        for root, _, files in os.walk(source_root):
+        for root, dirs, files in os.walk(source_root):
             for f in files:
                 if f == dep_dylib_name or f.startswith(dep + '.'):
                     src = os.path.join(root, f)
@@ -602,7 +604,7 @@ def resolve_dependencies(deps, source_root, frameworks_dir, copied_dylibs, copie
                             found = True
                         break
 
-            for d in os.listdir(root) if os.path.isdir(root) else []:
+            for d in dirs:
                 if d == dep_framework_name:
                     src = os.path.join(root, d)
                     if os.path.isdir(src):
@@ -769,7 +771,25 @@ def clean_deb_artifacts(extracted_root):
                 log_message(f"Failed to remove {path}: {e}", 'WARN')
 
 
-def inject_into_executable(executable_path, app_dir, copied_dylibs, copied_frameworks, plist_data, enable_substrate=True):
+def _get_load_prefixes(use_rpath=False, use_loader_path=False):
+    if use_rpath:
+        return "@rpath/", "@rpath/", "@rpath/"
+    elif use_loader_path:
+        return "@loader_path/Frameworks/", "@loader_path/", "@loader_path/"
+    else:
+        return "@executable_path/Frameworks/", "@executable_path/Frameworks/", "@executable_path/"
+
+
+def inject_into_executable(
+    executable_path,
+    app_dir,
+    copied_dylibs,
+    copied_frameworks,
+    plist_data,
+    enable_substrate=True,
+    use_rpath=False,
+    use_loader_path=False,
+):
     if not executable_path or not os.path.isfile(executable_path):
         return 0, []
 
@@ -795,36 +815,46 @@ def inject_into_executable(executable_path, app_dir, copied_dylibs, copied_frame
             inject_rpath(executable_path, rpath)
             color_print(f"[INFO] Added LC_RPATH: {rpath}", 'green')
 
+    fw_prefix, _, sub_prefix = _get_load_prefixes(use_rpath, use_loader_path)
+
     count = 0
     injected_names = []
 
     for name, path in copied_dylibs:
-        load_path = f"@executable_path/Frameworks/{name}"
+        load_path = f"{fw_prefix}{name}"
         if inject_lc_load_dylib(executable_path, load_path):
-            color_print(f"[INFO] Injected .dylib: {name}", 'green')
+            color_print(f"[INFO] Injected .dylib: {load_path}", 'green')
             count += 1
             injected_names.append(name)
 
     for name, path in copied_frameworks:
         framework_name = name.replace('.framework', '')
-        load_path = f"@executable_path/Frameworks/{name}/{framework_name}"
+        load_path = f"{fw_prefix}{name}/{framework_name}"
         if inject_lc_load_dylib(executable_path, load_path):
-            color_print(f"[INFO] Injected framework: {name}", 'green')
+            color_print(f"[INFO] Injected framework: {load_path}", 'green')
             count += 1
             injected_names.append(name)
 
     if enable_substrate:
         substrate_path = os.path.join(app_dir, 'sb.dylib')
         if os.path.exists(substrate_path):
-            load_path = "@executable_path/sb.dylib"
+            load_path = f"{sub_prefix}sb.dylib"
             if inject_lc_load_dylib(executable_path, load_path):
-                color_print("[INFO] Added substrate: sb.dylib", 'green')
+                color_print(f"[INFO] Added substrate: {load_path}", 'green')
                 count += 1
 
     return count, injected_names
 
 
-def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, enable_substrate=True):
+def inject_tweaks(
+    app_dir,
+    tweak_path,
+    plist_data,
+    script_dir,
+    enable_substrate=True,
+    use_rpath=False,
+    use_loader_path=False,
+):
     frameworks_dir = os.path.join(app_dir, 'Frameworks')
     os.makedirs(frameworks_dir, exist_ok=True)
 
@@ -889,9 +919,12 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, enable_substrate=
         return False, "No modules found to inject"
 
     try:
+        _, internal_dylib_prefix, _ = _get_load_prefixes(use_rpath, use_loader_path)
+        internal_dylib_bytes = internal_dylib_prefix.encode('utf-8')
+
         replacement_pairs = [
-            (b"/Library/MobileSubstrate/DynamicLibraries/", b"@executable_path/Frameworks/"),
-            (b"/var/jb/Library/MobileSubstrate/DynamicLibraries/", b"@executable_path/Frameworks/"),
+            (b"/Library/MobileSubstrate/DynamicLibraries/", internal_dylib_bytes),
+            (b"/var/jb/Library/MobileSubstrate/DynamicLibraries/", internal_dylib_bytes),
         ]
         for fw_name, _ in copied_frameworks:
             binary_name = fw_name.replace('.framework', '')
@@ -928,7 +961,9 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, enable_substrate=
                 main_executable, app_dir,
                 copied_dylibs, copied_frameworks,
                 plist_data,
-                enable_substrate=enable_substrate
+                enable_substrate=enable_substrate,
+                use_rpath=use_rpath,
+                use_loader_path=use_loader_path,
             )
             if count > 0:
                 total_successfully_injected.append({
@@ -983,7 +1018,9 @@ def inject_tweaks(app_dir, tweak_path, plist_data, script_dir, enable_substrate=
                         appex_executable, appex_dir,
                         copied_dylibs, copied_frameworks,
                         appex_plist,
-                        enable_substrate=enable_substrate
+                        enable_substrate=enable_substrate,
+                        use_rpath=use_rpath,
+                        use_loader_path=use_loader_path,
                     )
                     if count > 0:
                         total_successfully_injected.append({
@@ -1028,11 +1065,12 @@ def count_modules_in_tweak(tweak_path):
             extracted_root = os.path.join(temp_dir, items[0])
 
         count = 0
-        for root, _, files in os.walk(extracted_root):
+        for root, dirs, files in os.walk(extracted_root):
             for f in files:
                 if f.endswith('.dylib'):
                     count += 1
-                elif f.endswith('.framework'):
+            for d in dirs:
+                if d.endswith('.framework'):
                     count += 1
         return count if count > 0 else 1
     except Exception:
