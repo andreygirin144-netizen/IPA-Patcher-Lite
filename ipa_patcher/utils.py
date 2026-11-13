@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
-import time
 import datetime
-import logging
 import shutil
-import tempfile
+
+from i18n import t
 
 try:
     import console
@@ -33,7 +32,7 @@ else:
     if not os.path.exists(TEMP_DIR):
         try:
             os.makedirs(TEMP_DIR, exist_ok=True)
-        except:
+        except Exception:
             TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tmp')
 
 LOG_FILE = os.path.join(LOGS_DIR, 'patcher.log')
@@ -45,7 +44,7 @@ def ensure_directories():
         if not os.path.exists(dir_path):
             try:
                 os.makedirs(dir_path)
-            except:
+            except Exception:
                 pass
 
 
@@ -68,7 +67,7 @@ def color_print(text, color='white'):
             print(text)
             console.set_color(1.0, 1.0, 1.0)
             return
-        except:
+        except Exception:
             pass
 
     if not sys.stdout.isatty():
@@ -104,13 +103,15 @@ def log_message(msg, level='INFO'):
             safe_entry = f"[{timestamp}] [{level}] {safe_msg}"
             with open(LOG_FILE, 'a', encoding='utf-8') as f:
                 f.write(safe_entry + '\n')
-        except:
-            sys.stderr.write(f"[WARN] Не удалось записать лог в файл: {e}\n")
-        
-    color_print(f"[{level}] {msg}", 
-                'hotpink' if level == 'INFO' else 
-                'yellow' if level == 'WARN' else 
-                'red' if level == 'ERROR' else 'white')
+        except Exception:
+            sys.stderr.write(t("log_write_warn", err=e))
+
+    color_print(
+        f"[{level}] {msg}",
+        'hotpink' if level == 'INFO' else
+        'yellow' if level == 'WARN' else
+        'red' if level == 'ERROR' else 'white'
+    )
 
 
 def ask_input(prompt, default=""):
@@ -123,7 +124,7 @@ def ask_input(prompt, default=""):
             return default
         return result
     except KeyboardInterrupt:
-        print("\nПрервано.")
+        print(f"\n{t('interrupted')}")
         sys.exit(0)
 
 
@@ -132,18 +133,18 @@ def ask_yes_no(prompt, default=False):
         while True:
             default_str = "y/n"
             result = input(f"{prompt} ({default_str}): ").strip().lower()
-            
+
             if not result:
                 return default
-            
+
             if result in ('y', 'yes', 'д', 'да'):
                 return True
             elif result in ('n', 'no', 'н', 'нет'):
                 return False
-            
-            color_print("Ошибка: введите 'y' или 'n' (д/н)", 'red')
+
+            color_print(t("yn_error"), 'red')
     except KeyboardInterrupt:
-        print("\nПрервано.")
+        print(f"\n{t('interrupted')}")
         sys.exit(0)
 
 
@@ -151,7 +152,7 @@ def clear_screen():
     if HAVE_CONSOLE:
         try:
             console.clear()
-        except:
+        except Exception:
             os.system('clear')
     else:
         os.system('clear')
@@ -172,8 +173,8 @@ def check_disk_space(required_mb=500):
         usage = shutil.disk_usage(WORKSPACE_DIR)
         free_mb = usage.free / (1024 * 1024)
         if free_mb < required_mb:
-            color_print(f"[WARN] Свободно: {free_mb:.0f} MB, требуется: {required_mb} MB", 'yellow')
+            color_print(t("disk_space_warn", free=free_mb, req=required_mb), 'yellow')
             return False
         return True
-    except:
+    except Exception:
         return True

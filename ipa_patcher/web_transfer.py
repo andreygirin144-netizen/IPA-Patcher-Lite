@@ -14,6 +14,9 @@ import json
 from collections import defaultdict
 import threading
 import shutil
+import argparse
+
+from i18n import init_i18n, set_lang, get_lang, t
 
 try:
     import background
@@ -38,7 +41,14 @@ CONFIG = {
     'MAX_CONNECTIONS': 10,
 }
 
-VERSION = '1.1.8'
+VERSION = '1.1.9'
+
+
+def _parse_cli_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--lang", choices=["en", "ru"], default=None)
+    args, _ = parser.parse_known_args()
+    return args
 
 
 def _get_docs_dir():
@@ -113,7 +123,7 @@ class SecurityManager:
             if self.failed_attempts[ip] >= CONFIG['BAN_THRESHOLD']:
                 self.banned_ips[ip] = time.time()
                 self._save_blacklist()
-                audit_log(f"IP {ip} забанен за брутфорс ПИН-кода", 'WARN')
+                audit_log(t("wt_banned", ip=ip), 'WARN')
 
     def validate_token(self, token):
         if not token:
@@ -148,7 +158,7 @@ class SecurityManager:
         new_token = str(secrets.randbelow(900000) + 100000)
         self.access_token = new_token
         self.token_hash = hashlib.sha256(new_token.encode()).hexdigest()
-        audit_log("ПИН-код доступа обновлен", 'INFO')
+        audit_log(t("wt_pin_updated"), 'INFO')
         return new_token
 
 
@@ -379,12 +389,12 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             if clean_path == '/api/verify':
                 token = params.get('token', [''])[0]
                 if security.validate_token(token):
-                    log_message(f"Успешный вход по ПИН-коду от {ip}", 'SUCCESS')
-                    audit_log(f"Успешный вход по ПИН-коду от {ip}", 'INFO')
+                    log_message(t("wt_login_success", ip=ip), 'SUCCESS')
+                    audit_log(t("wt_login_success", ip=ip), 'INFO')
                     self.send_json_response({'valid': True})
                 else:
-                    log_message(f"Неверный ПИН-код от {ip}", 'WARN')
-                    audit_log(f"Неверный ПИН-код от {ip}", 'WARN')
+                    log_message(t("wt_login_fail", ip=ip), 'WARN')
+                    audit_log(t("wt_login_fail", ip=ip), 'WARN')
                     security.record_failed_attempt(ip)
                     self.send_json_response({'valid': False}, 401)
                 return
@@ -517,11 +527,9 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 elapsed = time.time() - start_time
                 speed = written / elapsed / 1024 / 1024 if elapsed > 0 else 0
 
-                log_message(f"Файл загружен: {safe_filename} ({written/1024/1024:.2f} MB) от {ip}", 'SUCCESS')
-                audit_log(
-                    f"Файл загружен: {safe_filename} ({written/1024/1024:.2f} MB) от {ip}",
-                    'INFO'
-                )
+                size_mb_str = f"{written / 1024 / 1024:.2f}"
+                log_message(t("wt_file_uploaded", name=safe_filename, size=size_mb_str, ip=ip), 'SUCCESS')
+                audit_log(t("wt_file_uploaded", name=safe_filename, size=size_mb_str, ip=ip), 'INFO')
 
                 self.send_json_response({
                     'status': 'success',
@@ -541,8 +549,8 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                         os.remove(temp_path)
                     except Exception:
                         pass
-                log_message(f"Ошибка загрузки от {ip}: {str(e)}", 'ERROR')
-                audit_log(f"Ошибка загрузки от {ip}: {str(e)}", 'ERROR')
+                log_message(t("wt_upload_err", ip=ip, err=e), 'ERROR')
+                audit_log(t("wt_upload_err", ip=ip, err=e), 'ERROR')
                 self.send_json_response({'error': 'Internal Server Error'}, 500)
         finally:
             security.release_connection()
@@ -554,7 +562,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Secure Transfer - Вход</title>
+            <title>{t("wt_html_login_title")}</title>
             <style>
                 *{{margin:0;padding:0;box-sizing:border-box}}
                 body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#1c1c1e;display:flex;justify-content:center;align-items:center;min-height:100vh}}
@@ -571,9 +579,9 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         <body>
             <div class="card">
                 <h2>Secure Transfer</h2>
-                <input type="password" id="pin" placeholder="ПИН-КОД" maxlength="6" autofocus>
-                <button class="btn" id="login">Войти</button>
-                <div class="hint">Введите 6-значный ПИН из консоли</div>
+                <input type="password" id="pin" placeholder="{t("wt_html_pin_ph")}" maxlength="6" autofocus>
+                <button class="btn" id="login">{t("wt_html_login_btn")}</button>
+                <div class="hint">{t("wt_html_pin_hint")}</div>
                 <div class="version">IPA Patcher Lite Transfer v{VERSION}</div>
             </div>
             <script>
@@ -581,7 +589,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     const pin = document.getElementById('pin').value.trim();
                     if (!pin) return;
                     fetch('/api/verify?token=' + encodeURIComponent(pin))
-                        .then(r => r.ok ? window.location.href='/?token='+encodeURIComponent(pin) : alert('Неверный ПИН'));
+                        .then(r => r.ok ? window.location.href='/?token='+encodeURIComponent(pin) : alert('Invalid PIN'));
                 }};
                 document.getElementById('pin').onkeydown = function(e) {{
                     if (e.key === 'Enter') document.getElementById('login').click();
@@ -634,21 +642,21 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         </head>
         <body>
             <div class="card">
-                <div class="badge ok" id="status">Безопасно</div>
+                <div class="badge ok" id="status">{t("wt_html_badge_ok")}</div>
                 <h2>Secure Transfer</h2>
-                <p class="sub">Загрузите файлы на iPhone</p>
+                <p class="sub">{t("wt_html_sub")}</p>
                 <div class="ip-box">{ip}:{port}</div>
-                <div class="info">ПИН-КОД</div>
+                <div class="info">{t("wt_pin_ph") if get_lang()=='ru' else "PIN CODE"}</div>
                 <div class="pin-box" id="pinDisplay">{token}</div>
                 <input type="file" id="fileInput" style="display:none">
-                <button class="btn" id="uploadBtn">Выбрать файл</button>
+                <button class="btn" id="uploadBtn">{t("wt_html_pick_btn")}</button>
                 <div id="prog"><div id="fill"></div></div>
                 <div id="msg" class="info"></div>
-                <button id="stopBtn" style="background:#ff3b30;color:white;padding:14px;border-radius:12px;border:none;width:100%;font-size:16px;font-weight:600;margin-top:12px;cursor:pointer">Остановить сервер</button>
+                <button id="stopBtn" style="background:#ff3b30;color:white;padding:14px;border-radius:12px;border:none;width:100%;font-size:16px;font-weight:600;margin-top:12px;cursor:pointer">{t("wt_html_stop_btn")}</button>
                 <div class="exts">
                     <span>.ipa</span><span>.tipa</span><span>.zip</span><span>.deb</span><span>.dylib</span>
                 </div>
-                <div class="size-info">Макс. размер: {max_size_mb} MB</div>
+                <div class="size-info">{t("wt_html_max_size", size=max_size_mb)}</div>
                 <div class="version">IPA Patcher Lite Transfer v{VERSION}</div>
             </div>
             <script>
@@ -669,7 +677,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     pinDisplay.onclick = function() {{
                         navigator.clipboard.writeText(TOKEN).then(() => {{
                             const orig = this.textContent;
-                            this.textContent = 'Скопировано!';
+                            this.textContent = '{t("wt_html_copied")}';
                             setTimeout(() => {{ this.textContent = orig; }}, 1500);
                         }});
                     }};
@@ -686,21 +694,21 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                         if (!file) return;
 
                         if (!isAllowed(file.name)) {{
-                            alert('Неподдерживаемый тип файла. Разрешены: ' + ALLOWED.join(', '));
+                            alert('Invalid file type.');
                             this.value = '';
                             return;
                         }}
 
                         if (file.size > MAX_SIZE) {{
-                            alert('Файл слишком большой. Максимум: ' + (MAX_SIZE/1024/1024) + ' MB');
+                            alert('File too large.');
                             this.value = '';
                             return;
                         }}
 
-                        btn.textContent = 'Загрузка...';
+                        btn.textContent = '{t("wt_html_uploading")}';
                         btn.disabled = true;
                         status.className = 'badge waiting';
-                        status.textContent = 'Загрузка';
+                        status.textContent = '{t("wt_html_status_load")}';
                         prog.style.display = 'block';
                         msg.textContent = file.name + ' (' + (file.size/1024/1024).toFixed(1) + ' MB)';
 
@@ -722,11 +730,11 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                                 try {{
                                     const resp = JSON.parse(xhr.responseText);
                                     status.className = 'badge ok';
-                                    status.textContent = 'Готово';
-                                    btn.textContent = 'Выбрать файл';
+                                    status.textContent = '{t("wt_html_status_done")}';
+                                    btn.textContent = '{t("wt_html_pick_btn")}';
                                     btn.className = 'btn';
                                     btn.disabled = false;
-                                    msg.textContent = 'Файл сохранен: ' + resp.filename;
+                                    msg.textContent = '{t("wt_html_saved_lbl", name="")}' + resp.filename;
                                     prog.style.display = 'none';
                                     fill.style.width = '0%';
                                     fileInput.value = '';
@@ -740,11 +748,11 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
                         xhr.onerror = function() {{
                             status.className = 'badge error';
-                            status.textContent = 'Ошибка';
-                            btn.textContent = 'Повторить';
+                            status.textContent = '{t("wt_html_status_err")}';
+                            btn.textContent = '{t("wt_html_retry_btn")}';
                             btn.className = 'btn error';
                             btn.disabled = false;
-                            msg.textContent = 'Ошибка загрузки. Попробуйте снова.';
+                            msg.textContent = '{t("wt_html_err_msg")}';
                             prog.style.display = 'none';
                             fill.style.width = '0%';
                         }};
@@ -757,15 +765,15 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     }};
 
                     stopBtn.onclick = function() {{
-                        if (confirm('Остановить сервер?')) {{
+                        if (confirm('{t("wt_html_stop_q")}')) {{
                             fetch('/api/stop?token=' + TOKEN)
                                 .then(r => {{
                                     if (r.ok) {{
                                         status.className = 'badge error';
-                                        status.textContent = 'Остановлен';
+                                        status.textContent = '{t("wt_html_status_err")}';
                                         btn.disabled = true;
                                         stopBtn.disabled = true;
-                                        msg.textContent = 'Сервер остановлен. Закройте страницу.';
+                                        msg.textContent = '{t("wt_html_stopped_msg")}';
                                         prog.style.display = 'none';
                                         setTimeout(() => {{ window.close(); }}, 1000);
                                     }}
@@ -782,8 +790,8 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 def stop_server():
     global STOP_SERVER, SERVER_INSTANCE
     STOP_SERVER = True
-    log_message("Сервер остановлен по команде с веб-страницы", 'INFO')
-    audit_log("Сервер остановлен по команде с веб-страницы", 'INFO')
+    log_message(t("wt_srv_stopped_web"), 'INFO')
+    audit_log(t("wt_srv_stopped_web"), 'INFO')
 
     def shutdown_server():
         time.sleep(0.1)
@@ -799,7 +807,7 @@ def stop_server():
 
 def print_header():
     clear_screen()
-    width = 45
+    width = 49
     title = f"IPA PATCHER LITE TRANSFER v{VERSION}"
 
     color_print("=" * width, 'cyan')
@@ -811,182 +819,182 @@ def print_header():
 def print_status(ip, port, running=False):
     max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
     if running:
-        color_print("  Статус: [РАБОТАЕТ]", 'green')
-        color_print(f"  Адрес: http://{ip}:{port}", 'blue')
-        color_print(f"  Папка: {shorten_path(FILES_DIR)}", 'white')
-        color_print(f"  ПИН-код: {security.get_token()}", 'yellow')
-        color_print(f"  Макс. размер: {max_size_mb} MB", 'white')
-        color_print(f"  Активных соединений: {security.active_connections}", 'white')
+        color_print(t("wt_run_running"), 'green')
+        color_print(t("wt_run_addr", ip=ip, port=port), 'blue')
+        color_print(t("wt_run_dir", path=shorten_path(FILES_DIR)), 'white')
+        color_print(t("wt_run_pin", pin=security.get_token()), 'yellow')
+        color_print(t("wt_run_size", size=max_size_mb), 'white')
+        color_print(t("wt_run_conn", conn=security.active_connections), 'white')
         if HAVE_BACKGROUND:
-            color_print("  Фоновый режим: АКТИВЕН", 'green')
-        color_print(f"  Лог: {shorten_path(LOG_FILE)}", 'white')
-        color_print(f"  Аудит: {shorten_path(AUDIT_LOG)}", 'white')
+            color_print(t("wt_run_bg"), 'green')
+        color_print(t("wt_run_log", path=shorten_path(LOG_FILE)), 'white')
+        color_print(t("wt_run_audit", path=shorten_path(AUDIT_LOG)), 'white')
     else:
-        color_print("  Статус: [ОСТАНОВЛЕН]", 'yellow')
+        color_print(t("wt_run_stopped"), 'yellow')
     print()
-    color_print("-" * 45, 'cyan')
+    color_print("-" * 49, 'cyan')
     print()
 
 
 def show_security_info():
     clear_screen()
     print_header()
-    color_print("  ИНФОРМАЦИЯ О БЕЗОПАСНОСТИ", 'cyan')
+    color_print(t("wt_sec_info_title"), 'cyan')
     print()
-    color_print("  Защита от:", 'yellow')
-    color_print("    Directory Traversal (обход каталогов)", 'green')
-    color_print("    DOS атак (ограничение запросов)", 'green')
-    color_print("    Брутфорса (бан после 5 попыток)", 'green')
-    color_print("    Переполнения буфера (лимит размера)", 'green')
-    color_print("    XSS и Clickjacking (CSP заголовки)", 'green')
-    color_print("    Timing attacks (secrets.compare_digest)", 'green')
-    color_print("    Утечки токена (страница входа)", 'green')
+    color_print(t("wt_sec_prot"), 'yellow')
+    color_print(t("wt_sec_dt"), 'green')
+    color_print(t("wt_sec_dos"), 'green')
+    color_print(t("wt_sec_brute"), 'green')
+    color_print(t("wt_sec_overflow"), 'green')
+    color_print(t("wt_sec_xss"), 'green')
+    color_print(t("wt_sec_timing"), 'green')
+    color_print(t("wt_sec_leak"), 'green')
     print()
-    color_print("  ПИН-код доступа:", 'yellow')
+    color_print(t("wt_pin_lbl"), 'yellow')
     color_print(f"    {security.get_token()}", 'blue')
-    color_print("    (вводится на странице входа)", 'white')
+    color_print(t("wt_pin_hint"), 'white')
     print()
-    color_print("  Разрешенные расширения:", 'yellow')
+    color_print(t("wt_ext_lbl"), 'yellow')
     color_print("    " + ", ".join(sorted(CONFIG['ALLOWED_EXTENSIONS'])), 'white')
     print()
-    color_print("  Лимиты:", 'yellow')
+    color_print(t("wt_limits_lbl"), 'yellow')
     max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
-    color_print(f"    Макс. размер файла: {max_size_mb} MB", 'white')
-    color_print(f"    Запросов в минуту: {CONFIG['RATE_LIMIT']}", 'white')
-    color_print(f"    Макс. соединений: {CONFIG['MAX_CONNECTIONS']}", 'white')
-    color_print(f"    Бан после: {CONFIG['BAN_THRESHOLD']} неудачных попыток", 'white')
+    color_print(t("wt_max_size", size=max_size_mb), 'white')
+    color_print(t("wt_req_min", rate=CONFIG['RATE_LIMIT']), 'white')
+    color_print(t("wt_max_conn", conn=CONFIG['MAX_CONNECTIONS']), 'white')
+    color_print(t("wt_ban_after", num=CONFIG['BAN_THRESHOLD']), 'white')
     print()
-    color_print("-" * 45, 'cyan')
-    input("\n  Нажмите Enter для продолжения...")
+    color_print("-" * 49, 'cyan')
+    input(t("wt_press_enter"))
 
 
 def view_security_logs():
     clear_screen()
     print_header()
-    color_print("  ЛОГ АУДИТА БЕЗОПАСНОСТИ", 'cyan')
+    color_print(t("wt_audit_title"), 'cyan')
     print()
-    color_print("-" * 45, 'cyan')
+    color_print("-" * 49, 'cyan')
     print()
 
     if not os.path.exists(AUDIT_LOG):
-        color_print("  Лог аудита не найден.", 'yellow')
+        color_print(t("wt_audit_missing"), 'yellow')
     else:
         try:
             with open(AUDIT_LOG, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 if not lines:
-                    color_print("  Лог аудита пуст.", 'yellow')
+                    color_print(t("wt_audit_empty"), 'yellow')
                 else:
                     for line in lines[-50:]:
                         print(line.strip())
         except Exception as e:
-            color_print(f"  Ошибка чтения лога: {e}", 'red')
+            color_print(f"  Error: {e}", 'red')
 
     print()
-    color_print("-" * 45, 'cyan')
-    input("\n  Нажмите Enter для продолжения...")
+    color_print("-" * 49, 'cyan')
+    input(t("wt_press_enter"))
 
 
 def view_upload_log():
     clear_screen()
     print_header()
-    color_print("  ЛОГ ЗАГРУЗОК ФАЙЛОВ", 'cyan')
+    color_print(t("wt_upload_log_title"), 'cyan')
     print()
-    color_print("-" * 45, 'cyan')
+    color_print("-" * 49, 'cyan')
     print()
 
     if not os.path.exists(LOG_FILE):
-        color_print("  Лог загрузок не найден.", 'yellow')
+        color_print(t("wt_upload_log_missing"), 'yellow')
     else:
         try:
             with open(LOG_FILE, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 if not lines:
-                    color_print("  Лог загрузок пуст.", 'yellow')
+                    color_print(t("wt_upload_log_empty"), 'yellow')
                 else:
                     for line in lines[-50:]:
                         print(line.strip())
         except Exception as e:
-            color_print(f"  Ошибка чтения лога: {e}", 'red')
+            color_print(f"  Error: {e}", 'red')
 
     print()
-    color_print("-" * 45, 'cyan')
-    input("\n  Нажмите Enter для продолжения...")
+    color_print("-" * 49, 'cyan')
+    input(t("wt_press_enter"))
 
 
 def clear_log():
     clear_screen()
-    color_print("  ОЧИСТКА ЛОГОВ", 'cyan')
+    color_print(t("wt_clear_log_title"), 'cyan')
     print()
 
-    choice = input("  Очистить логи системы и загрузок? (y/n): ").strip().lower()
-    if choice == 'y':
+    choice = input(t("wt_clear_log_q")).strip().lower()
+    if choice in ('y', 'yes', 'д', 'да'):
         try:
             if os.path.exists(LOGS_DIR):
                 shutil.rmtree(LOGS_DIR)
                 os.makedirs(LOGS_DIR, mode=0o755, exist_ok=True)
-                color_print("  Папка с логами очищена.", 'green')
+                color_print(t("wt_clear_log_ok"), 'green')
             else:
-                color_print("  Папка с логами не найдена.", 'yellow')
+                color_print(t("wt_clear_log_missing"), 'yellow')
         except Exception as e:
-            color_print(f"  Ошибка очистки логов: {e}", 'red')
+            color_print(f"  Error: {e}", 'red')
 
-    input("\n  Нажмите Enter для продолжения...")
+    input(t("wt_press_enter"))
 
 
 def clear_files():
     clear_screen()
     print_header()
-    color_print("  ОЧИСТКА ПАПКИ С ФАЙЛАМИ", 'cyan')
+    color_print(t("wt_clear_files_title"), 'cyan')
     print()
-    color_print(f"  Внимание! Все файлы в {shorten_path(FILES_DIR)} будут безвозвратно удалены.", 'orange')
+    color_print(t("wt_clear_files_warn", path=shorten_path(FILES_DIR)), 'orange')
     print()
 
-    choice = input("  Удалить все загруженные файлы? (y/n): ").strip().lower()
-    if choice == 'y':
+    choice = input(t("wt_clear_files_q")).strip().lower()
+    if choice in ('y', 'yes', 'д', 'да'):
         try:
             if os.path.exists(FILES_DIR):
                 shutil.rmtree(FILES_DIR)
                 ensure_directories()
-                color_print("  Папка с загруженными файлами успешно очищена.", 'green')
-                log_message("Папка с файлами очищена через меню", 'INFO')
+                color_print(t("wt_clear_files_ok"), 'green')
+                log_message(t("wt_clear_files_log"), 'INFO')
             else:
-                color_print("  Папка с файлами не найдена.", 'yellow')
+                color_print(t("wt_clear_files_missing"), 'yellow')
         except Exception as e:
-            color_print(f"  Ошибка при очистке папки: {e}", 'red')
+            color_print(f"  Error: {e}", 'red')
 
-    input("\n  Нажмите Enter для продолжения...")
+    input(t("wt_press_enter"))
 
 
 def manage_blacklist():
     clear_screen()
     print_header()
-    color_print("  УПРАВЛЕНИЕ ЧЕРНЫМ СПИСКОМ", 'cyan')
+    color_print(t("wt_black_title"), 'cyan')
     print()
 
     with security.rate_lock:
         banned = dict(security.banned_ips)
 
     if not banned:
-        color_print("  Черный список пуст.", 'green')
+        color_print(t("wt_black_empty"), 'green')
     else:
-        color_print("  Забаненные IP:", 'yellow')
+        color_print(t("wt_black_banned"), 'yellow')
         for ip, ban_time in banned.items():
             remaining = int(CONFIG['BAN_DURATION'] - (time.time() - ban_time))
             if remaining > 0:
-                color_print(f"    {ip} - осталось {remaining} секунд", 'red')
+                color_print(t("wt_black_rem", ip=ip, sec=remaining), 'red')
             else:
-                color_print(f"    {ip} - истекает...", 'yellow')
+                color_print(t("wt_black_exp", ip=ip), 'yellow')
 
     print()
-    color_print("-" * 45, 'cyan')
-    choice = input("\n  [1] Очистить черный список\n  [2] Назад\n  Выберите: ")
+    color_print("-" * 49, 'cyan')
+    choice = input(f"\n  [1] {t('wt_black_opt1').strip()[4:]}\n  [2] {t('wt_black_opt2').strip()[4:]}\n  {t('wt_black_sel').strip()}").strip()
 
     if choice == "1":
         with security.rate_lock:
             security.banned_ips.clear()
             security._save_blacklist()
-        color_print("  Черный список очищен.", 'green')
+        color_print(t("wt_black_cleared"), 'green')
         time.sleep(1)
 
 
@@ -994,23 +1002,24 @@ def change_port():
     global CONFIG
     clear_screen()
     print_header()
-    color_print("  СМЕНА ПОРТА", 'cyan')
+    color_print(t("wt_port_title"), 'cyan')
     print()
     try:
-        new_port = int(input(f"  Введите новый порт (1024-65535) [{CONFIG['PORT']}]: ").strip() or str(CONFIG['PORT']))
+        new_port_str = input(t("wt_port_prompt", port=CONFIG['PORT'])).strip()
+        new_port = int(new_port_str if new_port_str else str(CONFIG['PORT']))
         if 1024 <= new_port <= 65535:
             CONFIG['PORT'] = new_port
-            log_message(f"Порт изменен на {new_port}", 'INFO')
-            color_print(f"  Порт изменен на {new_port}", 'green')
-            input("\n  Нажмите Enter для продолжения...")
+            log_message(f"Port changed to {new_port}", 'INFO')
+            color_print(t("wt_port_ok", port=new_port), 'green')
+            input(t("wt_press_enter"))
             return CONFIG['PORT']
         else:
-            color_print("  Неверный порт. Оставляем текущий.", 'red')
-            input("\n  Нажмите Enter для продолжения...")
+            color_print(t("wt_port_err"), 'red')
+            input(t("wt_press_enter"))
             return CONFIG['PORT']
     except (ValueError, EOFError):
-        color_print("  Неверный ввод. Оставляем текущий.", 'red')
-        input("\n  Нажмите Enter для продолжения...")
+        color_print(t("wt_port_bad_in"), 'red')
+        input(t("wt_press_enter"))
         return CONFIG['PORT']
 
 
@@ -1029,22 +1038,22 @@ def run_server():
 
     print_status(ip, port, running=True)
 
-    log_message(f"Сервер запущен на порту {port}", 'INFO')
-    log_message(f"ПИН-код доступа: {security.get_token()}", 'INFO')
-    audit_log(f"Сервер запущен на {ip}:{port}", 'INFO')
+    log_message(t("wt_srv_started", port=port), 'INFO')
+    log_message(t("wt_pin_msg", token=security.get_token()), 'INFO')
+    audit_log(f"Server started on {ip}:{port}", 'INFO')
 
-    color_print("\n  ПИН-КОД (для страницы входа):", 'yellow')
+    color_print(t("wt_run_pin_lbl"), 'yellow')
     color_print(f"     {security.get_token()}", 'cyan')
-    color_print(f"\n  Ссылка: http://{ip}:{port}", 'blue')
-    color_print("\n  Для остановки нажмите CTRL+C или кнопку на сайте", 'orange')
-    color_print("-" * 45, 'cyan')
+    color_print(t("wt_run_link", ip=ip, port=port), 'blue')
+    color_print(t("wt_run_stop_hint"), 'orange')
+    color_print("-" * 49, 'cyan')
     print()
 
     orig_cwd = os.getcwd()
     os.chdir(FILES_DIR)
     if HAVE_BACKGROUND:
         background.keep_alive()
-        log_message("Фоновый режим активирован", 'INFO')
+        log_message(t("wt_bg_active"), 'INFO')
 
     SERVER_INSTANCE = ThreadedFastHTTPServer(('', port), SecureHTTPRequestHandler)
 
@@ -1053,8 +1062,8 @@ def run_server():
     except KeyboardInterrupt:
         print()
     finally:
-        log_message("Сервер остановлен", 'INFO')
-        audit_log("Сервер остановлен", 'INFO')
+        log_message(t("wt_srv_stopped"), 'INFO')
+        audit_log("Server stopped", 'INFO')
         if SERVER_INSTANCE:
             SERVER_INSTANCE.server_close()
             SERVER_INSTANCE = None
@@ -1063,7 +1072,7 @@ def run_server():
         except Exception:
             pass
 
-    color_print("\n  Сервер остановлен. Возврат в меню.", 'green')
+    color_print(t("wt_stopped_ret"), 'green')
     time.sleep(1)
     return
 
@@ -1073,25 +1082,28 @@ def interactive_menu():
         clear_screen()
         print_header()
 
-        color_print("  ГЛАВНОЕ МЕНЮ", 'cyan')
+        cur_lang_display = get_lang().upper()
+
+        color_print(t("wt_menu_title"), 'cyan')
         print()
-        color_print("  [1] Запустить защищенный сервер", 'white')
-        color_print("  [2] Информация о безопасности", 'white')
-        color_print("  [3] Показать IP-адрес", 'white')
-        color_print("  [4] Сменить порт", 'white')
-        color_print("  [5] Просмотр лога аудита", 'white')
-        color_print("  [6] Просмотр лога загрузок", 'white')
-        color_print("  [7] Управление черным списком", 'white')
-        color_print("  [8] Список загруженных файлов", 'white')
-        color_print("  [9] Сгенерировать новый ПИН", 'white')
-        color_print("  [10] Очистить логи", 'white')
-        color_print("  [11] Очистить загруженные файлы (!!!)", 'orange')
-        color_print("  [0] Выход", 'white')
+        color_print(t("wt_m1"), 'white')
+        color_print(t("wt_m2"), 'white')
+        color_print(t("wt_m3"), 'white')
+        color_print(t("wt_m4"), 'white')
+        color_print(t("wt_m5"), 'white')
+        color_print(t("wt_m6"), 'white')
+        color_print(t("wt_m7"), 'white')
+        color_print(t("wt_m8"), 'white')
+        color_print(t("wt_m9"), 'white')
+        color_print(t("wt_m10"), 'white')
+        color_print(t("wt_m11"), 'orange')
+        color_print(t("wt_m12", lang=cur_lang_display), 'white')
+        color_print(t("wt_m0"), 'white')
         print()
-        color_print("-" * 45, 'cyan')
+        color_print("-" * 49, 'cyan')
         print()
 
-        choice = input("  Выберите: ").strip()
+        choice = input(t("wt_select")).strip()
 
         if choice == "1":
             run_server()
@@ -1112,19 +1124,24 @@ def interactive_menu():
             open_files_folder()
         elif choice == "9":
             new_token = security.rotate_token()
-            color_print(f"  Новый ПИН: {new_token}", 'green')
+            color_print(f"  New PIN: {new_token}", 'green')
             time.sleep(2)
         elif choice == "10":
             clear_log()
         elif choice == "11":
             clear_files()
+        elif choice == "12":
+            new_lang = "en" if get_lang() == "ru" else "ru"
+            set_lang(new_lang, persist=True)
+            color_print(t("wt_lang_switched"), 'green')
+            time.sleep(1)
         elif choice == "0":
             clear_screen()
-            color_print("\n  До свидания!", 'cyan')
+            color_print(t("wt_goodbye"), 'cyan')
             print()
             sys.exit(0)
         else:
-            color_print("  Неверный выбор.", 'red')
+            color_print("  Invalid choice.", 'red')
             time.sleep(1)
 
 
@@ -1132,23 +1149,23 @@ def show_ip():
     clear_screen()
     print_header()
     ip = get_local_ip()
-    color_print("\n  Ваши IP-адреса:", 'cyan')
+    color_print(t("wt_ip_title"), 'cyan')
     print()
-    color_print(f"  Локальный: http://{ip}:{CONFIG['PORT']}", 'blue')
-    color_print(f"  Localhost: http://127.0.0.1:{CONFIG['PORT']}", 'blue')
+    color_print(t("wt_ip_loc", ip=ip, port=CONFIG['PORT']), 'blue')
+    color_print(t("wt_ip_host", port=CONFIG['PORT']), 'blue')
     print()
-    color_print("-" * 45, 'cyan')
-    input("\n  Нажмите Enter для продолжения...")
+    color_print("-" * 49, 'cyan')
+    input(t("wt_press_enter"))
 
 
 def open_files_folder():
     clear_screen()
     print_header()
-    color_print("  СПИСОК ЗАГРУЖЕННЫХ ФАЙЛОВ", 'cyan')
+    color_print(t("wt_files_title"), 'cyan')
     print()
-    color_print(f"  Путь: {shorten_path(FILES_DIR)}", 'blue')
+    color_print(f"  Path: {shorten_path(FILES_DIR)}", 'blue')
     print()
-    color_print("-" * 45, 'cyan')
+    color_print("-" * 49, 'cyan')
     print()
 
     try:
@@ -1158,7 +1175,7 @@ def open_files_folder():
                      if os.path.isfile(os.path.join(FILES_DIR, f)) and not f.startswith('.')]
 
         if not files:
-            color_print("  Папка пуста. Файлов нет.", 'yellow')
+            color_print(t("wt_files_empty"), 'yellow')
         else:
             files.sort(key=lambda f: os.path.getmtime(os.path.join(FILES_DIR, f)), reverse=True)
             for idx, file in enumerate(files, 1):
@@ -1167,20 +1184,22 @@ def open_files_folder():
                 mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fpath)).strftime('%Y-%m-%d %H:%M')
                 color_print(f"  [{idx}] {file} ({fsize:.2f} MB) - {mtime}", 'white')
     except Exception as e:
-        color_print(f"  Ошибка чтения файлов: {e}", 'red')
+        color_print(f"  Error: {e}", 'red')
 
     print()
-    color_print("-" * 45, 'cyan')
-    input("\n  Нажмите Enter для продолжения...")
+    color_print("-" * 49, 'cyan')
+    input(t("wt_press_enter"))
 
 
 def main():
+    args = _parse_cli_args()
+    init_i18n(lang=args.lang, persist=(args.lang is not None))
     ensure_directories()
     try:
         interactive_menu()
     except KeyboardInterrupt:
         clear_screen()
-        color_print("\n  До свидания!", 'cyan')
+        color_print(t("wt_goodbye"), 'cyan')
         print()
         sys.exit(0)
 
