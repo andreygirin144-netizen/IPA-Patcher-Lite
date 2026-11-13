@@ -1,40 +1,41 @@
 # -*- coding: utf-8 -*-
 import os
 
-from utils import color_print, ask_input, ask_yes_no, log_message
+from utils import color_print, ask_input, ask_yes_no
 from core import load_plist_safe, save_plist_safe
-from .text_viewer import parse_typed_value, safe_read_file_content
+from i18n import t
+from .text_viewer import parse_typed_value
 
 
 def edit_plist_file(file_path, on_change_callback=None):
     try:
         plist_data = load_plist_safe(file_path)
         if not plist_data or not isinstance(plist_data, dict):
-            color_print("Не удалось загрузить plist или файл пуст.", 'red')
+            color_print(t("fe_pt_load_err"), 'red')
             return [], {}
 
         changed_keys = []
         deep_flags = {'version_deep': False, 'bundle_deep': False}
-        
+
         while True:
-            color_print(f"\nРедактор plist: {os.path.basename(file_path)}", 'cyan')
-            print("=" * 50)
-            print(f"  Всего ключей: {len(plist_data)}")
+            color_print(t("fe_pt_hdr", name=os.path.basename(file_path)), 'cyan')
+            print("=" * 49)
+            print(t("fe_pt_total", n=len(plist_data)))
             print("")
-            print("  1. Просмотреть все ключи")
-            print("  2. Изменить значение ключа (можно несколько через пробел)")
-            print("  3. Добавить новый ключ")
-            print("  4. Удалить ключ (можно несколько через пробел)")
-            print("  5. Быстрое редактирование (имя, версия, Bundle ID)")
-            print("  0. Выйти из редактора plist")
-            
-            action = ask_input("Выберите действие", "0")
-            
+            print(t("fe_pt_m1"))
+            print(t("fe_pt_m2"))
+            print(t("fe_pt_m3"))
+            print(t("fe_pt_m4"))
+            print(t("fe_pt_m5"))
+            print(t("fe_pt_m0"))
+
+            action = ask_input(t("fe_select_action"), "0")
+
             if action == "0":
                 break
-                
+
             elif action == "1":
-                color_print("\nКлючи plist:", 'blue')
+                color_print(t("fe_pt_keys_hdr"), 'blue')
                 keys = sorted(plist_data.keys())
                 for idx, key in enumerate(keys, 1):
                     value = plist_data[key]
@@ -56,11 +57,11 @@ def edit_plist_file(file_path, on_change_callback=None):
                     else:
                         type_str = type(value).__name__
                     color_print(f"  {idx:>3}) {key} [{type_str}] = {value_str}", 'white')
-                input("\nНажмите Enter, чтобы продолжить...")
-                
+                input(t("fe_press_enter_nl"))
+
             elif action == "2":
                 keys = sorted(plist_data.keys())
-                color_print("\nДоступные ключи:", 'blue')
+                color_print(t("fe_pt_avail_keys"), 'blue')
                 for idx, key in enumerate(keys, 1):
                     value = plist_data[key]
                     value_str = str(value)
@@ -80,15 +81,15 @@ def edit_plist_file(file_path, on_change_callback=None):
                         type_str = type(value).__name__
                     color_print(f"  {idx:>3}) {key} [{type_str}] = {value_str}", 'white')
                 print("")
-                color_print("  Введите номера через пробел", 'cyan')
-                color_print("  Например: 1 5 10", 'green')
-                color_print("  Или диапазон: 1-5", 'green')
-                color_print("  0) Отмена", 'red')
-                
-                key_input = ask_input("Введите номера ключей", "0")
+                color_print(t("fe_pt_hint1"), 'cyan')
+                color_print(t("fe_pt_hint2"), 'green')
+                color_print(t("fe_pt_hint3"), 'green')
+                color_print(t("fe_cancel_0"), 'red')
+
+                key_input = ask_input(t("fe_pt_enter_nums"), "0")
                 if key_input == "0":
                     continue
-                
+
                 selected_indices = []
                 for part in key_input.split():
                     part = part.strip()
@@ -102,9 +103,9 @@ def edit_plist_file(file_path, on_change_callback=None):
                                     if i not in selected_indices:
                                         selected_indices.append(i)
                             else:
-                                color_print(f"Диапазон {part} вне допустимых значений (1-{len(keys)})", 'yellow')
+                                color_print(t("fe_mt_range_oob", part=part, max=len(keys)), 'yellow')
                         except ValueError:
-                            color_print(f"Неверный формат диапазона: {part}", 'red')
+                            color_print(t("fe_mt_range_bad", part=part), 'red')
                     else:
                         try:
                             idx = int(part) - 1
@@ -112,20 +113,20 @@ def edit_plist_file(file_path, on_change_callback=None):
                                 if idx not in selected_indices:
                                     selected_indices.append(idx)
                             else:
-                                color_print(f"Номер {part} вне диапазона (1-{len(keys)})", 'yellow')
+                                color_print(t("fe_mt_num_oob", part=part, max=len(keys)), 'yellow')
                         except ValueError:
-                            color_print(f"Неверный номер: {part}", 'red')
-                
+                            color_print(t("fe_mt_fmt_bad", part=part), 'red')
+
                 if not selected_indices:
-                    color_print("Не выбрано ни одного ключа.", 'yellow')
+                    color_print(t("fe_pt_none_sel"), 'yellow')
                     continue
-                
+
                 selected_keys = [keys[idx] for idx in selected_indices]
-                
+
                 has_version = any(k in ['CFBundleShortVersionString', 'CFBundleVersion'] for k in selected_keys)
                 has_bundle = any(k in ['CFBundleIdentifier'] for k in selected_keys)
-                
-                color_print(f"\nВыбрано {len(selected_indices)} ключей:", 'cyan')
+
+                color_print(t("fe_pt_sel_cnt", n=len(selected_indices)), 'cyan')
                 for idx in selected_indices:
                     key = keys[idx]
                     value = plist_data[key]
@@ -133,68 +134,68 @@ def edit_plist_file(file_path, on_change_callback=None):
                     if len(value_str) > 80:
                         value_str = value_str[:80] + "..."
                     color_print(f"  {idx+1}) {key} = {value_str}", 'white')
-                
-                if not ask_yes_no("Продолжить редактирование выбранных ключей?", default=True):
+
+                if not ask_yes_no(t("fe_pt_cont_q"), default=True):
                     continue
-                
+
                 deep_version = False
                 if has_version:
-                    color_print("\nВыберите способ замены версии:", 'cyan')
-                    print("  1) Только Info.plist (безопасно)")
-                    print("  2) Глубокая замена (во всех файлах)")
-                    mode = ask_input("Ваш выбор", "1")
+                    color_print(t("fe_pt_ver_mode"), 'cyan')
+                    print(t("fe_pt_m_plist"))
+                    print(t("fe_pt_m_deep"))
+                    mode = ask_input(t("your_choice"), "1")
                     deep_version = (mode == "2")
                     if deep_version:
-                        color_print("Выбрана глубокая замена версии", 'yellow')
+                        color_print(t("fe_pt_ver_deep"), 'yellow')
                         deep_flags['version_deep'] = True
                     else:
-                        color_print("Выбрана замена только в Info.plist", 'yellow')
+                        color_print(t("fe_pt_ver_plist"), 'yellow')
                         deep_flags['version_deep'] = False
-                
+
                 deep_bundle = False
                 if has_bundle:
-                    color_print("\nВыберите способ замены Bundle ID:", 'cyan')
-                    print("  1) Только Info.plist (безопасно)")
-                    print("  2) Глубокая замена (во всех файлах)")
-                    mode = ask_input("Ваш выбор", "1")
+                    color_print(t("fe_pt_bundle_mode"), 'cyan')
+                    print(t("fe_pt_m_plist"))
+                    print(t("fe_pt_m_deep"))
+                    mode = ask_input(t("your_choice"), "1")
                     deep_bundle = (mode == "2")
                     if deep_bundle:
-                        color_print("Выбрана глубокая замена Bundle ID", 'yellow')
+                        color_print(t("fe_pt_bundle_deep"), 'yellow')
                         deep_flags['bundle_deep'] = True
                     else:
-                        color_print("Выбрана замена только в Info.plist", 'yellow')
+                        color_print(t("fe_pt_ver_plist"), 'yellow')
                         deep_flags['bundle_deep'] = False
-                
-                color_print("\nПодсказка по форматам:", 'cyan')
-                print("  true/false - булево значение")
-                print("  123 - целое число")
-                print("  12.5 - число с плавающей точкой")
-                print("  [1, 2, 3] - массив (список)")
-                print("  {\"key\": \"value\"} - словарь")
-                print("  (пустой ввод - пропустить ключ)")
+
+                color_print(t("fe_pt_fmt_hint"), 'cyan')
+                print(t("fe_pt_fmt_bool"))
+                print(t("fe_pt_fmt_int"))
+                print(t("fe_pt_fmt_float"))
+                print(t("fe_pt_fmt_arr"))
+                print(t("fe_pt_fmt_dict"))
+                print(t("fe_pt_fmt_skip"))
                 print("")
-                
+
                 edited_count = 0
-                for idx in selected_indices:
+                for pos_i, idx in enumerate(selected_indices, 1):
                     key = keys[idx]
                     current = plist_data[key]
                     current_str = str(current)
                     if len(current_str) > 80:
                         current_str = current_str[:80] + "..."
-                    
-                    color_print(f"\n[{idx+1}/{len(selected_indices)}] Ключ: {key}", 'yellow')
-                    color_print(f"  Текущее значение: {current_str}", 'white')
-                    
+
+                    color_print(t("fe_pt_key_cur", idx=pos_i, tot=len(selected_indices), key=key), 'yellow')
+                    color_print(t("fe_pt_val_cur", val=current_str), 'white')
+
                     if key in ['CFBundleShortVersionString', 'CFBundleVersion'] and deep_version:
-                        color_print(f"  [ГЛУБОКАЯ ЗАМЕНА] Будет заменено во всех файлах", 'green')
+                        color_print(t("fe_pt_deep_note"), 'green')
                     elif key == 'CFBundleIdentifier' and deep_bundle:
-                        color_print(f"  [ГЛУБОКАЯ ЗАМЕНА] Будет заменено во всех файлах", 'green')
-                    
-                    new_value = ask_input(f"Новое значение для '{key}' (Enter = пропустить)", "")
+                        color_print(t("fe_pt_deep_note"), 'green')
+
+                    new_value = ask_input(t("fe_pt_new_val_q", key=key), "")
                     if new_value == "":
-                        color_print(f"  Пропущен: {key}", 'yellow')
+                        color_print(t("fe_pt_skipped", key=key), 'yellow')
                         continue
-                    
+
                     try:
                         parsed = parse_typed_value(new_value)
                         if parsed != current:
@@ -202,57 +203,57 @@ def edit_plist_file(file_path, on_change_callback=None):
                             edited_count += 1
                             if key not in changed_keys:
                                 changed_keys.append(key)
-                            color_print(f"  Обновлен: {key}", 'green')
+                            color_print(t("fe_pt_updated", key=key), 'green')
                         else:
-                            color_print(f"  Значение не изменилось: {key}", 'yellow')
+                            color_print(t("fe_pt_unchanged", key=key), 'yellow')
                     except Exception as e:
-                        color_print(f"  Ошибка для {key}: {e}", 'red')
-                
+                        color_print(t("fe_pt_key_err", key=key, err=e), 'red')
+
                 if edited_count > 0:
                     if save_plist_safe(plist_data, file_path):
-                        color_print(f"\n[SUCCESS] Обновлено {edited_count} ключей.", 'green')
+                        color_print(t("fe_pt_upd_cnt", n=edited_count), 'green')
                         if on_change_callback:
                             on_change_callback()
                     else:
-                        color_print("[ERROR] Не удалось сохранить plist.", 'red')
+                        color_print(t("fe_pt_save_err"), 'red')
                 else:
-                    color_print("[INFO] Ни один ключ не был изменен.", 'yellow')
-                    
+                    color_print(t("fe_pt_none_chg"), 'yellow')
+
             elif action == "3":
-                new_key = ask_input("Введите имя нового ключа")
+                new_key = ask_input(t("fe_pt_new_key_name"))
                 if new_key and new_key not in plist_data:
-                    new_value = ask_input(f"Введите значение для {new_key}")
+                    new_value = ask_input(t("fe_pt_new_key_val", key=new_key))
                     if new_value:
                         plist_data[new_key] = parse_typed_value(new_value)
                         if new_key not in changed_keys:
                             changed_keys.append(new_key)
                         if save_plist_safe(plist_data, file_path):
-                            color_print(f"[SUCCESS] Ключ {new_key} добавлен.", 'green')
+                            color_print(t("fe_pt_added", key=new_key), 'green')
                             if on_change_callback:
                                 on_change_callback()
                         else:
-                            color_print("[ERROR] Не удалось сохранить plist.", 'red')
+                            color_print(t("fe_pt_save_err"), 'red')
                 elif new_key in plist_data:
-                    color_print(f"Ключ {new_key} уже существует.", 'yellow')
-                    
+                    color_print(t("fe_pt_exists", key=new_key), 'yellow')
+
             elif action == "4":
                 keys = sorted(plist_data.keys())
-                color_print("\nДоступные ключи:", 'blue')
+                color_print(t("fe_pt_avail_keys"), 'blue')
                 for idx, key in enumerate(keys, 1):
                     value_str = str(plist_data[key])
                     if len(value_str) > 50:
                         value_str = value_str[:50] + "..."
                     color_print(f"  {idx:>3}) {key} = {value_str}", 'white')
                 print("")
-                color_print("  Введите номера через пробел", 'cyan')
-                color_print("  Например: 1 5 10", 'green')
-                color_print("  Или диапазон: 1-5", 'green')
-                color_print("  0) Отмена", 'red')
-                
-                key_input = ask_input("Введите номера ключей для удаления", "0")
+                color_print(t("fe_pt_hint1"), 'cyan')
+                color_print(t("fe_pt_hint2"), 'green')
+                color_print(t("fe_pt_hint3"), 'green')
+                color_print(t("fe_cancel_0"), 'red')
+
+                key_input = ask_input(t("fe_pt_del_nums"), "0")
                 if key_input == "0":
                     continue
-                
+
                 selected_indices = []
                 for part in key_input.split():
                     part = part.strip()
@@ -266,9 +267,9 @@ def edit_plist_file(file_path, on_change_callback=None):
                                     if i not in selected_indices:
                                         selected_indices.append(i)
                             else:
-                                color_print(f"Диапазон {part} вне допустимых значений (1-{len(keys)})", 'yellow')
+                                color_print(t("fe_mt_range_oob", part=part, max=len(keys)), 'yellow')
                         except ValueError:
-                            color_print(f"Неверный формат диапазона: {part}", 'red')
+                            color_print(t("fe_mt_range_bad", part=part), 'red')
                     else:
                         try:
                             idx = int(part) - 1
@@ -276,25 +277,25 @@ def edit_plist_file(file_path, on_change_callback=None):
                                 if idx not in selected_indices:
                                     selected_indices.append(idx)
                             else:
-                                color_print(f"Номер {part} вне диапазона (1-{len(keys)})", 'yellow')
+                                color_print(t("fe_mt_num_oob", part=part, max=len(keys)), 'yellow')
                         except ValueError:
-                            color_print(f"Неверный номер: {part}", 'red')
-                
+                            color_print(t("fe_mt_fmt_bad", part=part), 'red')
+
                 if not selected_indices:
-                    color_print("Не выбрано ни одного ключа.", 'yellow')
+                    color_print(t("fe_pt_none_sel"), 'yellow')
                     continue
-                
-                color_print(f"\nВыбрано {len(selected_indices)} ключей для удаления:", 'red')
+
+                color_print(t("fe_pt_del_cnt", n=len(selected_indices)), 'red')
                 for idx in selected_indices:
                     key = keys[idx]
                     value_str = str(plist_data[key])
                     if len(value_str) > 80:
                         value_str = value_str[:80] + "..."
                     color_print(f"  {idx+1}) {key} = {value_str}", 'red')
-                
-                if not ask_yes_no(f"Удалить {len(selected_indices)} ключей?", default=False):
+
+                if not ask_yes_no(t("fe_pt_del_q", n=len(selected_indices)), default=False):
                     continue
-                
+
                 deleted_count = 0
                 for idx in selected_indices:
                     key = keys[idx]
@@ -302,21 +303,21 @@ def edit_plist_file(file_path, on_change_callback=None):
                     deleted_count += 1
                     if key in changed_keys:
                         changed_keys.remove(key)
-                    color_print(f"  Удален: {key}", 'green')
-                
+                    color_print(t("fe_pt_deleted_one", key=key), 'green')
+
                 if save_plist_safe(plist_data, file_path):
-                    color_print(f"[SUCCESS] Удалено {deleted_count} ключей.", 'green')
+                    color_print(t("fe_pt_del_done", n=deleted_count), 'green')
                     if on_change_callback:
                         on_change_callback()
                 else:
-                    color_print("[ERROR] Не удалось сохранить plist.", 'red')
-                    
+                    color_print(t("fe_pt_save_err"), 'red')
+
             elif action == "5":
-                color_print("\nБыстрое редактирование:", 'cyan')
+                color_print(t("fe_pt_quick_hdr"), 'cyan')
                 print("=" * 40)
-                
+
                 current_name = plist_data.get("CFBundleDisplayName") or plist_data.get("CFBundleName", "")
-                new_name = ask_input("Имя приложения", current_name)
+                new_name = ask_input(t("fe_pt_q_name"), current_name)
                 if new_name and new_name != current_name:
                     plist_data["CFBundleDisplayName"] = new_name
                     plist_data["CFBundleName"] = new_name
@@ -325,79 +326,79 @@ def edit_plist_file(file_path, on_change_callback=None):
                     if "CFBundleName" not in changed_keys:
                         changed_keys.append("CFBundleName")
                     if save_plist_safe(plist_data, file_path):
-                        color_print(f"[SUCCESS] Имя изменено: {current_name} -> {new_name}", 'green')
+                        color_print(t("fe_pt_q_name_ok", old=current_name, new=new_name), 'green')
                         if on_change_callback:
                             on_change_callback()
                     else:
-                        color_print("[ERROR] Не удалось сохранить.", 'red')
+                        color_print(t("fe_pt_save_err"), 'red')
                         continue
-                
+
                 current_version = plist_data.get("CFBundleShortVersionString", "1.0")
-                new_version = ask_input("Версия", current_version)
+                new_version = ask_input(t("fe_pt_q_ver"), current_version)
                 if new_version and new_version != current_version:
-                    color_print("\nВыберите способ замены версии:", 'cyan')
-                    print("  1) Только Info.plist (безопасно)")
-                    print("  2) Глубокая замена (во всех файлах)")
-                    mode = ask_input("Ваш выбор", "1")
+                    color_print(t("fe_pt_ver_mode"), 'cyan')
+                    print(t("fe_pt_m_plist"))
+                    print(t("fe_pt_m_deep"))
+                    mode = ask_input(t("your_choice"), "1")
                     deep_replace = (mode == "2")
-                    
+
                     plist_data["CFBundleShortVersionString"] = new_version
                     if "CFBundleShortVersionString" not in changed_keys:
                         changed_keys.append("CFBundleShortVersionString")
                     if deep_replace:
                         deep_flags['version_deep'] = True
                     if save_plist_safe(plist_data, file_path):
-                        color_print(f"[SUCCESS] Версия изменена: {current_version} -> {new_version}", 'green')
+                        color_print(t("fe_pt_q_ver_ok", old=current_version, new=new_version), 'green')
                         if deep_replace:
-                            color_print("[INFO] Выбрана глубокая замена версии (будет выполнена при сборке)", 'yellow')
+                            color_print(t("fe_pt_q_ver_deep"), 'yellow')
                         if on_change_callback:
                             on_change_callback()
                     else:
-                        color_print("[ERROR] Не удалось сохранить.", 'red')
+                        color_print(t("fe_pt_save_err"), 'red')
                         continue
-                
+
                 current_build = plist_data.get("CFBundleVersion", "1")
-                new_build = ask_input("Номер сборки", current_build)
+                new_build = ask_input(t("fe_pt_q_build"), current_build)
                 if new_build and new_build != current_build:
                     plist_data["CFBundleVersion"] = new_build
                     if "CFBundleVersion" not in changed_keys:
                         changed_keys.append("CFBundleVersion")
                     if save_plist_safe(plist_data, file_path):
-                        color_print(f"[SUCCESS] Номер сборки изменён: {current_build} -> {new_build}", 'green')
+                        color_print(t("fe_pt_q_build_ok", old=current_build, new=new_build), 'green')
                         if on_change_callback:
                             on_change_callback()
                     else:
-                        color_print("[ERROR] Не удалось сохранить.", 'red')
+                        color_print(t("fe_pt_save_err"), 'red')
                         continue
-                
+
                 current_bundle = plist_data.get("CFBundleIdentifier", "")
-                new_bundle = ask_input("Bundle ID", current_bundle)
+                new_bundle = ask_input(t("fe_pt_q_bundle"), current_bundle)
                 if new_bundle and new_bundle != current_bundle:
-                    color_print("\nВыберите способ замены Bundle ID:", 'cyan')
-                    print("  1) Только Info.plist (безопасно)")
-                    print("  2) Глубокая замена (во всех файлах)")
-                    mode = ask_input("Ваш выбор", "1")
+                    color_print(t("fe_pt_bundle_mode"), 'cyan')
+                    print(t("fe_pt_m_plist"))
+                    print(t("fe_pt_m_deep"))
+                    mode = ask_input(t("your_choice"), "1")
                     deep_replace = (mode == "2")
-                    
+
                     plist_data["CFBundleIdentifier"] = new_bundle
                     if "CFBundleIdentifier" not in changed_keys:
                         changed_keys.append("CFBundleIdentifier")
                     if deep_replace:
                         deep_flags['bundle_deep'] = True
                     if save_plist_safe(plist_data, file_path):
-                        color_print(f"[SUCCESS] Bundle ID изменён: {current_bundle} -> {new_bundle}", 'green')
+                        color_print(t("fe_pt_q_bundle_ok", old=current_bundle, new=new_bundle), 'green')
                         if deep_replace:
-                            color_print("[INFO] Выбрана глубокая замена Bundle ID (будет выполнена при сборке)", 'yellow')
+                            color_print(t("fe_pt_q_bundle_deep"), 'yellow')
                         if on_change_callback:
                             on_change_callback()
                     else:
-                        color_print("[ERROR] Не удалось сохранить.", 'red')
+                        color_print(t("fe_pt_save_err"), 'red')
                         continue
-                
-                color_print("[SUCCESS] Быстрое редактирование завершено!", 'green')
-        
+
+                color_print(t("fe_pt_q_done"), 'green')
+
         return changed_keys, deep_flags
 
     except Exception as e:
-        color_print(f"Ошибка работы с plist: {e}", 'red')
+        color_print(t("fe_pt_err", err=e), 'red')
         return [], {}

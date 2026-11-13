@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 import os
 import fnmatch
+import plistlib
 
 from utils import color_print, ask_input, ask_yes_no, log_message
-from core import is_macho_binary, load_plist_safe
+from core import is_macho_binary
+from i18n import t
 from .utils import is_safe_path, format_file_size, count_items_in_dir, is_text_extension
 from .backups import cleanup_backups
 from .macho_tools import handle_macho_file
@@ -13,17 +15,17 @@ from .file_actions import handle_file_actions, cleanup_all_temp_files
 def cleanup_backups_in_app(app_dir: str) -> int:
     try:
         deleted = 0
-        for root, dirs, files in os.walk(app_dir):
+        for root, _, files in os.walk(app_dir):
             for file in files:
                 if '.bak.' in file or file.endswith('.bak'):
                     file_path = os.path.join(root, file)
                     try:
                         os.remove(file_path)
                         deleted += 1
-                    except:
+                    except Exception:
                         pass
         if deleted > 0:
-            color_print(f"[INFO] Удалено {deleted} бэкапов из .app", 'green')
+            color_print(t("fe_br_bak_cleaned", count=deleted), 'green')
         return deleted
     except Exception as e:
         log_message(f"Failed to cleanup backups in app: {e}", 'WARN')
@@ -33,17 +35,17 @@ def cleanup_backups_in_app(app_dir: str) -> int:
 def search_files(app_dir: str, search_pattern: str, current_dir: str = None) -> list:
     if current_dir is None:
         current_dir = app_dir
-    
+
     results = []
     search_lower = search_pattern.lower()
-    
+
     for root, dirs, files in os.walk(current_dir):
         for d in dirs:
             if fnmatch.fnmatch(d.lower(), search_lower) or search_lower in d.lower():
                 full_path = os.path.join(root, d)
                 rel_path = os.path.relpath(full_path, app_dir)
                 results.append((full_path, rel_path, True))
-        
+
         for f in files:
             if fnmatch.fnmatch(f.lower(), search_lower) or search_lower in f.lower():
                 full_path = os.path.join(root, f)
@@ -51,10 +53,10 @@ def search_files(app_dir: str, search_pattern: str, current_dir: str = None) -> 
                 try:
                     size = os.path.getsize(full_path)
                     size_str = format_file_size(size)
-                except:
+                except Exception:
                     size_str = "? B"
                 results.append((full_path, rel_path, False, size_str))
-    
+
     return results
 
 
@@ -68,10 +70,9 @@ def start_interactive_explorer(app_dir: str) -> tuple:
     changed_files = set()
     plist_changes = {}
     deep_flags = {'version_deep': False, 'bundle_deep': False}
-    
+
     plist_data = None
     try:
-        import plistlib
         plist_path = os.path.join(real_app_dir, "Info.plist")
         if os.path.exists(plist_path):
             with open(plist_path, 'rb') as f:
@@ -80,15 +81,17 @@ def start_interactive_explorer(app_dir: str) -> tuple:
         log_message(f"Failed to load plist at start: {e}", 'WARN')
         plist_data = {}
 
+    if plist_data is None:
+        plist_data = {}
+
     def reload_plist():
         nonlocal plist_data
         try:
-            import plistlib
             plist_path = os.path.join(real_app_dir, "Info.plist")
             if os.path.exists(plist_path):
                 with open(plist_path, 'rb') as f:
                     plist_data = plistlib.load(f)
-                color_print("[INFO] Info.plist перезагружен!", 'green')
+                color_print(t("fe_br_plist_reloaded"), 'green')
         except Exception as e:
             log_message(f"Failed to reload plist: {e}", 'WARN')
 
@@ -104,7 +107,7 @@ def start_interactive_explorer(app_dir: str) -> tuple:
         })
 
     if not os.path.isdir(real_app_dir):
-        color_print(f"[ERROR] Папка .app не найдена: {app_dir}", 'red')
+        color_print(t("fe_br_app_missing", path=app_dir), 'red')
         return False, [], None, {}
 
     while True:
@@ -112,16 +115,16 @@ def start_interactive_explorer(app_dir: str) -> tuple:
         display_path = "Root" if rel_path == "." else rel_path
 
         if search_mode:
-            color_print(f"\nРезультаты поиска: {display_path}", 'cyan')
+            color_print(t("fe_br_search_hdr", path=display_path), 'cyan')
         else:
-            color_print(f"\nФайловый менеджер: {display_path}", 'cyan')
-        print("=" * 55)
+            color_print(t("fe_br_fm_hdr", path=display_path), 'cyan')
+        print("=" * 49)
 
         if search_mode:
             if not search_results:
-                color_print("  Ничего не найдено.", 'yellow')
+                color_print(t("fe_br_nothing_found"), 'yellow')
             else:
-                color_print(f"  Найдено: {len(search_results)} элементов", 'green')
+                color_print(t("fe_br_found_cnt", count=len(search_results)), 'green')
                 for idx, result in enumerate(search_results, 1):
                     if len(result) >= 4:
                         _, rel_path, is_dir, size_str = result
@@ -135,27 +138,27 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                             color_print(f"  {idx}) [DIR] {rel_path}", 'blue')
                         else:
                             print(f"  {idx}) {rel_path}")
-            print("  s) Новый поиск")
-            print("  c) Очистить результаты")
-            print("  0) Назад")
-            
-            choice = ask_input("Выберите элемент", "0")
-            
+            print(t("fe_br_new_search"))
+            print(t("fe_br_clear_search"))
+            print(t("fe_back_0"))
+
+            choice = ask_input(t("fe_br_select_item"), "0")
+
             if choice == "0":
                 search_mode = False
                 search_results = []
                 continue
             elif choice.lower() == "s":
-                search_pattern = ask_input("Введите шаблон поиска (например, *.plist, Info, .dylib, *.sqlite)")
+                search_pattern = ask_input(t("fe_br_search_prompt"))
                 if search_pattern:
                     search_results = search_files(app_dir, search_pattern, app_dir)
-                    color_print(f"[INFO] Найдено: {len(search_results)} элементов", 'green')
+                    color_print(t("fe_br_found_info", count=len(search_results)), 'green')
                 continue
             elif choice.lower() == "c":
                 search_results = []
-                color_print("[INFO] Результаты очищены.", 'yellow')
+                color_print(t("fe_br_search_cleared"), 'yellow')
                 continue
-            
+
             if choice.isdigit() and 1 <= int(choice) <= len(search_results):
                 result = search_results[int(choice) - 1]
                 if len(result) >= 3:
@@ -197,13 +200,13 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                                     changed_files.add(base_fname)
                                     all_changes.append({'type': 'file_edit', 'file': base_fname})
             else:
-                color_print("Неверный выбор.", 'red')
+                color_print(t("fe_invalid_choice"), 'red')
             continue
 
         try:
             items = os.listdir(current_dir)
         except Exception as e:
-            color_print(f"[ERROR] Не удалось открыть папку: {e}", 'red')
+            color_print(t("fe_br_dir_err", err=e), 'red')
             parent = os.path.dirname(current_dir)
             if is_safe_path(parent, real_app_dir):
                 current_dir = parent
@@ -213,9 +216,9 @@ def start_interactive_explorer(app_dir: str) -> tuple:
 
         items.sort(key=lambda x: (not os.path.isdir(os.path.join(current_dir, x)), x.lower()))
 
-        print("  0) Выход в главное меню патчера")
-        print("  s) Поиск файлов")
-        print("  h) Помощь")
+        print(t("fe_br_exit_main"))
+        print(t("fe_br_search_files"))
+        print(t("fe_br_help"))
 
         for idx, item in enumerate(items, 1):
             full_path = os.path.join(current_dir, item)
@@ -239,89 +242,87 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                 except OSError:
                     print(f"  {idx}) {item}")
 
-        color_print("=" * 55, 'cyan')
-        
+        color_print("=" * 49, 'cyan')
+
         if current_dir != app_dir:
-            print("  ..) На уровень выше")
-        
-        choice = ask_input("Выберите элемент", "0")
+            print(t("fe_br_parent_dir"))
+
+        choice = ask_input(t("fe_br_select_item"), "0")
 
         if choice == "0":
             if current_dir == app_dir:
                 try:
-                    import plistlib
                     plist_path = os.path.join(real_app_dir, "Info.plist")
                     if os.path.exists(plist_path):
                         with open(plist_path, 'rb') as f:
                             current_plist = plistlib.load(f)
-                        
+
                         old_name = plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName')
                         new_name = current_plist.get('CFBundleDisplayName') or current_plist.get('CFBundleName')
                         if new_name and old_name and new_name != old_name:
                             plist_changes['name'] = new_name
-                            add_change('plist_change', 'Info.plist', f'Имя: {old_name}', f'Имя: {new_name}')
-                        
+                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_name", val=old_name), t("fe_br_lbl_name", val=new_name))
+
                         old_version = plist_data.get('CFBundleShortVersionString')
                         new_version = current_plist.get('CFBundleShortVersionString')
                         if new_version and old_version and new_version != old_version:
                             plist_changes['version'] = new_version
                             plist_changes['version_old'] = old_version
                             plist_changes['version_deep'] = deep_flags.get('version_deep', False)
-                            add_change('plist_change', 'Info.plist', f'Версия: {old_version}', f'Версия: {new_version}')
-                        
+                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_ver", val=old_version), t("fe_br_lbl_ver", val=new_version))
+
                         old_bundle = plist_data.get('CFBundleIdentifier')
                         new_bundle = current_plist.get('CFBundleIdentifier')
                         if new_bundle and old_bundle and new_bundle != old_bundle:
                             plist_changes['bundle_id'] = new_bundle
                             plist_changes['bundle_old'] = old_bundle
                             plist_changes['bundle_deep'] = deep_flags.get('bundle_deep', False)
-                            add_change('plist_change', 'Info.plist', f'Bundle ID: {old_bundle}', f'Bundle ID: {new_bundle}')
-                        
+                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_bundle", val=old_bundle), t("fe_br_lbl_bundle", val=new_bundle))
+
                         old_build = plist_data.get('CFBundleVersion')
                         new_build = current_plist.get('CFBundleVersion')
                         if new_build and old_build and new_build != old_build:
                             plist_changes['build'] = new_build
-                            add_change('plist_change', 'Info.plist', f'Сборка: {old_build}', f'Сборка: {new_build}')
-                        
+                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_build", val=old_build), t("fe_br_lbl_build", val=new_build))
+
                         plist_data = current_plist
-                        color_print("[INFO] Info.plist перезагружен при выходе!", 'green')
+                        color_print(t("fe_br_plist_exit"), 'green')
                 except Exception as e:
                     log_message(f"Failed to reload plist on exit: {e}", 'WARN')
-                
+
                 if modified_any and all_changes:
-                    color_print("\nСВОДКА ИЗМЕНЕНИЙ В ФАЙЛОВОМ МЕНЕДЖЕРЕ:", 'yellow')
-                    color_print("=" * 50, 'cyan')
-                    
+                    color_print(t("fe_br_sum_hdr"), 'yellow')
+                    color_print("=" * 49, 'cyan')
+
                     if changed_files:
-                        color_print("  Измененные файлы:", 'cyan')
+                        color_print(t("fe_br_sum_files"), 'cyan')
                         for file_name in sorted(changed_files):
                             color_print(f"    - {file_name}", 'white')
                         color_print("", 'white')
-                    
+
                     for change in all_changes:
                         if change['type'] == 'macho_path_change':
-                            color_print(f"  Изменён путь зависимости в {change.get('file', 'бинарнике')}:", 'green')
+                            color_print(t("fe_br_sum_dep_chg", file=change.get('file', t("fe_br_binary_word"))), 'green')
                             color_print(f"    {change['old']}", 'red')
                             color_print(f"    -> {change['new']}", 'green')
                         elif change['type'] == 'macho_add_dependency':
-                            color_print(f"  Добавлена зависимость в {change.get('file', 'бинарнике')}: {change['path']}", 'green')
+                            color_print(t("fe_br_sum_dep_add", file=change.get('file', t("fe_br_binary_word")), path=change['path']), 'green')
                         elif change['type'] == 'plist_change':
                             color_print(f"  {change['new']}", 'green')
                         elif change['type'] == 'file_edit':
-                            color_print(f"  Изменён файл: {change.get('file')}", 'green')
-                    color_print("=" * 50, 'cyan')
-                    if not ask_yes_no("Подтвердить выход из файлового менеджера?", default=True):
+                            color_print(t("fe_br_sum_file_edit", file=change.get('file')), 'green')
+                    color_print("=" * 49, 'cyan')
+                    if not ask_yes_no(t("fe_br_exit_q"), default=True):
                         continue
                 else:
-                    color_print("[INFO] Изменений не обнаружено.", 'yellow')
-                
+                    color_print(t("fe_br_no_changes"), 'yellow')
+
                 result_plist_changes = plist_changes.copy() if plist_changes else {}
-                
-                
+
                 cleanup_backups_in_app(app_dir)
                 cleanup_backups(app_dir)
                 cleanup_all_temp_files()
-                
+
                 return modified_any, all_changes, plist_data, result_plist_changes
             else:
                 parent = os.path.realpath(os.path.dirname(current_dir))
@@ -332,28 +333,28 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                 continue
 
         elif choice.lower() == "s":
-            search_pattern = ask_input("Введите шаблон поиска (например, *.plist, Info, .dylib, *.sqlite)")
+            search_pattern = ask_input(t("fe_br_search_prompt"))
             if search_pattern:
                 search_results = search_files(app_dir, search_pattern, current_dir)
                 search_mode = True
             continue
 
         elif choice.lower() == "h":
-            color_print("\nПомощь по файловому менеджеру:", 'cyan')
-            print("=" * 50)
-            print("  Навигация:")
-            print("    - Введите номер элемента для перехода")
-            print("    - 0 - выход/на уровень выше")
-            print("    - s - поиск файлов")
-            print("    - h - эта справка")
+            color_print(t("fe_br_help_hdr"), 'cyan')
+            print("=" * 49)
+            print(t("fe_br_help_nav"))
+            print(t("fe_br_help_n1"))
+            print(t("fe_br_help_n2"))
+            print(t("fe_br_help_n3"))
+            print(t("fe_br_help_n4"))
             print("")
-            print("  Типы файлов:")
-            color_print("    [DIR] - папка", 'blue')
-            color_print("    [Mach-O] - исполняемый бинарник", 'hotpink')
-            color_print("    [Database] - база данных SQLite", 'cyan')
-            color_print("    [Text] - текстовый файл", 'green')
-            print("=" * 50)
-            input("\nНажмите Enter для продолжения...")
+            print(t("fe_br_help_types"))
+            color_print(t("fe_br_help_t1"), 'blue')
+            color_print(t("fe_br_help_t2"), 'hotpink')
+            color_print(t("fe_br_help_t3"), 'cyan')
+            color_print(t("fe_br_help_t4"), 'green')
+            print("=" * 49)
+            input(t("fe_press_enter_nl"))
             continue
 
         elif choice.lower() == "..":
@@ -370,7 +371,7 @@ def start_interactive_explorer(app_dir: str) -> tuple:
             selected_path = os.path.join(current_dir, selected_item)
 
             if not is_safe_path(selected_path, real_app_dir):
-                color_print("[WARN] Попытка выйти за пределы .app - запрещено.", 'yellow')
+                color_print(t("fe_br_escape_warn"), 'yellow')
                 continue
 
             if os.path.isdir(selected_path):
@@ -406,6 +407,6 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                             changed_files.add(selected_item)
                             all_changes.append({'type': 'file_edit', 'file': selected_item})
         else:
-            color_print("Неверный выбор.", 'red')
+            color_print(t("fe_invalid_choice"), 'red')
 
     return modified_any, all_changes, plist_data, plist_changes

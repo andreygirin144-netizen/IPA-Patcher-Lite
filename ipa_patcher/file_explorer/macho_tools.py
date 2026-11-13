@@ -1,27 +1,25 @@
 # -*- coding: utf-8 -*-
 import os
-from pathlib import Path
 
 from utils import color_print, ask_input, ask_yes_no, log_message
 from core import is_macho_binary, get_load_dylibs, inject_lc_load_dylib, get_macho_summary
 from core import safe_patch_dylib_path
-from core import load_plist_safe, save_plist_safe
 from hex_patcher import start_hex_patcher
+from i18n import t
 from .backups import backup_file, restore_backup, rollback_after_failed_patch, find_backups
 from .utils import format_file_size
-from .types import ChangeSummary
 
 
 def parse_number_input(input_str: str, max_value: int) -> list:
     if not input_str or input_str.strip() == "":
         return []
-    
+
     if input_str.lower() == "all":
         return list(range(max_value))
-    
+
     result = []
     parts = input_str.split()
-    
+
     for part in parts:
         part = part.strip()
         if '-' in part:
@@ -34,26 +32,26 @@ def parse_number_input(input_str: str, max_value: int) -> list:
                         if i not in result:
                             result.append(i)
                 else:
-                    color_print(f"Диапазон {part} вне допустимых значений (1-{max_value})", 'yellow')
+                    color_print(t("fe_mt_range_oob", part=part, max=max_value), 'yellow')
             except ValueError:
-                color_print(f"Неверный формат диапазона: {part}", 'red')
+                color_print(t("fe_mt_range_bad", part=part), 'red')
         elif part.isdigit():
             idx = int(part) - 1
             if 0 <= idx < max_value:
                 if idx not in result:
                     result.append(idx)
             else:
-                color_print(f"Номер {part} вне диапазона (1-{max_value})", 'yellow')
+                color_print(t("fe_mt_num_oob", part=part, max=max_value), 'yellow')
         else:
-            color_print(f"Неверный формат: {part}", 'red')
-    
+            color_print(t("fe_mt_fmt_bad", part=part), 'red')
+
     return sorted(result)
 
 
 def is_valid_macho_binary(file_path: str) -> bool:
     if not is_macho_binary(file_path):
         return False
-    
+
     try:
         summary = get_macho_summary(file_path)
         if not summary.get('archs'):
@@ -70,23 +68,23 @@ def cleanup_old_backups(file_path: str, keep_latest: bool = True) -> None:
         backups = find_backups(file_path)
         if not backups:
             return
-        
+
         if keep_latest and len(backups) > 1:
             for backup in backups[:-1]:
                 try:
                     if backup.path.exists():
                         backup.path.unlink()
-                        color_print(f"[INFO] Удален старый бэкап: {os.path.basename(backup.path)}", 'green')
+                        color_print(t("fe_mt_old_bak_del", name=os.path.basename(backup.path)), 'green')
                 except Exception as e:
-                    color_print(f"[WARN] Не удалось удалить {os.path.basename(backup.path)}: {e}", 'yellow')
+                    color_print(t("fe_fa_tmp_del_err", name=os.path.basename(backup.path), err=e), 'yellow')
         elif not keep_latest:
             for backup in backups:
                 try:
                     if backup.path.exists():
                         backup.path.unlink()
-                        color_print(f"[INFO] Удален бэкап: {os.path.basename(backup.path)}", 'green')
+                        color_print(t("fe_mt_bak_del", name=os.path.basename(backup.path)), 'green')
                 except Exception as e:
-                    color_print(f"[WARN] Не удалось удалить {os.path.basename(backup.path)}: {e}", 'yellow')
+                    color_print(t("fe_fa_tmp_del_err", name=os.path.basename(backup.path), err=e), 'yellow')
     except Exception as e:
         log_message(f"Failed to cleanup old backups: {e}", 'WARN')
 
@@ -94,25 +92,25 @@ def cleanup_old_backups(file_path: str, keep_latest: bool = True) -> None:
 def handle_macho_file(file_path: str) -> tuple:
     modified = False
     changes_summary = []
-    
+
     while True:
-        color_print(f"\nИнструменты Mach-O: {os.path.basename(file_path)}", 'cyan')
-        print("=" * 50)
-        print("1. Показать список зависимостей (LC_LOAD_DYLIB)")
-        print("2. Изменить путь зависимости (только с префиксами)")
-        print("3. Добавить новую зависимость (LC_LOAD_DYLIB)")
-        print("4. Информация о файле")
-        print("5. Восстановить из резервной копии")
-        print("6. Открыть в Hex-редакторе")
-        print("0. Назад")
-        choice = ask_input("Выберите действие", "0")
+        color_print(t("fe_mt_hdr", name=os.path.basename(file_path)), 'cyan')
+        print("=" * 49)
+        print(t("fe_mt_m1"))
+        print(t("fe_mt_m2"))
+        print(t("fe_mt_m3"))
+        print(t("fe_mt_m4"))
+        print(t("fe_mt_m5"))
+        print(t("fe_mt_m6"))
+        print(t("fe_fa_act_0"))
+        choice = ask_input(t("fe_select_action"), "0")
 
         if choice == "1":
             dylibs = get_load_dylibs(file_path)
             if not dylibs:
-                color_print("Зависимости не найдены или не удалось распарсить бинарник.", 'yellow')
+                color_print(t("fe_mt_no_deps"), 'yellow')
                 continue
-            color_print(f"\nНайденные зависимости ({len(dylibs)}):", 'blue')
+            color_print(t("fe_mt_found_deps", count=len(dylibs)), 'blue')
             for idx, dylib in enumerate(dylibs, 1):
                 if dylib.startswith('@rpath'):
                     color_print(f"  {idx}) {dylib}", 'magenta')
@@ -126,25 +124,25 @@ def handle_macho_file(file_path: str) -> tuple:
         elif choice == "2":
             dylibs = get_load_dylibs(file_path)
             if not dylibs:
-                color_print("Нет доступных зависимостей для редактирования.", 'yellow')
-                continue
-            
-            prefixed_dylibs = []
-            for dylib in dylibs:
-                if dylib.startswith(('@executable_path/', '@loader_path/', '@rpath/')):
-                    prefixed_dylibs.append(dylib)
-            
-            if not prefixed_dylibs:
-                color_print("Нет зависимостей с префиксами для редактирования.", 'yellow')
-                color_print("  Все зависимости являются системными путями.", 'white')
-                color_print("  Используйте пункт 3 для добавления новых зависимостей.", 'white')
+                color_print(t("fe_mt_no_edit_deps"), 'yellow')
                 continue
 
-            color_print("\nВыберите зависимость с префиксом для изменения:", 'blue')
-            color_print("  Поддерживаются: номера через пробел, диапазоны (1-5), all", 'cyan')
-            color_print("  Примеры: 2 4 6, 2-5, all", 'cyan')
+            prefixed_dylibs = [
+                d for d in dylibs
+                if d.startswith(('@executable_path/', '@loader_path/', '@rpath/'))
+            ]
+
+            if not prefixed_dylibs:
+                color_print(t("fe_mt_no_pref_deps"), 'yellow')
+                color_print(t("fe_mt_all_sys"), 'white')
+                color_print(t("fe_mt_use_opt3"), 'white')
+                continue
+
+            color_print(t("fe_mt_sel_pref"), 'blue')
+            color_print(t("fe_mt_sel_hint1"), 'cyan')
+            color_print(t("fe_mt_sel_hint2"), 'cyan')
             print("")
-            
+
             for idx, dylib in enumerate(prefixed_dylibs, 1):
                 if dylib.startswith('@rpath'):
                     color_print(f"  {idx}) {dylib}", 'magenta')
@@ -152,80 +150,80 @@ def handle_macho_file(file_path: str) -> tuple:
                     color_print(f"  {idx}) {dylib}", 'green')
                 elif dylib.startswith('@loader_path'):
                     color_print(f"  {idx}) {dylib}", 'cyan')
-            
-            print("  0) Отмена")
-            
-            sel = ask_input("Введите номера", "0")
+
+            print(t("fe_cancel_0"))
+
+            sel = ask_input(t("fe_mt_enter_nums"), "0")
             if sel == "0":
                 continue
-            
+
             selected_indices = parse_number_input(sel, len(prefixed_dylibs))
-            
+
             if not selected_indices:
-                color_print("Не выбрано ни одной зависимости.", 'yellow')
+                color_print(t("fe_mt_none_sel"), 'yellow')
                 continue
-            
-            color_print(f"\nВыбрано {len(selected_indices)} зависимостей для изменения:", 'cyan')
+
+            color_print(t("fe_mt_sel_cnt", count=len(selected_indices)), 'cyan')
             for idx in selected_indices:
                 color_print(f"  {idx+1}) {prefixed_dylibs[idx]}", 'white')
-            
-            if not ask_yes_no("Продолжить?", default=True):
+
+            if not ask_yes_no(t("fe_mt_continue"), default=True):
                 continue
-            
-            color_print("\nВыберите режим подтверждения:", 'cyan')
-            print("  1) Подтверждать каждое изменение")
-            print("  2) Применить все без подтверждения")
-            
-            confirm_mode = ask_input("Выберите режим", "1")
+
+            color_print(t("fe_mt_confirm_mode"), 'cyan')
+            print(t("fe_mt_cm1"))
+            print(t("fe_mt_cm2"))
+
+            confirm_mode = ask_input(t("fe_mt_sel_mode"), "1")
             auto_confirm = (confirm_mode == "2")
-            
-            color_print("\nВыберите префикс для нового пути (применяется ко всем выбранным):", 'cyan')
-            print("  1) @executable_path/  - относительно папки .app")
-            print("  2) @loader_path/      - относительно текущего файла")
-            print("  3) @rpath/            - относительно RPATH (если задан)")
-            print("  4) Оставить без изменений (полный путь)")
-            print("  0) Отмена")
-            
-            prefix_choice = ask_input("Выберите префикс", "1")
-            
+
+            color_print(t("fe_mt_sel_prefix"), 'cyan')
+            print(t("fe_mt_p1"))
+            print(t("fe_mt_p2"))
+            print(t("fe_mt_p3"))
+            print(t("fe_mt_p4"))
+            print(t("fe_cancel_0"))
+
+            prefix_choice = ask_input(t("fe_mt_pick_prefix"), "1")
+
             if prefix_choice == "0":
                 continue
-            
+
             if prefix_choice == "1":
                 prefix = "@executable_path/"
-                color_print(f"Выбран префикс: {prefix}", 'green')
+                color_print(t("fe_mt_pref_chosen", prefix=prefix), 'green')
             elif prefix_choice == "2":
                 prefix = "@loader_path/"
-                color_print(f"Выбран префикс: {prefix}", 'green')
+                color_print(t("fe_mt_pref_chosen", prefix=prefix), 'green')
             elif prefix_choice == "3":
                 prefix = "@rpath/"
-                color_print(f"Выбран префикс: {prefix}", 'green')
+                color_print(t("fe_mt_pref_chosen", prefix=prefix), 'green')
             elif prefix_choice == "4":
                 prefix = ""
-                color_print("Выбран полный путь (без префикса)", 'green')
+                color_print(t("fe_mt_full_chosen"), 'green')
             else:
-                color_print("Неверный выбор", 'red')
+                color_print(t("fe_invalid_choice"), 'red')
                 continue
-            
+
             backup_info = backup_file(file_path)
             if not backup_info:
-                color_print("[WARN] Не удалось создать резервную копию!", 'yellow')
-                if not ask_yes_no("Продолжить без бэкапа?", default=False):
+                color_print(t("fe_mt_bak_warn"), 'yellow')
+                if not ask_yes_no(t("fe_bak_continue_q"), default=False):
                     continue
-            
+
             changed_count = 0
             failed_count = 0
             skipped_count = 0
-            
+
             for idx in selected_indices:
                 old_path = prefixed_dylibs[idx]
                 old_dir = os.path.dirname(old_path)
                 old_name = os.path.basename(old_path)
-                
-                color_print(f"\nТекущий путь: {old_path}", 'yellow')
-                color_print(f"  Директория: {old_dir}", 'white')
-                color_print(f"  Имя файла: {old_name}", 'white')
-                
+
+                color_print(t("fe_mt_cur_path", path=old_path), 'yellow')
+                color_print(t("fe_mt_dir", dir=old_dir), 'white')
+                color_print(t("fe_mt_fname", name=old_name), 'white')
+
                 current_prefix = ""
                 if old_path.startswith('@executable_path/'):
                     current_prefix = "@executable_path/"
@@ -233,12 +231,12 @@ def handle_macho_file(file_path: str) -> tuple:
                     current_prefix = "@loader_path/"
                 elif old_path.startswith('@rpath/'):
                     current_prefix = "@rpath/"
-                
+
                 if current_prefix:
-                    color_print(f"  Текущий префикс: {current_prefix}", 'cyan')
+                    color_print(t("fe_mt_cur_pref", prefix=current_prefix), 'cyan')
                     rel_part = old_path[len(current_prefix):]
-                    color_print(f"  Относительная часть: {rel_part}", 'white')
-                
+                    color_print(t("fe_mt_rel_part", part=rel_part), 'white')
+
                 if prefix:
                     if old_path.startswith(('@executable_path/', '@loader_path/', '@rpath/')):
                         for p in ['@executable_path/', '@loader_path/', '@rpath/']:
@@ -247,74 +245,71 @@ def handle_macho_file(file_path: str) -> tuple:
                                 break
                         else:
                             rel_path = old_name
-                        
+
                         new_path = prefix + rel_path
-                        color_print(f"\nНовый путь: {new_path}", 'cyan')
+                        color_print(t("fe_mt_new_path", path=new_path), 'cyan')
                     else:
                         new_path = prefix + old_name
-                        color_print(f"\nНовый путь: {new_path}", 'cyan')
+                        color_print(t("fe_mt_new_path", path=new_path), 'cyan')
                 else:
-                    new_path = ask_input("Введите полный путь", old_path)
+                    new_path = ask_input(t("fe_mt_enter_full"), old_path)
                     if not new_path:
                         continue
-                
-                color_print("\n" + "=" * 50, 'cyan')
-                color_print("ИТОГОВЫЙ ПУТЬ:", 'yellow')
-                color_print(f"  Старый: {old_path}", 'red')
-                color_print(f"  Новый:  {new_path}", 'green')
-                color_print("=" * 50, 'cyan')
-                
+
+                color_print("\n" + "=" * 49, 'cyan')
+                color_print(t("fe_mt_final_path"), 'yellow')
+                color_print(t("fe_mt_old_lbl", path=old_path), 'red')
+                color_print(t("fe_mt_new_lbl", path=new_path), 'green')
+                color_print("=" * 49, 'cyan')
+
                 old_len = len(old_path.encode('utf-8'))
                 new_len = len(new_path.encode('utf-8'))
-                color_print(f"  Длина старого: {old_len} байт", 'white')
-                color_print(f"  Длина нового: {new_len} байт", 'white')
-                
+                color_print(t("fe_mt_old_len", n=old_len), 'white')
+                color_print(t("fe_mt_new_len", n=new_len), 'white')
+
                 if new_len > old_len:
-                    color_print(f"[ERROR] Новый путь длиннее на {new_len - old_len} байт!", 'red')
-                    color_print("[INFO] Пропускаем эту зависимость.", 'yellow')
+                    color_print(t("fe_mt_too_long", diff=new_len - old_len), 'red')
+                    color_print(t("fe_mt_skipping"), 'yellow')
                     skipped_count += 1
                     continue
-                
+
                 if not auto_confirm:
-                    if not ask_yes_no("Применить изменение?", default=True):
+                    if not ask_yes_no(t("fe_mt_apply_q"), default=True):
                         skipped_count += 1
                         continue
                 else:
-                    color_print("[INFO] Применяем изменение...", 'blue')
-                
-                color_print("\n[INFO] Поиск старого пути в бинарнике...", 'blue')
-                found = False
+                    color_print(t("fe_mt_applying"), 'blue')
+
+                color_print(t("fe_mt_searching"), 'blue')
                 try:
                     with open(file_path, 'rb') as f:
                         data = f.read()
                         pos = data.find(old_path.encode('utf-8'))
                         if pos != -1:
-                            found = True
-                            color_print(f"[INFO] Путь найден по смещению: 0x{pos:08X}", 'green')
+                            color_print(t("fe_mt_found_off", pos=pos), 'green')
                         else:
                             pos = data.find((old_path + '\x00').encode('utf-8'))
                             if pos != -1:
-                                found = True
-                                color_print(f"[INFO] Путь найден (с нулевым байтом): 0x{pos:08X}", 'green')
+                                color_print(t("fe_mt_found_null", pos=pos), 'green')
                             else:
-                                color_print("[WARN] Старый путь не найден в бинарнике!", 'yellow')
-                                color_print("  Пропускаем эту зависимость.", 'yellow')
+                                color_print(t("fe_mt_not_found"), 'yellow')
+                                color_print(t("fe_mt_skipping"), 'yellow')
                                 skipped_count += 1
                                 continue
                 except Exception as e:
-                    color_print(f"[WARN] Не удалось проверить наличие пути: {e}", 'yellow')
+                    color_print(f"[WARN] {e}", 'yellow')
                     skipped_count += 1
                     continue
-                
+
                 if safe_patch_dylib_path(file_path, old_path, new_path):
                     if not is_valid_macho_binary(file_path):
-                        color_print("[ERROR] Бинарник повреждён! Автоматический откат...", 'red')
+                        color_print(t("fe_mt_corrupt_rb"), 'red')
                         if backup_info and rollback_after_failed_patch(file_path, backup_info.path):
-                            color_print("[INFO] Восстановлена последняя резервная копия.", 'green')
+                            color_print(t("fe_mt_rb_ok"), 'green')
                         else:
-                            color_print("[CRITICAL] Не удалось восстановить бэкап! Бинарник повреждён.", 'red')
+                            color_print(t("fe_mt_rb_fail"), 'red')
                         continue
-                    color_print(f"[SUCCESS] Путь успешно изменён!", 'green')
+                    color_print(t("fe_mt_chg_ok"), 'green')
                     modified = True
                     changed_count += 1
                     changes_summary.append({
@@ -323,148 +318,148 @@ def handle_macho_file(file_path: str) -> tuple:
                         'new': new_path
                     })
                 else:
-                    color_print("[ERROR] Не удалось изменить путь.", 'red')
+                    color_print(t("fe_mt_chg_err"), 'red')
                     failed_count += 1
-            
+
             if backup_info:
                 cleanup_old_backups(file_path, keep_latest=True)
-                color_print(f"[INFO] Бэкап сохранён: {backup_info.path}", 'blue')
-            
-            color_print("\n" + "=" * 50, 'cyan')
-            color_print("ИТОГ ИЗМЕНЕНИЙ:", 'yellow')
-            color_print("=" * 50, 'cyan')
-            color_print(f"  Успешно изменено: {changed_count}", 'green')
+                color_print(t("fe_mt_bak_saved", path=backup_info.path), 'blue')
+
+            color_print("\n" + "=" * 49, 'cyan')
+            color_print(t("fe_mt_sum_hdr"), 'yellow')
+            color_print("=" * 49, 'cyan')
+            color_print(t("fe_mt_sum_ok", n=changed_count), 'green')
             if failed_count > 0:
-                color_print(f"  Ошибок: {failed_count}", 'red')
+                color_print(t("fe_mt_sum_err", n=failed_count), 'red')
             if skipped_count > 0:
-                color_print(f"  Пропущено: {skipped_count}", 'yellow')
-            color_print("=" * 50, 'cyan')
+                color_print(t("fe_mt_sum_skip", n=skipped_count), 'yellow')
+            color_print("=" * 49, 'cyan')
 
         elif choice == "3":
-            color_print("\nПодсказка по префиксам:", 'cyan')
-            color_print("  @executable_path/Frameworks/  - для dylib в папке Frameworks", 'green')
-            color_print("  @loader_path/                - для dylib рядом с бинарником", 'green')
-            color_print("  @rpath/                      - если RPATH задан отдельно", 'green')
-            
-            color_print("\nВыберите префикс для новой зависимости:", 'cyan')
+            color_print(t("fe_mt_hints"), 'cyan')
+            color_print(t("fe_mt_h1"), 'green')
+            color_print(t("fe_mt_h2"), 'green')
+            color_print(t("fe_mt_h3"), 'green')
+
+            color_print(t("fe_mt_new_pref"), 'cyan')
             print("  1) @executable_path/Frameworks/")
             print("  2) @loader_path/")
             print("  3) @rpath/")
-            print("  4) Полный путь (без префикса)")
-            print("  0) Отмена")
-            
-            prefix_choice = ask_input("Выберите префикс", "1")
-            
+            print(t("fe_mt_p4_new"))
+            print(t("fe_cancel_0"))
+
+            prefix_choice = ask_input(t("fe_mt_pick_prefix"), "1")
+
             if prefix_choice == "0":
                 continue
             elif prefix_choice == "1":
                 prefix = "@executable_path/Frameworks/"
-                color_print(f"Выбран префикс: {prefix}", 'green')
+                color_print(t("fe_mt_pref_chosen", prefix=prefix), 'green')
             elif prefix_choice == "2":
                 prefix = "@loader_path/"
-                color_print(f"Выбран префикс: {prefix}", 'green')
+                color_print(t("fe_mt_pref_chosen", prefix=prefix), 'green')
             elif prefix_choice == "3":
                 prefix = "@rpath/"
-                color_print(f"Выбран префикс: {prefix}", 'green')
+                color_print(t("fe_mt_pref_chosen", prefix=prefix), 'green')
             elif prefix_choice == "4":
                 prefix = ""
-                color_print("Выбран полный путь (без префикса)", 'green')
+                color_print(t("fe_mt_full_chosen"), 'green')
             else:
-                color_print("Неверный выбор", 'red')
+                color_print(t("fe_invalid_choice"), 'red')
                 continue
-            
-            lib_name = ask_input("Введите имя библиотеки (например, MyLibrary.dylib)")
+
+            lib_name = ask_input(t("fe_mt_lib_name"))
             if not lib_name:
                 continue
-            
+
             if prefix:
                 new_dep = prefix + lib_name
             else:
-                new_dep = ask_input("Введите полный путь", lib_name)
-            
-            color_print(f"\nНовая зависимость: {new_dep}", 'yellow')
-            
-            if not ask_yes_no("Добавить зависимость?", default=True):
+                new_dep = ask_input(t("fe_mt_enter_full"), lib_name)
+
+            color_print(t("fe_mt_new_dep", dep=new_dep), 'yellow')
+
+            if not ask_yes_no(t("fe_mt_add_q"), default=True):
                 continue
-            
+
             backup_info = backup_file(file_path)
             if not backup_info:
-                color_print("[WARN] Не удалось создать резервную копию!", 'yellow')
-                if not ask_yes_no("Продолжить без бэкапа?", default=False):
+                color_print(t("fe_mt_bak_warn"), 'yellow')
+                if not ask_yes_no(t("fe_bak_continue_q"), default=False):
                     continue
-            
+
             if inject_lc_load_dylib(file_path, new_dep):
                 if not is_valid_macho_binary(file_path):
-                    color_print("[ERROR] Бинарник повреждён! Автоматический откат...", 'red')
+                    color_print(t("fe_mt_corrupt_rb"), 'red')
                     if backup_info and rollback_after_failed_patch(file_path, backup_info.path):
-                        color_print("[INFO] Восстановлена последняя резервная копия.", 'green')
+                        color_print(t("fe_mt_rb_ok"), 'green')
                     else:
-                        color_print("[CRITICAL] Не удалось восстановить бэкап! Бинарник повреждён.", 'red')
+                        color_print(t("fe_mt_rb_fail"), 'red')
                     continue
-                color_print(f"[SUCCESS] Зависимость {new_dep} добавлена!", 'green')
+                color_print(t("fe_mt_add_ok", dep=new_dep), 'green')
                 if backup_info:
                     cleanup_old_backups(file_path, keep_latest=True)
-                    color_print(f"[INFO] Бэкап сохранён: {backup_info.path}", 'blue')
+                    color_print(t("fe_mt_bak_saved", path=backup_info.path), 'blue')
                 modified = True
                 changes_summary.append({
                     'type': 'macho_add_dependency',
                     'path': new_dep
                 })
             else:
-                color_print("[ERROR] Не удалось добавить зависимость.", 'red')
-                color_print("[INFO] Возможные причины: нет свободного места в заголовке, бинарник повреждён.", 'yellow')
+                color_print(t("fe_mt_add_err"), 'red')
+                color_print(t("fe_mt_add_hint"), 'yellow')
 
         elif choice == "4":
             try:
                 info = get_macho_summary(file_path)
-                color_print(f"\nИнформация о бинарнике:", 'cyan')
-                print(f"  Размер: {format_file_size(info.get('size', 0))}")
-                print(f"  FAT (мультиархитектурный): {'Да' if info.get('is_fat') else 'Нет'}")
+                color_print(t("fe_mt_info_hdr"), 'cyan')
+                print(t("fe_mt_size", size=format_file_size(info.get('size', 0))))
+                print(t("fe_mt_fat", val=t("fe_yes") if info.get('is_fat') else t("fe_no")))
                 archs = info.get('archs', [])
-                print(f"  Архитектуры: {', '.join(archs) if archs else 'не определены'}")
-                print(f"  Количество зависимостей: {info.get('dylibs_count', 0)}")
+                print(t("fe_mt_archs", archs=', '.join(archs) if archs else t("fe_unknown")))
+                print(t("fe_mt_deps_cnt", n=info.get('dylibs_count', 0)))
             except Exception as e:
-                color_print(f"Не удалось собрать информацию: {e}", 'red')
+                color_print(t("fe_mt_info_err", err=e), 'red')
 
         elif choice == "5":
             backups = find_backups(file_path)
             if not backups:
-                color_print("Нет доступных резервных копий.", 'yellow')
+                color_print(t("fe_mt_no_baks"), 'yellow')
                 continue
-            
-            color_print("\nДоступные резервные копии:", 'blue')
+
+            color_print(t("fe_mt_avail_baks"), 'blue')
             for idx, backup in enumerate(backups, 1):
                 try:
                     size = format_file_size(backup.size)
-                    color_print(f"  {idx}) Версия {backup.version} ({size})", 'white')
+                    color_print(t("fe_mt_bak_row_sz", idx=idx, ver=backup.version, size=size), 'white')
                 except OSError:
-                    color_print(f"  {idx}) Версия {backup.version}", 'white')
-            print("  0) Отмена")
-            
-            sel = ask_input("Выберите версию для восстановления", "0")
+                    color_print(t("fe_mt_bak_row", idx=idx, ver=backup.version), 'white')
+            print(t("fe_cancel_0"))
+
+            sel = ask_input(t("fe_mt_bak_sel"), "0")
             if sel == "0":
                 continue
             try:
                 idx = int(sel) - 1
                 if 0 <= idx < len(backups):
                     backup = backups[idx]
-                    if ask_yes_no(f"Восстановить версию {backup.version}?", default=False):
+                    if ask_yes_no(t("fe_mt_bak_q", ver=backup.version), default=False):
                         if restore_backup(file_path, backup, create_backup=True):
-                            color_print("[SUCCESS] Файл восстановлен из резервной копии!", 'green')
+                            color_print(t("fe_mt_bak_ok"), 'green')
                             modified = True
                             changes_summary.append({
                                 'type': 'restored_backup',
                                 'version': backup.version
                             })
                             cleanup_old_backups(file_path, keep_latest=True)
-                            color_print("[INFO] Старые бэкапы удалены, оставлен только текущий.", 'green')
+                            color_print(t("fe_mt_bak_trimmed"), 'green')
                         else:
-                            color_print("[ERROR] Не удалось восстановить файл.", 'red')
+                            color_print(t("fe_mt_bak_err"), 'red')
             except ValueError:
-                color_print("Неверный номер.", 'red')
+                color_print(t("fe_bad_num"), 'red')
 
         elif choice == "6":
-            color_print("[INFO] Запуск Hex-патчера...", 'blue')
+            color_print(t("fe_fa_hex_launch"), 'blue')
             start_hex_patcher(os.path.dirname(file_path), file_path)
 
         elif choice == "0":
@@ -476,22 +471,22 @@ def handle_macho_file(file_path: str) -> tuple:
 def get_file_info(file_path: str, file_name: str) -> None:
     try:
         size = format_file_size(os.path.getsize(file_path))
-        color_print(f"\nИнформация о файле:", 'cyan')
-        print(f"  Имя: {file_name}")
-        print(f"  Размер: {size}")
-        print(f"  Путь: {file_path}")
+        color_print(t("fe_fi_hdr"), 'cyan')
+        print(t("fe_fi_name", name=file_name))
+        print(t("fe_fi_size", size=size))
+        print(t("fe_fi_path", path=file_path))
         if is_macho_binary(file_path):
-            print(f"  Тип: Mach-O бинарник")
+            print(t("fe_fi_macho"))
             try:
                 summary = get_macho_summary(file_path)
                 archs = summary.get('archs', [])
                 if archs:
-                    print(f"  Архитектуры: {', '.join(archs)}")
-                print(f"  Зависимостей: {summary.get('dylibs_count', 0)}")
-            except:
+                    print(t("fe_fi_archs", archs=', '.join(archs)))
+                print(t("fe_fi_deps", n=summary.get('dylibs_count', 0)))
+            except Exception:
                 pass
         else:
-            print(f"  Тип: {os.path.splitext(file_name)[1] or 'неизвестный'}")
+            print(t("fe_fi_type", ext=os.path.splitext(file_name)[1] or t("fe_unknown")))
     except Exception as e:
-        color_print(f"Ошибка: {e}", 'red')
-    input("\nНажмите Enter, чтобы продолжить...")
+        color_print(t("fe_fi_err", err=e), 'red')
+    input(t("fe_press_enter_nl"))
