@@ -38,9 +38,17 @@ CONFIG = {
     'MAX_CONNECTIONS': 10,
 }
 
-VERSION = '1.1.7'
+VERSION = '1.1.8'
 
-DOCS_DIR = os.path.expanduser('~/Documents')
+
+def _get_docs_dir():
+    home = os.path.expanduser('~')
+    if os.path.basename(home).lower() == 'documents':
+        return home
+    return os.path.join(home, 'Documents')
+
+
+DOCS_DIR = _get_docs_dir()
 FILES_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Files')
 LOGS_DIR = os.path.join(DOCS_DIR, 'IPA_Patcher_Logs')
 LOG_FILE = os.path.join(LOGS_DIR, 'web_transfer.log')
@@ -67,16 +75,17 @@ class SecurityManager:
     def _load_blacklist(self):
         try:
             if os.path.exists(BLACKLIST_FILE):
-                with open(BLACKLIST_FILE, 'r') as f:
+                with open(BLACKLIST_FILE, 'r', encoding='utf-8') as f:
                     self.banned_ips = json.load(f).get('banned', {})
-        except:
+        except Exception:
             pass
 
     def _save_blacklist(self):
         try:
-            with open(BLACKLIST_FILE, 'w') as f:
+            os.makedirs(LOGS_DIR, mode=0o755, exist_ok=True)
+            with open(BLACKLIST_FILE, 'w', encoding='utf-8') as f:
                 json.dump({'banned': self.banned_ips}, f)
-        except:
+        except Exception:
             pass
 
     def check_rate_limit(self, ip):
@@ -89,12 +98,13 @@ class SecurityManager:
         return True
 
     def check_ban(self, ip):
-        if ip in self.banned_ips:
-            if time.time() - self.banned_ips[ip] < CONFIG['BAN_DURATION']:
-                return True
-            else:
-                del self.banned_ips[ip]
-                self._save_blacklist()
+        with self.rate_lock:
+            if ip in self.banned_ips:
+                if time.time() - self.banned_ips[ip] < CONFIG['BAN_DURATION']:
+                    return True
+                else:
+                    del self.banned_ips[ip]
+                    self._save_blacklist()
         return False
 
     def record_failed_attempt(self, ip):
@@ -111,12 +121,13 @@ class SecurityManager:
         return secrets.compare_digest(token, self.access_token)
 
     def get_session_id(self, ip):
-        if ip not in self.sessions:
-            self.sessions[ip] = {
-                'created': time.time(),
-                'last_activity': time.time()
-            }
-        return self.sessions[ip]
+        with self.rate_lock:
+            if ip not in self.sessions:
+                self.sessions[ip] = {
+                    'created': time.time(),
+                    'last_activity': time.time()
+                }
+            return self.sessions[ip]
 
     def check_connection_limit(self):
         with self.connection_lock:
@@ -127,7 +138,8 @@ class SecurityManager:
 
     def release_connection(self):
         with self.connection_lock:
-            self.active_connections -= 1
+            if self.active_connections > 0:
+                self.active_connections -= 1
 
     def get_token(self):
         return self.access_token
@@ -147,18 +159,20 @@ def audit_log(msg, level='INFO'):
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     masked_msg = re.sub(r'\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b', r'\1.xxx.xxx', msg)
     try:
+        os.makedirs(LOGS_DIR, mode=0o755, exist_ok=True)
         with open(AUDIT_LOG, 'a', encoding='utf-8') as f:
             f.write(f"[{timestamp}] [{level}] {masked_msg}\n")
-    except:
+    except Exception:
         pass
 
 
 def log_message(msg, level='INFO'):
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     try:
+        os.makedirs(LOGS_DIR, mode=0o755, exist_ok=True)
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             f.write(f"[{timestamp}] [{level}] {msg}\n")
-    except:
+    except Exception:
         pass
 
     color_print(f"[{timestamp}] {msg}", level_to_color(level))
@@ -201,7 +215,7 @@ def color_print(text, color='white'):
             print(text)
             console.set_color(1.0, 1.0, 1.0)
             return
-        except:
+        except Exception:
             pass
 
     ansi_colors = {
@@ -224,7 +238,7 @@ def clear_screen():
         try:
             console.clear()
             return
-        except:
+        except Exception:
             pass
     sys.stdout.write("\033[2J\033[H")
     sys.stdout.flush()
@@ -237,7 +251,7 @@ def get_local_ip():
         ip = s.getsockname()[0]
         s.close()
         return ip
-    except:
+    except Exception:
         return '127.0.0.1'
 
 
@@ -259,13 +273,13 @@ def is_safe_path(path):
         real_base = os.path.realpath(FILES_DIR)
         real_path = os.path.realpath(path)
         return real_path == real_base or real_path.startswith(real_base + os.sep)
-    except:
+    except Exception:
         return False
 
 
 def shorten_path(path):
     if 'Documents' in path:
-        return '~/Documents' + path.split('Documents')[1]
+        return '~/Documents' + path.split('Documents', 1)[1]
     return path
 
 
@@ -345,172 +359,193 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if STOP_SERVER:
+            self.close_connection = True
             return
 
-        ip = self.client_address[0]
-
-        if not self.validate_request():
+        if not security.check_connection_limit():
+            self.send_json_response({'error': 'Server busy'}, 503)
             return
 
-        parsed = urllib.parse.urlparse(self.path)
-        clean_path = parsed.path
-        params = urllib.parse.parse_qs(parsed.query)
+        try:
+            ip = self.client_address[0]
 
-        if clean_path == '/api/verify':
-            token = params.get('token', [''])[0]
-            if security.validate_token(token):
-                log_message(f"Успешный вход по ПИН-коду от {ip}", 'SUCCESS')
-                audit_log(f"Успешный вход по ПИН-коду от {ip}", 'INFO')
-                self.send_json_response({'valid': True})
-            else:
-                log_message(f"Неверный ПИН-код от {ip}", 'WARN')
-                audit_log(f"Неверный ПИН-код от {ip}", 'WARN')
-                security.record_failed_attempt(ip)
-                self.send_json_response({'valid': False}, 401)
-            return
-
-        if clean_path == '/' or clean_path == '/index.html':
-            if 'token' in params and security.validate_token(params['token'][0]):
-                self.send_html_response(self.get_secure_html())
-            else:
-                self.send_html_response(self.get_login_page(), 401)
-            return
-
-        if clean_path.startswith('/api/'):
-            if not self.validate_token():
-                security.record_failed_attempt(ip)
-                self.send_json_response({'error': 'Unauthorized'}, 401)
+            if not self.validate_request():
                 return
 
-            if clean_path == '/api/status':
-                self.send_json_response({
-                    'status': 'online',
-                    'connections': security.active_connections,
-                    'max_file_size': CONFIG['MAX_FILE_SIZE']
-                })
+            parsed = urllib.parse.urlparse(self.path)
+            clean_path = parsed.path
+            params = urllib.parse.parse_qs(parsed.query)
+
+            if clean_path == '/api/verify':
+                token = params.get('token', [''])[0]
+                if security.validate_token(token):
+                    log_message(f"Успешный вход по ПИН-коду от {ip}", 'SUCCESS')
+                    audit_log(f"Успешный вход по ПИН-коду от {ip}", 'INFO')
+                    self.send_json_response({'valid': True})
+                else:
+                    log_message(f"Неверный ПИН-код от {ip}", 'WARN')
+                    audit_log(f"Неверный ПИН-код от {ip}", 'WARN')
+                    security.record_failed_attempt(ip)
+                    self.send_json_response({'valid': False}, 401)
                 return
 
-            if clean_path == '/api/files':
-                files = []
-                try:
-                    for f in os.listdir(FILES_DIR):
-                        fpath = os.path.join(FILES_DIR, f)
-                        if os.path.isfile(fpath):
-                            files.append({
-                                'name': f,
-                                'size': os.path.getsize(fpath),
-                                'modified': os.path.getmtime(fpath)
-                            })
-                except:
-                    pass
-                self.send_json_response(files)
+            if clean_path == '/' or clean_path == '/index.html':
+                if 'token' in params and security.validate_token(params['token'][0]):
+                    self.send_html_response(self.get_secure_html())
+                else:
+                    self.send_html_response(self.get_login_page(), 401)
                 return
 
-            if clean_path == '/api/stop':
-                stop_server()
-                self.send_json_response({'status': 'stopped'})
-                return
+            if clean_path.startswith('/api/'):
+                if not self.validate_token():
+                    security.record_failed_attempt(ip)
+                    self.send_json_response({'error': 'Unauthorized'}, 401)
+                    return
 
-        self.send_response(404)
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.close_connection = True
+                if clean_path == '/api/status':
+                    self.send_json_response({
+                        'status': 'online',
+                        'connections': security.active_connections,
+                        'max_file_size': CONFIG['MAX_FILE_SIZE']
+                    })
+                    return
+
+                if clean_path == '/api/files':
+                    files = []
+                    try:
+                        for f in os.listdir(FILES_DIR):
+                            fpath = os.path.join(FILES_DIR, f)
+                            if os.path.isfile(fpath):
+                                files.append({
+                                    'name': f,
+                                    'size': os.path.getsize(fpath),
+                                    'modified': os.path.getmtime(fpath)
+                                })
+                    except Exception:
+                        pass
+                    self.send_json_response(files)
+                    return
+
+                if clean_path == '/api/stop':
+                    stop_server()
+                    self.send_json_response({'status': 'stopped'})
+                    return
+
+            self.send_response(404)
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.close_connection = True
+        finally:
+            security.release_connection()
 
     def do_POST(self):
         if STOP_SERVER:
+            self.close_connection = True
             return
 
-        ip = self.client_address[0]
-
-        if not self.validate_request():
+        if not security.check_connection_limit():
+            self.send_json_response({'error': 'Server busy'}, 503)
             return
-
-        content_length = int(self.headers.get('Content-Length', 0))
-
-        if not self.validate_token():
-            security.record_failed_attempt(ip)
-            remaining = content_length
-            while remaining > 0:
-                chunk = self.rfile.read(min(65536, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-            self.send_json_response({'error': 'Invalid token'}, 401)
-            return
-
-        filename = urllib.parse.unquote(self.headers.get('X-File-Name', 'file.bin'))
-        safe_filename = sanitize_filename(filename)
-
-        if not is_allowed_extension(safe_filename) or content_length > CONFIG['MAX_FILE_SIZE']:
-            self.rfile.read(content_length)
-            self.send_json_response({'error': 'Rejected'}, 400)
-            return
-
-        out_path = os.path.join(FILES_DIR, safe_filename)
-
-        if not is_safe_path(out_path):
-            self.rfile.read(content_length)
-            self.send_json_response({'error': 'Forbidden'}, 403)
-            return
-
-        if os.path.exists(out_path):
-            name, ext = os.path.splitext(safe_filename)
-            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            safe_filename = f"{name}_{timestamp}{ext}"
-            out_path = os.path.join(FILES_DIR, safe_filename)
-
-        start_time = time.time()
-        written = 0
-        temp_path = out_path + '.tmp'
 
         try:
-            with open(temp_path, 'wb') as f:
-                while written < content_length:
-                    chunk_size = min(65536, content_length - written)
-                    chunk = self.rfile.read(chunk_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    written += len(chunk)
+            ip = self.client_address[0]
 
-                    if time.time() - start_time > 3600:
-                        raise TimeoutError("Upload timeout (1 hour)")
+            if not self.validate_request():
+                return
 
-            if written < content_length:
-                raise ConnectionError("Incomplete read")
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+            except ValueError:
+                self.send_json_response({'error': 'Invalid Content-Length'}, 400)
+                return
 
-            os.rename(temp_path, out_path)
+            if content_length <= 0:
+                self.send_json_response({'error': 'Invalid Content-Length'}, 400)
+                return
 
-            elapsed = time.time() - start_time
-            speed = written / elapsed / 1024 / 1024 if elapsed > 0 else 0
+            if not self.validate_token():
+                security.record_failed_attempt(ip)
+                self.send_json_response({'error': 'Invalid token'}, 401)
+                return
 
-            log_message(f"Файл загружен: {safe_filename} ({written/1024/1024:.2f} MB) от {ip}", 'SUCCESS')
-            audit_log(
-                f"Файл загружен: {safe_filename} ({written/1024/1024:.2f} MB) от {ip}",
-                'INFO'
-            )
+            filename = urllib.parse.unquote(self.headers.get('X-File-Name', 'file.bin'))
+            safe_filename = sanitize_filename(filename)
 
-            self.send_json_response({
-                'status': 'success',
-                'filename': safe_filename,
-                'size': written,
-                'speed': round(speed, 2),
-                'time': round(elapsed, 2)
-            })
+            if not is_allowed_extension(safe_filename):
+                self.send_json_response({'error': 'Rejected file type'}, 400)
+                return
 
-            print()
-            color_print(f"  [+] Успешно загружен: {safe_filename}", 'green')
-            return
+            if content_length > CONFIG['MAX_FILE_SIZE']:
+                self.send_json_response({'error': 'Payload too large'}, 413)
+                return
 
-        except Exception as e:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-            log_message(f"Ошибка загрузки от {ip}: {str(e)}", 'ERROR')
-            audit_log(f"Ошибка загрузки от {ip}: {str(e)}", 'ERROR')
-            self.send_json_response({'error': 'Internal Server Error'}, 500)
+            ensure_directories()
+            out_path = os.path.join(FILES_DIR, safe_filename)
+
+            if not is_safe_path(out_path):
+                self.send_json_response({'error': 'Forbidden'}, 403)
+                return
+
+            if os.path.exists(out_path):
+                name, ext = os.path.splitext(safe_filename)
+                timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                safe_filename = f"{name}_{timestamp}{ext}"
+                out_path = os.path.join(FILES_DIR, safe_filename)
+
+            start_time = time.time()
+            written = 0
+            temp_path = out_path + '.tmp'
+
+            try:
+                with open(temp_path, 'wb') as f:
+                    while written < content_length:
+                        chunk_size = min(65536, content_length - written)
+                        chunk = self.rfile.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        written += len(chunk)
+
+                        if time.time() - start_time > 3600:
+                            raise TimeoutError("Upload timeout (1 hour)")
+
+                if written < content_length:
+                    raise ConnectionError("Incomplete read")
+
+                os.rename(temp_path, out_path)
+
+                elapsed = time.time() - start_time
+                speed = written / elapsed / 1024 / 1024 if elapsed > 0 else 0
+
+                log_message(f"Файл загружен: {safe_filename} ({written/1024/1024:.2f} MB) от {ip}", 'SUCCESS')
+                audit_log(
+                    f"Файл загружен: {safe_filename} ({written/1024/1024:.2f} MB) от {ip}",
+                    'INFO'
+                )
+
+                self.send_json_response({
+                    'status': 'success',
+                    'filename': safe_filename,
+                    'size': written,
+                    'speed': round(speed, 2),
+                    'time': round(elapsed, 2)
+                })
+
+                print()
+                color_print(f"  [+] Успешно загружен: {safe_filename}", 'green')
+                return
+
+            except Exception as e:
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                log_message(f"Ошибка загрузки от {ip}: {str(e)}", 'ERROR')
+                audit_log(f"Ошибка загрузки от {ip}: {str(e)}", 'ERROR')
+                self.send_json_response({'error': 'Internal Server Error'}, 500)
+        finally:
+            security.release_connection()
 
     def get_login_page(self):
         return f"""
@@ -562,6 +597,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         ip = get_local_ip()
         port = CONFIG['PORT']
         max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
+        allowed_json = json.dumps(sorted(CONFIG['ALLOWED_EXTENSIONS']))
 
         return f"""
         <!DOCTYPE html>
@@ -619,7 +655,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 (function() {{
                     const TOKEN = '{token}';
                     const MAX_SIZE = {CONFIG['MAX_FILE_SIZE']};
-                    const ALLOWED = {list(CONFIG['ALLOWED_EXTENSIONS'])};
+                    const ALLOWED = {allowed_json};
 
                     const status = document.getElementById('status');
                     const btn = document.getElementById('uploadBtn');
@@ -755,7 +791,7 @@ def stop_server():
             try:
                 SERVER_INSTANCE.shutdown()
                 SERVER_INSTANCE.server_close()
-            except:
+            except Exception:
                 pass
 
     threading.Thread(target=shutdown_server, daemon=True).start()
@@ -775,7 +811,7 @@ def print_header():
 def print_status(ip, port, running=False):
     max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
     if running:
-        color_print(f"  Статус: [РАБОТАЕТ]", 'green')
+        color_print("  Статус: [РАБОТАЕТ]", 'green')
         color_print(f"  Адрес: http://{ip}:{port}", 'blue')
         color_print(f"  Папка: {shorten_path(FILES_DIR)}", 'white')
         color_print(f"  ПИН-код: {security.get_token()}", 'yellow')
@@ -786,7 +822,7 @@ def print_status(ip, port, running=False):
         color_print(f"  Лог: {shorten_path(LOG_FILE)}", 'white')
         color_print(f"  Аудит: {shorten_path(AUDIT_LOG)}", 'white')
     else:
-        color_print(f"  Статус: [ОСТАНОВЛЕН]", 'yellow')
+        color_print("  Статус: [ОСТАНОВЛЕН]", 'yellow')
     print()
     color_print("-" * 45, 'cyan')
     print()
@@ -811,7 +847,7 @@ def show_security_info():
     color_print("    (вводится на странице входа)", 'white')
     print()
     color_print("  Разрешенные расширения:", 'yellow')
-    color_print("    " + ", ".join(CONFIG['ALLOWED_EXTENSIONS']), 'white')
+    color_print("    " + ", ".join(sorted(CONFIG['ALLOWED_EXTENSIONS'])), 'white')
     print()
     color_print("  Лимиты:", 'yellow')
     max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
@@ -928,7 +964,9 @@ def manage_blacklist():
     color_print("  УПРАВЛЕНИЕ ЧЕРНЫМ СПИСКОМ", 'cyan')
     print()
 
-    banned = security.banned_ips
+    with security.rate_lock:
+        banned = dict(security.banned_ips)
+
     if not banned:
         color_print("  Черный список пуст.", 'green')
     else:
@@ -945,8 +983,9 @@ def manage_blacklist():
     choice = input("\n  [1] Очистить черный список\n  [2] Назад\n  Выберите: ")
 
     if choice == "1":
-        security.banned_ips.clear()
-        security._save_blacklist()
+        with security.rate_lock:
+            security.banned_ips.clear()
+            security._save_blacklist()
         color_print("  Черный список очищен.", 'green')
         time.sleep(1)
 
@@ -969,7 +1008,7 @@ def change_port():
             color_print("  Неверный порт. Оставляем текущий.", 'red')
             input("\n  Нажмите Enter для продолжения...")
             return CONFIG['PORT']
-    except:
+    except (ValueError, EOFError):
         color_print("  Неверный ввод. Оставляем текущий.", 'red')
         input("\n  Нажмите Enter для продолжения...")
         return CONFIG['PORT']
@@ -982,6 +1021,7 @@ def run_server():
     clear_screen()
     print_header()
 
+    ensure_directories()
     security.rotate_token()
 
     ip = get_local_ip()
@@ -1000,6 +1040,7 @@ def run_server():
     color_print("-" * 45, 'cyan')
     print()
 
+    orig_cwd = os.getcwd()
     os.chdir(FILES_DIR)
     if HAVE_BACKGROUND:
         background.keep_alive()
@@ -1017,6 +1058,10 @@ def run_server():
         if SERVER_INSTANCE:
             SERVER_INSTANCE.server_close()
             SERVER_INSTANCE = None
+        try:
+            os.chdir(orig_cwd)
+        except Exception:
+            pass
 
     color_print("\n  Сервер остановлен. Возврат в меню.", 'green')
     time.sleep(1)
