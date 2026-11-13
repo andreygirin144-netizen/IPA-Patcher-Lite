@@ -360,9 +360,9 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         else:
             path_display = "@executable_path"
         
-        color_print("\n" + "=" * 50, 'cyan')
-        color_print("  IPA PATCHER LITE - Интерактивное меню", 'cyan')
-        color_print("=" * 50, 'cyan')
+        color_print("\n" + "=" * 49, 'cyan')
+        color_print("      IPA PATCHER LITE - Интерактивное меню", 'cyan')
+        color_print("=" * 49, 'cyan')
         print("1. Изменить имя приложения")
         print(f"   Текущее: {plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName', 'не задано')}")
         print("2. Изменить версию")
@@ -385,7 +385,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print("16. Прореживание бинарника (удаление 32-битных архитектур)")
         print("17. Восстановить из резервных копий (Info.plist + бинарники)")
         print("0. Выход без сохранения")
-        print("=" * 50)
+        color_print("=" * 49, 'yellow')
         choice = ask_input("Ваш выбор", "9")
         
         if choice == "1":
@@ -1402,7 +1402,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 
         elif choice == "16":
             color_print("\n--- ПРОРЕЖИВАНИЕ БИНАРНИКА ---", 'cyan')
-            print("=" * 50)
+            print("=" * 49)
             color_print("Эта операция удаляет 32-битные архитектуры (ARMv7/v7s)", 'yellow')
             color_print("из FAT бинарника, оставляя только ARM64/ARM64e.", 'yellow')
             color_print("Это освобождает место в заголовке для инъекций твиков.", 'yellow')
@@ -1523,7 +1523,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 
         elif choice == "17":
             color_print("\n--- ВОССТАНОВЛЕНИЕ ИЗ РЕЗЕРВНЫХ КОПИЙ ---", 'cyan')
-            print("=" * 50)
+            print("=" * 49)
             
             restored_any = False
             
@@ -1644,7 +1644,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         elif choice == "0":
             if modified:
                 color_print("\n--- СВОДКА ИЗМЕНЕНИЙ ---", 'cyan')
-                color_print("=" * 50, 'cyan')
+                color_print("=" * 49, 'cyan')
                 if "name" in changes:
                     color_print(f"  Имя: {original.get('CFBundleName')} -> {changes['name']}", 'green')
                 if "version" in changes:
@@ -1675,7 +1675,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print("  Прореживание бинарника: ВЫПОЛНЕНО", 'green')
                 if "restored_backups" in changes:
                     color_print("  Резервные копии: ВОССТАНОВЛЕНЫ", 'green')
-                color_print("=" * 50, 'cyan')
+                color_print("=" * 49, 'cyan')
                 if not ask_yes_no("Выйти без сохранения?", default=False):
                     continue
             color_print("Выход без сохранения.", 'yellow')
@@ -1720,7 +1720,7 @@ def main():
     ensure_directories()
     if PYTHONISTA:
         console.clear()
-    color_print(f"=== IPA Patcher Lite v{VERSION} ===", 'cyan')
+    color_print(f"            IPA Patcher Lite v{VERSION} ", 'cyan')
     
     if not check_disk_space(500):
         color_print("[ERROR] Недостаточно свободного места на диске", 'red')
@@ -1869,8 +1869,6 @@ def main():
         log.info("Сохранение в: %s", output_path)
         
         cleanup_backups(app_dir)
-        
-        color_print("\n--- Сборка ---", 'cyan')
         
         if is_tipa:
             color_print("[INFO] Упаковка TIPA без сжатия (требование TrollStore)", 'yellow')
