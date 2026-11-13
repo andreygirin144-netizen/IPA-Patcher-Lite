@@ -9,7 +9,7 @@
 [![a-Shell mini](https://img.shields.io/badge/a--Shell-mini-FF8C00?style=flat-square)](https://apps.apple.com/app/a-shell-mini/id1543537943)
 [![Platform](https://img.shields.io/badge/Platform-iOS%2FiPadOS%20%7C%20macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square)]()
 [![No Dependencies](https://img.shields.io/badge/Dependencies-0%20(Zero--pip)-22C55E?style=flat-square)]()
-[![Version](https://img.shields.io/badge/Version-1.1.8-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/Version-1.1.9-blue?style=flat-square)]()
 [![License GPLv3](https://img.shields.io/badge/License-GPLv3-red?style=flat-square)](LICENSE)
 
 **Unpack → edit → smart ElleKit manager → tweak injection (`.deb` / `.zst` / `.dylib`) → advanced patches → Hex patcher → SQLite database editor → rebuild `.ipa` / `.tipa`**
