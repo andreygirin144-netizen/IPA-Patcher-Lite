@@ -6,11 +6,10 @@ import sys
 import textwrap
 from typing import Optional, List, Dict, Any, Tuple
 from .core.engine import PatchEngine
-from .core.exceptions import PatchError
-from .core.types import PatchType, SearchMode
 from .utils.hex_utils import HexUtils
 from .analyzers.macho import MachOAnalyzer
-from utils import color_print, ask_input, ask_yes_no, format_file_size, BACKUP_DIR
+from utils import color_print, ask_input, ask_yes_no, format_file_size
+from i18n import t
 
 DEFAULT_CONTEXT_SIZE = 16
 
@@ -43,28 +42,28 @@ class InteractiveCli:
         self.app_dir = app_dir
         if file_path and os.path.isfile(file_path):
             self.selected_file = file_path
-            color_print(f"\n[INFO] Открыт файл: {os.path.basename(file_path)}", 'cyan')
-            color_print(f"[INFO] Путь: {file_path}", 'white')
+            color_print(t("hp_opened_file", name=os.path.basename(file_path)), 'cyan')
+            color_print(t("hp_file_path", path=file_path), 'white')
         elif self.selected_file and os.path.isfile(self.selected_file):
-            color_print(f"\n[INFO] Редактирование файла: {os.path.basename(self.selected_file)}", 'cyan')
-        color_print("\n[15] Hex & String Патчер", 'cyan')
+            color_print(t("hp_editing_file", name=os.path.basename(self.selected_file)), 'cyan')
+        color_print(t("hp_title"), 'cyan')
         while self.running:
             self._show_menu()
         return self.has_changes
 
     def _show_menu(self) -> None:
-        print("\n  1. Одиночный патч")
-        print("  2. JSON патч")
-        print("  3. Откат (Undo)")
-        print("  4. Dry-run")
-        print("  5. Сохранить патч в JSON")
-        print("  6. Последние изменения")
-        print("  7. Hex-редактор")
-        print("  8. Сохранить изменения и выйти")
-        print("  0. Назад")
+        print("\n" + t("hp_m1"))
+        print(t("hp_m2"))
+        print(t("hp_m3"))
+        print(t("hp_m4"))
+        print(t("hp_m5"))
+        print(t("hp_m6"))
+        print(t("hp_m7"))
+        print(t("hp_m8"))
+        print(t("hp_m0"))
         print("")
 
-        choice = ask_input("Выбор", "0")
+        choice = ask_input(t("hp_choice"), "0")
         if choice == "0":
             self.running = False
             return
@@ -81,24 +80,24 @@ class InteractiveCli:
         elif choice == "7":
             self._hex_editor()
         elif choice == "8":
-            color_print("Изменения сохранены в файлах. Возврат в главное меню.", 'green')
+            color_print(t("hp_saved_exit"), 'green')
             self.running = False
             return
         elif choice == "1":
             self._single_patch(dry_run=False)
         else:
-            color_print("Неверный выбор", 'red')
+            color_print(t("hp_bad_choice"), 'red')
 
     def _hex_editor(self) -> None:
         if not self.selected_file or not os.path.isfile(self.selected_file):
-            color_print("Файл не выбран", 'yellow')
+            color_print(t("hp_no_file"), 'yellow')
             self.selected_file = self._choose_file()
             if not self.selected_file:
                 return
 
         file_size = os.path.getsize(self.selected_file)
         if file_size == 0:
-            color_print("Файл пустой", 'red')
+            color_print(t("hp_empty_file"), 'red')
             return
 
         self.dump_mode = True
@@ -109,19 +108,19 @@ class InteractiveCli:
         file_size = os.path.getsize(self.selected_file)
         size_mb = file_size / (1024 * 1024)
 
-        color_print(f"\nHex редактор: {os.path.basename(self.selected_file)} ({size_mb:.2f} MB)", 'cyan')
+        color_print(t("hp_ed_hdr", name=os.path.basename(self.selected_file), mb=size_mb), 'cyan')
         print("")
-        print("  1. Классический HEX-дамп (сетка 16 байт)")
-        print("  2. Семантический карточный дамп (Сущности & Строки)")
-        print("  3. Поиск")
-        print("  4. Редактировать по смещению")
-        print("  5. Поиск и замена")
-        print("  6. Найденные смещения")
-        print("  7. Перейти по номеру")
-        print("  0. Назад")
+        print(t("hp_ed_m1"))
+        print(t("hp_ed_m2"))
+        print(t("hp_ed_m3"))
+        print(t("hp_ed_m4"))
+        print(t("hp_ed_m5"))
+        print(t("hp_ed_m6"))
+        print(t("hp_ed_m7"))
+        print(t("hp_m0"))
         print("")
 
-        choice = ask_input("Выбор", "1")
+        choice = ask_input(t("hp_choice"), "1")
         if choice == "0":
             self.dump_mode = False
             return
@@ -140,37 +139,37 @@ class InteractiveCli:
         elif choice == "7":
             self._go_to_line()
         else:
-            color_print("Неверный выбор", 'red')
+            color_print(t("hp_bad_choice"), 'red')
 
     def _extract_semantic_entities(self, min_len: int = 4) -> List[Dict[str, Any]]:
         entities = []
         file_size = os.path.getsize(self.selected_file)
-        
+
         with open(self.selected_file, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 pos = 0
                 while pos < file_size:
                     while pos < file_size and not (32 <= mm[pos] <= 126):
                         pos += 1
-                    
+
                     if pos >= file_size:
                         break
-                    
+
                     start_off = pos
                     while pos < file_size and (32 <= mm[pos] <= 126):
                         pos += 1
-                    
+
                     str_len = pos - start_off
                     if str_len >= min_len:
                         raw_bytes = mm[start_off:pos]
                         text_val = raw_bytes.decode('utf-8', errors='replace')
-                        
+
                         null_padding = 0
                         null_pos = pos
                         while null_pos < file_size and mm[null_pos] == 0 and null_padding < 64:
                             null_padding += 1
                             null_pos += 1
-                        
+
                         entities.append({
                             "offset": start_off,
                             "len": str_len,
@@ -178,7 +177,7 @@ class InteractiveCli:
                             "text": text_val,
                             "hex": HexUtils.bytes_to_hex(raw_bytes)
                         })
-                    
+
                     pos += 1
         return entities
 
@@ -189,7 +188,7 @@ class InteractiveCli:
         box2 = w2 + 2
         total_inner = box1 + box2 + 1
 
-        title = f"СУЩНОСТЬ #{num}"
+        title = t("hp_sem_card", num=num)
         top_bar = "┌" + "─" * total_inner + "┐"
         title_line = "│" + f"{title:^{total_inner}}" + "│"
         header_sep = "├" + "─" * box1 + "┬" + "─" * box2 + "┤"
@@ -203,9 +202,9 @@ class InteractiveCli:
         ]
 
         items = [
-            ("Смещение", f"0x{entity['offset']:08X}"),
-            ("Длина", f"{entity['len']}b (макс {entity['max_len']})"),
-            ("Текст", entity['text']),
+            (t("hp_lbl_offset"), f"0x{entity['offset']:08X}"),
+            (t("hp_lbl_len"), t("hp_sem_len_val", n=entity['len'], m=entity['max_len'])),
+            (t("hp_lbl_text"), entity['text']),
             ("HEX", entity['hex'])
         ]
 
@@ -230,49 +229,52 @@ class InteractiveCli:
         return "\n".join("  " + l for l in card_lines)
 
     def _semantic_dump_mode(self) -> None:
-        color_print("\n[INFO] Сканирование файла на целостные сущности...", 'cyan')
-        
-        min_len_input = ask_input("Минимальная длина строки для карточки", "4")
+        color_print(t("hp_sem_scanning"), 'cyan')
+
+        min_len_input = ask_input(t("hp_sem_minlen"), "4")
         try:
             min_len = max(2, int(min_len_input))
         except ValueError:
             min_len = 4
-            
+
         entities = self._extract_semantic_entities(min_len=min_len)
         total = len(entities)
-        
+
         if total == 0:
-            color_print("[WARN] Осмысленных сущностей не найдено.", 'yellow')
+            color_print(t("hp_sem_none"), 'yellow')
             return
-            
+
         page_size = 6
         offset = 0
-        
+
         while True:
             total_pages = (total + page_size - 1) // page_size
             cur_page = (offset // page_size) + 1
-            
-            color_print(f"\n--- СЕМАНТИЧЕСКИЙ ДАМП (Карточки {offset+1}-{min(offset+page_size, total)} из {total}) [Стр. {cur_page}/{total_pages}] ---", 'cyan')
+
+            color_print(
+                t("hp_sem_hdr", a=offset + 1, b=min(offset + page_size, total), tot=total, p=cur_page, ptot=total_pages),
+                'cyan'
+            )
             print("")
-            
+
             for i in range(offset, min(offset + page_size, total)):
                 print(self._render_entity_card(i + 1, entities[i]))
                 print("")
-                
+
             has_next = (offset + page_size < total)
             has_prev = (offset > 0)
-            
-            print("  [#] Введите номер карточки (#) для редактирования")
-            print("  [s] Поиск / Фильтр по тексту")
+
+            print(t("hp_sem_opt_num"))
+            print(t("hp_sem_opt_s"))
             if has_next:
-                print("  [n / Enter] Следующая страница")
+                print(t("hp_sem_opt_n"))
             if has_prev:
-                print("  [p] Предыдущая страница")
-            print("  [0] Назад")
+                print(t("hp_sem_opt_p"))
+            print(t("hp_sem_opt_0"))
             print("")
-            
-            cmd = ask_input("Выбор", "n" if has_next else "0").strip().lower()
-            
+
+            cmd = ask_input(t("hp_choice"), "n" if has_next else "0").strip().lower()
+
             if cmd == "0":
                 break
             elif (cmd == "n" or cmd == "") and has_next:
@@ -280,55 +282,55 @@ class InteractiveCli:
             elif cmd == "p" and has_prev:
                 offset = max(0, offset - page_size)
             elif cmd == "s":
-                query = ask_input("Поисковый запрос (текст или путь)")
+                query = ask_input(t("hp_sem_query"))
                 if query:
                     found_indices = [
                         idx for idx, e in enumerate(entities)
                         if query.lower() in e['text'].lower()
                     ]
                     if found_indices:
-                        color_print(f"\n[INFO] Найдено карточек: {len(found_indices)}", 'green')
+                        color_print(t("hp_sem_found", n=len(found_indices)), 'green')
                         offset = (found_indices[0] // page_size) * page_size
                     else:
-                        color_print("[WARN] Ничего не найдено.", 'yellow')
+                        color_print(t("hp_sem_not_found"), 'yellow')
             elif cmd.isdigit():
                 target_num = int(cmd)
                 if 1 <= target_num <= total:
                     ent = entities[target_num - 1]
-                    color_print(f"\nРедактирование сущности #{target_num}:", 'yellow')
-                    color_print(f"  Текущий текст: \"{ent['text']}\"", 'white')
-                    color_print(f"  Смещение:      0x{ent['offset']:08X}", 'cyan')
-                    color_print(f"  Макс. длина:   {ent['max_len']} байт (с учетом \\x00)", 'cyan')
+                    color_print(t("hp_sem_edit_hdr", n=target_num), 'yellow')
+                    color_print(t("hp_sem_cur_text", text=ent['text']), 'white')
+                    color_print(t("hp_sem_cur_off", off=ent['offset']), 'cyan')
+                    color_print(t("hp_sem_cur_max", m=ent['max_len']), 'cyan')
                     print("")
-                    
-                    new_val = ask_input("Новый текст (Enter = отмена)", ent['text'])
+
+                    new_val = ask_input(t("hp_sem_new_text"), ent['text'])
                     if not new_val or new_val == ent['text']:
-                        color_print("[INFO] Отменено, изменений нет.", 'yellow')
+                        color_print(t("hp_sem_cancelled"), 'yellow')
                         continue
-                        
+
                     new_bytes = new_val.encode('utf-8')
                     if len(new_bytes) > ent['max_len']:
-                        color_print(f"[ERROR] Новый текст ({len(new_bytes)} б) длиннее лимита ({ent['max_len']} б)!", 'red')
+                        color_print(t("hp_sem_too_long", nl=len(new_bytes), ml=ent['max_len']), 'red')
                         continue
-                        
+
                     pad_len = ent['max_len'] - len(new_bytes)
                     new_bytes += b'\x00' * pad_len
-                    
-                    if ask_yes_no(f"Применить замену для #{target_num}?", default=True):
-                        backup = self.engine.backup_mgr.create(self.selected_file)
+
+                    if ask_yes_no(t("hp_sem_apply_q", n=target_num), default=True):
+                        self.engine.backup_mgr.create(self.selected_file)
                         with open(self.selected_file, 'r+b') as f:
                             with mmap.mmap(f.fileno(), 0) as mm:
                                 mm[ent['offset']:ent['offset'] + len(new_bytes)] = new_bytes
                                 mm.flush()
-                        
-                        color_print("[SUCCESS] Сущность успешно обновлена!", 'green')
+
+                        color_print(t("hp_sem_ok"), 'green')
                         self.has_changes = True
-                        
+
                         ent['text'] = new_val
                         ent['len'] = len(new_val.encode('utf-8'))
                         ent['hex'] = HexUtils.bytes_to_hex(new_val.encode('utf-8'))
                 else:
-                    color_print("Номер вне диапазона.", 'red')
+                    color_print(t("hp_num_oob"), 'red')
 
     def _get_string_bounds(self, mm: mmap.mmap, off: int, search_len: int) -> Tuple[int, int, str]:
         file_size = len(mm)
@@ -438,27 +440,27 @@ class InteractiveCli:
 
     def _go_to_line(self) -> None:
         if not self.offsets:
-            color_print("Нет найденных смещений. Сначала выполните поиск.", 'yellow')
+            color_print(t("hp_goto_none"), 'yellow')
             return
 
-        color_print("\nПерейти по номеру", 'cyan')
+        color_print(t("hp_goto_hdr"), 'cyan')
         print("")
-        color_print(f"  Всего найдено: {len(self.offsets)}", 'white')
+        color_print(t("hp_total_found", n=len(self.offsets)), 'white')
         print("")
 
-        line_num = ask_input("Введите номер")
+        line_num = ask_input(t("hp_enter_num"))
         try:
             idx = int(line_num) - 1
             if 0 <= idx < len(self.offsets):
                 off = self.offsets[idx]
-                color_print(f"  Смещение: 0x{off:08X} (#{idx+1})", 'green')
+                color_print(t("hp_off_item", off=off, idx=idx + 1), 'green')
                 print("")
                 self._show_context_line(off)
                 print("")
             else:
-                color_print(f"Номер {line_num} вне диапазона (1-{len(self.offsets)})", 'red')
+                color_print(t("hp_num_range_err", num=line_num, max=len(self.offsets)), 'red')
         except Exception:
-            color_print("Неверный формат", 'red')
+            color_print(t("hp_bad_fmt"), 'red')
 
     def _show_context_line(self, offset: int, context_size: int = DEFAULT_CONTEXT_SIZE) -> None:
         search_len = len(self.search_bytes) if self.search_bytes else 0
@@ -467,7 +469,7 @@ class InteractiveCli:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 info = self._extract_universal_context(mm, offset, search_len)
                 if info["text"]:
-                    color_print(f"  [Контекст текста]: \"{info['text']}\"", 'magenta')
+                    color_print(t("hp_ctx_text", text=info['text']), 'magenta')
 
                 line_start = info["line_start"]
                 line_end = info["line_end"]
@@ -495,9 +497,9 @@ class InteractiveCli:
                             if i not in result:
                                 result.append(i)
                     else:
-                        color_print(f"Диапазон {part} вне допустимых значений (1-{total})", 'yellow')
+                        color_print(t("hp_range_oob", part=part, total=total), 'yellow')
                 except ValueError:
-                    color_print(f"Неверный формат диапазона: {part}", 'red')
+                    color_print(t("hp_range_bad", part=part), 'red')
             else:
                 try:
                     idx = int(part) - 1
@@ -505,14 +507,14 @@ class InteractiveCli:
                         if idx not in result:
                             result.append(idx)
                     else:
-                        color_print(f"Номер {part} вне диапазона (1-{total})", 'yellow')
+                        color_print(t("hp_num_range_err", num=part, max=total), 'yellow')
                 except ValueError:
-                    color_print(f"Неверный формат: {part}", 'red')
+                    color_print(t("hp_fmt_bad", part=part), 'red')
 
         return sorted(result)
 
     def _show_matches_range_indices(self, indices: List[int], context_size: int = DEFAULT_CONTEXT_SIZE) -> None:
-        color_print(f"\nПоказано {len(indices)} совпадений:", 'cyan')
+        color_print(t("hp_shown_matches", n=len(indices)), 'cyan')
         print("")
 
         search_len = len(self.search_bytes) if self.search_bytes else 0
@@ -523,9 +525,9 @@ class InteractiveCli:
                     off = self.offsets[idx]
                     info = self._extract_universal_context(mm, off, search_len)
 
-                    color_print(f"\n  #{idx+1:>4}  0x{off:08X}  (паттерн: {search_len} байт)", 'yellow')
+                    color_print(t("hp_match_hdr", idx=idx + 1, off=off, slen=search_len), 'yellow')
                     if info["text"]:
-                        color_print(f"  [Контекст текста]: \"{info['text']}\"", 'magenta')
+                        color_print(t("hp_ctx_text", text=info['text']), 'magenta')
 
                     line_start = info["line_start"]
                     line_end = info["line_end"]
@@ -541,24 +543,24 @@ class InteractiveCli:
 
     def _browse_matches(self) -> Optional[List[int]]:
         if not self.offsets:
-            color_print("Нет совпадений", 'yellow')
+            color_print(t("hp_no_matches"), 'yellow')
             return None
 
         total = len(self.offsets)
-        color_print(f"\n--- ПРОСМОТР СОВПАДЕНИЙ ---", 'cyan')
-        color_print(f"Всего найдено: {total}", 'yellow')
+        color_print(t("hp_browse_hdr"), 'cyan')
+        color_print(t("hp_found_total", total=total), 'yellow')
         print("")
-        print("  Команды:")
-        print("    <номер>         - показать конкретное совпадение")
-        print("    <номер> <номер> - показать несколько")
-        print("    <номер>-<номер> - показать диапазон")
-        print("    all             - показать все")
-        print("    sel             - перейти к выбору для замены")
-        print("    q               - выход")
+        print(t("hp_b_cmds"))
+        print(t("hp_b_one"))
+        print(t("hp_b_multi"))
+        print(t("hp_b_range"))
+        print(t("hp_b_all"))
+        print(t("hp_b_sel"))
+        print(t("hp_b_q"))
         print("")
 
         while True:
-            command = ask_input("Команда", "").strip().lower()
+            command = ask_input(t("hp_cmd"), "").strip().lower()
 
             if command in ("q", "quit", "exit", ""):
                 return None
@@ -569,60 +571,60 @@ class InteractiveCli:
             if command == "all":
                 self._show_matches_range_indices(list(range(min(total, 50))))
                 if total > 50:
-                    color_print(f"Показано 50 из {total}", 'yellow')
+                    color_print(t("hp_shown_of", shown=50, total=total), 'yellow')
                 continue
 
             try:
                 indices = self._parse_match_indices(command, total)
                 if not indices:
-                    color_print("Неверный формат. Используйте: 5, 5 10, 5-10, all, sel, q", 'yellow')
+                    color_print(t("hp_b_bad_fmt"), 'yellow')
                     continue
 
                 self._show_matches_range_indices(indices)
             except Exception as e:
-                color_print(f"Ошибка: {e}", 'red')
+                color_print(t("hp_err", err=e), 'red')
 
     def _select_matches_for_replace(self) -> Optional[List[int]]:
         total = len(self.offsets)
 
-        color_print(f"\n--- ВЫБОР ДЛЯ ЗАМЕНЫ ---", 'cyan')
-        color_print(f"Всего: {total}", 'yellow')
+        color_print(t("hp_sel_hdr"), 'cyan')
+        color_print(t("hp_sel_total", total=total), 'yellow')
         print("")
-        print("  Введите номера через пробел, диапазон или all:")
-        print("    Примеры: 56 96 109")
+        print(t("hp_sel_hint1"))
+        print(t("hp_sel_hint2"))
         print("    56-109")
         print("    all")
-        print("    q - отмена")
+        print(t("hp_sel_hint3"))
         print("")
 
-        command = ask_input("Номера", "").strip().lower()
+        command = ask_input(t("hp_numbers"), "").strip().lower()
 
         if command in ("q", "", "quit", "exit"):
             return None
 
         if command == "all":
-            color_print(f"Выбраны все {total} совпадений", 'green')
+            color_print(t("hp_sel_all", total=total), 'green')
             return self.offsets
 
         try:
             indices = self._parse_match_indices(command, total)
             if not indices:
-                color_print("Не выбрано ни одного номера", 'yellow')
+                color_print(t("hp_sel_none"), 'yellow')
                 return None
 
             selected = [self.offsets[i] for i in indices]
-            color_print(f"\nВыбрано {len(selected)} совпадений:", 'green')
+            color_print(t("hp_sel_cnt", n=len(selected)), 'green')
             for idx in indices[:10]:
                 color_print(f"  #{idx+1}  0x{self.offsets[idx]:08X}", 'white')
             if len(indices) > 10:
-                color_print(f"  ... и еще {len(indices) - 10}", 'yellow')
+                color_print(t("hp_and_more", n=len(indices) - 10), 'yellow')
 
-            if not ask_yes_no("Продолжить с этими совпадениями?", default=True):
+            if not ask_yes_no(t("hp_sel_cont_q"), default=True):
                 return None
 
             return selected
         except Exception as e:
-            color_print(f"Ошибка: {e}", 'red')
+            color_print(t("hp_err", err=e), 'red')
             return None
 
     def _show_matches_range(self, start_idx: int, end_idx: int) -> None:
@@ -630,26 +632,26 @@ class InteractiveCli:
         self._show_matches_range_indices(indices)
 
     def _search_in_file(self) -> None:
-        color_print("\nПоиск в файле", 'cyan')
+        color_print(t("hp_search_hdr"), 'cyan')
         print("")
         print("  1. HEX")
-        print("  2. Текст (точное совпадение)")
-        print("  3. Текст (без учета регистра)")
+        print(t("hp_search_m2"))
+        print(t("hp_search_m3"))
         print("")
 
-        mode = ask_input("Режим", "1")
+        mode = ask_input(t("hp_mode"), "1")
 
         if mode == "1":
-            search_hex = ask_input("HEX для поиска")
+            search_hex = ask_input(t("hp_hex_search"))
             if not search_hex:
                 return
             try:
                 search_bytes = HexUtils.hex_to_bytes(search_hex)
             except Exception:
-                color_print("Неверный HEX формат", 'red')
+                color_print(t("hp_bad_hex"), 'red')
                 return
         elif mode == "3":
-            search_text = ask_input("Текст для поиска (без учета регистра)")
+            search_text = ask_input(t("hp_text_ci_search"))
             if not search_text:
                 return
             search_lower = search_text.lower()
@@ -657,7 +659,7 @@ class InteractiveCli:
             search_bytes_lower = search_lower.encode('utf-8')
             search_bytes_upper = search_upper.encode('utf-8')
 
-            color_print("Поиск...", 'blue')
+            color_print(t("hp_searching"), 'blue')
             offsets = []
             with open(self.selected_file, 'rb') as f:
                 with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
@@ -678,21 +680,21 @@ class InteractiveCli:
                         off += 1
 
             if not offsets:
-                color_print("Совпадений не найдено", 'yellow')
+                color_print(t("hp_no_matches"), 'yellow')
                 return
 
-            color_print(f"Найдено: {len(offsets)}", 'green')
+            color_print(t("hp_found_n", n=len(offsets)), 'green')
             self.offsets = offsets
             self.search_bytes = search_bytes_lower
             self._show_all_offsets()
             return
         else:
-            search_text = ask_input("Текст для поиска")
+            search_text = ask_input(t("hp_text_search"))
             if not search_text:
                 return
             search_bytes = search_text.encode('utf-8')
 
-        color_print("Поиск...", 'blue')
+        color_print(t("hp_searching"), 'blue')
         offsets = []
         with open(self.selected_file, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
@@ -705,20 +707,20 @@ class InteractiveCli:
                     off += 1
 
         if not offsets:
-            color_print("Совпадений не найдено", 'yellow')
+            color_print(t("hp_no_matches"), 'yellow')
             return
 
-        color_print(f"Найдено: {len(offsets)}", 'green')
+        color_print(t("hp_found_n", n=len(offsets)), 'green')
         self.offsets = offsets
         self.search_bytes = search_bytes
         self._show_all_offsets()
 
     def _show_all_offsets(self) -> None:
         if not self.offsets:
-            color_print("Нет найденных смещений", 'yellow')
+            color_print(t("hp_no_offsets"), 'yellow')
             return
 
-        color_print(f"\nСмещения ({len(self.offsets)})", 'cyan')
+        color_print(t("hp_offsets_hdr", n=len(self.offsets)), 'cyan')
         print("")
 
         with open(self.selected_file, 'rb') as f:
@@ -740,15 +742,15 @@ class InteractiveCli:
         size_mb = file_size / (1024 * 1024)
 
         if size_mb > 10:
-            color_print(f"Файл большой ({size_mb:.1f} MB), показываем первые 10 МБ", 'yellow')
+            color_print(t("hp_dump_large", mb=size_mb), 'yellow')
             max_dump = 10 * 1024 * 1024
         else:
             max_dump = file_size
 
-        color_print(f"\nДамп: {os.path.basename(self.selected_file)} ({size_mb:.2f} MB)", 'cyan')
+        color_print(t("hp_dump_hdr", name=os.path.basename(self.selected_file), mb=size_mb), 'cyan')
         print("")
 
-        step = ask_input("Интервал", "16")
+        step = ask_input(t("hp_dump_step"), "16")
         try:
             step = int(step)
             if step < 1:
@@ -756,7 +758,7 @@ class InteractiveCli:
         except Exception:
             step = 16
 
-        rows_per_page = ask_input("Строк на страницу", "25")
+        rows_per_page = ask_input(t("hp_dump_rows"), "25")
         try:
             rows_per_page = int(rows_per_page)
             if rows_per_page < 1:
@@ -764,7 +766,7 @@ class InteractiveCli:
         except Exception:
             rows_per_page = 25
 
-        block_size = ask_input("Разделитель каждые N строк", "16")
+        block_size = ask_input(t("hp_dump_block"), "16")
         try:
             block_size = int(block_size)
             if block_size < 1:
@@ -789,21 +791,24 @@ class InteractiveCli:
                 while offset < max_dump:
                     if total_rows >= rows_per_page:
                         color_print("  " + "=" * 65, 'yellow')
-                        color_print(f"  Страница {current_page}/{total_pages}. Строки {row_num - rows_per_page}-{row_num-1} из {total_rows_all}", 'cyan')
+                        color_print(
+                            t("hp_dump_page", cur=current_page, tot=total_pages, a=row_num - rows_per_page, b=row_num - 1, all=total_rows_all),
+                            'cyan'
+                        )
                         if self.offsets:
-                            color_print(f"  Подсвечено совпадений: {len(self.offsets)}", 'green')
+                            color_print(t("hp_dump_hl", n=len(self.offsets)), 'green')
                         print("")
-                        color_print("  [n] следующая страница", 'blue')
-                        color_print("  [p] предыдущая страница", 'blue')
-                        color_print("  [g] перейти к строке и редактировать", 'blue')
-                        color_print("  [o] перейти по смещению и редактировать", 'blue')
-                        color_print("  [h] перейти по HEX и редактировать", 'blue')
-                        color_print("  [f] найти HEX и подсветить", 'yellow')
-                        color_print("  [c] очистить подсветку", 'yellow')
-                        color_print("  [q] выйти из дампа", 'blue')
+                        color_print(t("hp_dump_nav_n"), 'blue')
+                        color_print(t("hp_dump_nav_p"), 'blue')
+                        color_print(t("hp_dump_nav_g"), 'blue')
+                        color_print(t("hp_dump_nav_o"), 'blue')
+                        color_print(t("hp_dump_nav_h"), 'blue')
+                        color_print(t("hp_dump_nav_f"), 'yellow')
+                        color_print(t("hp_dump_nav_c"), 'yellow')
+                        color_print(t("hp_dump_nav_q"), 'blue')
                         print("")
 
-                        nav = ask_input("Команда", "n")
+                        nav = ask_input(t("hp_cmd"), "n")
                         if nav.lower() == "q":
                             return
                         elif nav.lower() == "p":
@@ -816,11 +821,11 @@ class InteractiveCli:
                                 color_print("  " + "=" * 65, 'yellow')
                                 continue
                             else:
-                                color_print("  Это первая страница", 'yellow')
+                                color_print(t("hp_dump_first"), 'yellow')
                                 continue
                         elif nav.lower() == "g":
                             try:
-                                target_row = int(ask_input("Введите номер строки"))
+                                target_row = int(ask_input(t("hp_dump_enter_row")))
                                 if 1 <= target_row <= total_rows_all:
                                     target_offset = (target_row - 1) * step
                                     self._edit_at_offset_from_dump(target_offset, step)
@@ -831,13 +836,13 @@ class InteractiveCli:
                                     color_print("  " + "=" * 65, 'yellow')
                                     continue
                                 else:
-                                    color_print(f"  Номер строки должен быть от 1 до {total_rows_all}", 'yellow')
+                                    color_print(t("hp_dump_row_oob", max=total_rows_all), 'yellow')
                             except Exception:
-                                color_print("  Неверный номер", 'red')
+                                color_print(t("hp_dump_bad_num"), 'red')
                             continue
                         elif nav.lower() == "o":
                             try:
-                                offset_str = ask_input("Введите смещение (hex или dec)")
+                                offset_str = ask_input(t("hp_dump_enter_off"))
                                 if offset_str.startswith('0x'):
                                     target_offset = int(offset_str, 16)
                                 else:
@@ -852,13 +857,13 @@ class InteractiveCli:
                                     color_print("  " + "=" * 65, 'yellow')
                                     continue
                                 else:
-                                    color_print(f"  Смещение вне диапазона (0-{max_dump-1})", 'yellow')
+                                    color_print(t("hp_dump_off_oob", max=max_dump - 1), 'yellow')
                             except Exception:
-                                color_print("  Неверный формат", 'red')
+                                color_print(t("hp_bad_fmt"), 'red')
                             continue
                         elif nav.lower() == "h":
                             try:
-                                hex_str = ask_input("Введите HEX для поиска и редактирования")
+                                hex_str = ask_input(t("hp_dump_enter_hex_ed"))
                                 search_bytes = HexUtils.hex_to_bytes(hex_str)
                                 pos = mm.find(search_bytes, 0)
                                 if pos != -1:
@@ -869,17 +874,17 @@ class InteractiveCli:
                                     row_num = target_row
                                     total_rows = (target_row - 1) % rows_per_page
                                     block_counter = 0
-                                    color_print(f"  Найден HEX 0x{pos:08X} (строка {target_row})", 'green')
+                                    color_print(t("hp_dump_hex_found", pos=pos, row=target_row), 'green')
                                     color_print("  " + "=" * 65, 'yellow')
                                     continue
                                 else:
-                                    color_print("  HEX не найден", 'yellow')
+                                    color_print(t("hp_dump_hex_miss"), 'yellow')
                             except Exception:
-                                color_print("  Неверный HEX формат", 'red')
+                                color_print(t("hp_bad_hex"), 'red')
                             continue
                         elif nav.lower() == "f":
                             try:
-                                hex_str = ask_input("Введите HEX для поиска и подсветки")
+                                hex_str = ask_input(t("hp_dump_enter_hex_hl"))
                                 if not hex_str:
                                     continue
                                 search_bytes = HexUtils.hex_to_bytes(hex_str)
@@ -895,13 +900,13 @@ class InteractiveCli:
                                     pos += 1
 
                                 if not offsets:
-                                    color_print("  HEX не найден", 'yellow')
+                                    color_print(t("hp_dump_hex_miss"), 'yellow')
                                     self.offsets = []
                                     self.search_bytes = None
                                     continue
 
                                 self.offsets = offsets
-                                color_print(f"  Найдено совпадений: {len(offsets)}", 'green')
+                                color_print(t("hp_dump_hl_cnt", n=len(offsets)), 'green')
 
                                 first_pos = offsets[0]
                                 target_row = first_pos // step + 1
@@ -910,16 +915,16 @@ class InteractiveCli:
                                 row_num = (current_page - 1) * rows_per_page + 1
                                 total_rows = 0
                                 block_counter = 0
-                                color_print(f"  Первое совпадение: 0x{first_pos:08X} (строка {target_row})", 'green')
+                                color_print(t("hp_dump_first_hl", pos=first_pos, row=target_row), 'green')
                                 color_print("  " + "=" * 65, 'yellow')
                                 continue
                             except Exception as e:
-                                color_print(f"  Ошибка: {e}", 'red')
+                                color_print("  " + t("hp_err", err=e), 'red')
                             continue
                         elif nav.lower() == "c":
                             self.offsets = []
                             self.search_bytes = None
-                            color_print("  Подсветка очищена", 'yellow')
+                            color_print(t("hp_dump_hl_clr"), 'yellow')
                             color_print("  " + "=" * 65, 'yellow')
                             continue
                         elif nav.lower() == "n":
@@ -932,10 +937,10 @@ class InteractiveCli:
                                 color_print("  " + "=" * 65, 'yellow')
                                 continue
                             else:
-                                color_print("  Это последняя страница", 'yellow')
+                                color_print(t("hp_dump_last"), 'yellow')
                                 continue
                         else:
-                            color_print("  Неверная команда", 'yellow')
+                            color_print(t("hp_dump_bad_cmd"), 'yellow')
                             continue
 
                     data = mm[offset:min(offset + step, max_dump)]
@@ -952,49 +957,49 @@ class InteractiveCli:
                         block_counter = 0
 
         color_print("  " + "=" * 65, 'cyan')
-        color_print(f"  Конец дампа. Всего строк: {total_rows_all}", 'cyan')
+        color_print(t("hp_dump_end", tot=total_rows_all), 'cyan')
 
     def _edit_at_offset_from_dump(self, offset: int, read_size: int = DEFAULT_CONTEXT_SIZE) -> None:
         file_size = os.path.getsize(self.selected_file)
         if offset >= file_size:
-            color_print(f"Смещение {offset} >= {file_size}", 'red')
+            color_print(t("hp_off_oob", off=offset, size=file_size), 'red')
             return
 
         with open(self.selected_file, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 current_bytes = mm[offset:min(offset + read_size, file_size)]
 
-        color_print(f"\nРедактирование по смещению 0x{offset:08X}:", 'cyan')
+        color_print(t("hp_ed_off_hdr", off=offset), 'cyan')
         color_print(f"  HEX: {HexUtils.bytes_to_hex(current_bytes)}", 'white')
         ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in current_bytes)
         color_print(f"  ASC: {ascii_str}", 'white')
         print("")
 
-        new_hex = ask_input("Новые байты (HEX)")
+        new_hex = ask_input(t("hp_new_bytes"))
         if not new_hex:
             return
 
         try:
             new_bytes = HexUtils.hex_to_bytes(new_hex)
         except Exception:
-            color_print("Неверный HEX формат", 'red')
+            color_print(t("hp_bad_hex"), 'red')
             return
 
         if len(new_bytes) != len(current_bytes):
-            color_print(f"Длина: старые {len(current_bytes)} байт, новые {len(new_bytes)} байт", 'yellow')
-            if not ask_yes_no("Продолжить? (будет дополнено нулями или обрезано)", default=False):
+            color_print(t("hp_len_diff", old=len(current_bytes), new=len(new_bytes)), 'yellow')
+            if not ask_yes_no(t("hp_len_pad_q"), default=False):
                 return
             if len(new_bytes) < len(current_bytes):
                 new_bytes += b'\x00' * (len(current_bytes) - len(new_bytes))
             else:
                 new_bytes = new_bytes[:len(current_bytes)]
 
-        if not ask_yes_no(f"Подтвердить замену 0x{offset:08X}?", default=True):
+        if not ask_yes_no(t("hp_confirm_off", off=offset), default=True):
             return
 
         backup = self.engine.backup_mgr.create(self.selected_file)
         if backup is None:
-            color_print("Бэкап не создан", 'red')
+            color_print(t("hp_bak_fail"), 'red')
             return
 
         with open(self.selected_file, 'r+b') as f:
@@ -1002,105 +1007,105 @@ class InteractiveCli:
                 mm[offset:offset + len(new_bytes)] = new_bytes
                 mm.flush()
 
-        color_print("Заменено", 'green')
+        color_print(t("hp_replaced"), 'green')
         self.has_changes = True
 
         with open(self.selected_file, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 new_current = mm[offset:min(offset + read_size, file_size)]
 
-        color_print(f"\nНовые байты 0x{offset:08X}:", 'green')
+        color_print(t("hp_new_bytes_hdr", off=offset), 'green')
         color_print(f"  HEX: {HexUtils.bytes_to_hex(new_current)}", 'green')
         ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in new_current)
         color_print(f"  ASC: {ascii_str}", 'green')
         print("")
 
     def _edit_at_offset(self) -> None:
-        color_print("\nРедактирование по смещению", 'cyan')
+        color_print(t("hp_ed_off_title"), 'cyan')
         print("")
 
         if self.offsets:
-            color_print("Найденные смещения (первые 20):", 'blue')
+            color_print(t("hp_found_top20"), 'blue')
             for i, off in enumerate(self.offsets[:20], 1):
                 color_print(f"  #{i}  0x{off:08X}", 'white')
             if len(self.offsets) > 20:
-                color_print(f"  ... и еще {len(self.offsets) - 20}", 'yellow')
+                color_print(t("hp_and_more", n=len(self.offsets) - 20), 'yellow')
             print("")
-            use_found = ask_yes_no("Использовать номер из списка?", default=False)
+            use_found = ask_yes_no(t("hp_use_list_q"), default=False)
             if use_found:
-                idx = ask_input("Номер")
+                idx = ask_input(t("hp_num_prompt"))
                 try:
                     idx = int(idx) - 1
                     if 0 <= idx < len(self.offsets):
                         offset = self.offsets[idx]
                         color_print(f"0x{offset:08X} (#{idx+1})", 'green')
                     else:
-                        color_print("Неверный номер", 'red')
+                        color_print(t("hp_num_oob"), 'red')
                         return
                 except Exception:
-                    color_print("Неверный формат", 'red')
+                    color_print(t("hp_bad_fmt"), 'red')
                     return
             else:
-                offset_str = ask_input("Смещение (hex)")
+                offset_str = ask_input(t("hp_off_hex_prompt"))
                 try:
                     if offset_str.startswith('0x'):
                         offset = int(offset_str, 16)
                     else:
                         offset = int(offset_str)
                 except Exception:
-                    color_print("Неверный формат", 'red')
+                    color_print(t("hp_bad_fmt"), 'red')
                     return
         else:
-            offset_str = ask_input("Смещение (hex)")
+            offset_str = ask_input(t("hp_off_hex_prompt"))
             try:
                 if offset_str.startswith('0x'):
                     offset = int(offset_str, 16)
                 else:
                     offset = int(offset_str)
             except Exception:
-                color_print("Неверный формат", 'red')
+                color_print(t("hp_bad_fmt"), 'red')
                 return
 
         file_size = os.path.getsize(self.selected_file)
         if offset >= file_size:
-            color_print(f"Смещение {offset} > {file_size}", 'red')
+            color_print(t("hp_off_gt", off=offset, size=file_size), 'red')
             return
 
         with open(self.selected_file, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 current_bytes = mm[offset:min(offset + DEFAULT_CONTEXT_SIZE, file_size)]
 
-        color_print(f"\nТекущие байты 0x{offset:08X}:", 'cyan')
+        color_print(t("hp_cur_bytes_hdr", off=offset), 'cyan')
         color_print(f"  HEX: {HexUtils.bytes_to_hex(current_bytes)}", 'white')
         ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in current_bytes)
         color_print(f"  ASC: {ascii_str}", 'white')
         print("")
 
-        new_hex = ask_input("Новые байты (HEX)")
+        new_hex = ask_input(t("hp_new_bytes"))
         if not new_hex:
             return
 
         try:
             new_bytes = HexUtils.hex_to_bytes(new_hex)
         except Exception:
-            color_print("Неверный HEX формат", 'red')
+            color_print(t("hp_bad_hex"), 'red')
             return
 
         if len(new_bytes) != len(current_bytes):
-            color_print(f"Длина: старые {len(current_bytes)} байт, новые {len(new_bytes)} байт", 'yellow')
-            if not ask_yes_no("Продолжить? (будет дополнено нулями или обрезано)", default=False):
+            color_print(t("hp_len_diff", old=len(current_bytes), new=len(new_bytes)), 'yellow')
+            if not ask_yes_no(t("hp_len_pad_q"), default=False):
                 return
             if len(new_bytes) < len(current_bytes):
                 new_bytes += b'\x00' * (len(current_bytes) - len(new_bytes))
             else:
                 new_bytes = new_bytes[:len(current_bytes)]
 
-        if not ask_yes_no(f"Подтвердить замену 0x{offset:08X}?", default=True):
+        if not ask_yes_no(t("hp_confirm_off", off=offset), default=True):
             return
 
         backup = self.engine.backup_mgr.create(self.selected_file)
         if backup is None:
-            color_print("Бэкап не создан", 'red')
+            color_print(t("hp_bak_fail"), 'red')
             return
 
         with open(self.selected_file, 'r+b') as f:
@@ -1108,62 +1113,62 @@ class InteractiveCli:
                 mm[offset:offset + len(new_bytes)] = new_bytes
                 mm.flush()
 
-        color_print("Заменено", 'green')
+        color_print(t("hp_replaced"), 'green')
         self.has_changes = True
 
         with open(self.selected_file, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 new_current = mm[offset:min(offset + DEFAULT_CONTEXT_SIZE, file_size)]
 
-        color_print(f"\nНовые байты 0x{offset:08X}:", 'green')
+        color_print(t("hp_new_bytes_hdr", off=offset), 'green')
         color_print(f"  HEX: {HexUtils.bytes_to_hex(new_current)}", 'green')
         ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in new_current)
         color_print(f"  ASC: {ascii_str}", 'green')
         print("")
 
     def _search_and_replace(self) -> None:
-        color_print("\nПоиск и замена", 'cyan')
+        color_print(t("hp_sr_hdr"), 'cyan')
         print("")
         print("  1. HEX")
-        print("  2. Текст (точное совпадение)")
-        print("  3. Текст (без учета регистра)")
+        print(t("hp_search_m2"))
+        print(t("hp_search_m3"))
         print("")
 
-        mode = ask_input("Режим", "1")
+        mode = ask_input(t("hp_mode"), "1")
 
         if mode == "1":
-            search_hex = ask_input("Что искать (HEX)")
+            search_hex = ask_input(t("hp_sr_hex_find"))
             if not search_hex:
                 return
             try:
                 search_bytes = HexUtils.hex_to_bytes(search_hex)
             except Exception:
-                color_print("Неверный HEX формат", 'red')
+                color_print(t("hp_bad_hex"), 'red')
                 return
 
-            replace_hex = ask_input("На что заменить (HEX)")
+            replace_hex = ask_input(t("hp_sr_hex_rep"))
             if not replace_hex:
                 return
             try:
                 replace_bytes = HexUtils.hex_to_bytes(replace_hex)
             except Exception:
-                color_print("Неверный HEX формат", 'red')
+                color_print(t("hp_bad_hex"), 'red')
                 return
 
             if len(search_bytes) != len(replace_bytes):
-                color_print(f"Длины: поиск {len(search_bytes)} байт, замена {len(replace_bytes)} байт", 'yellow')
+                color_print(t("hp_sr_len_info", s=len(search_bytes), r=len(replace_bytes)), 'yellow')
                 if len(replace_bytes) < len(search_bytes):
                     replace_bytes += b'\x00' * (len(search_bytes) - len(replace_bytes))
-                    color_print(f"Замена дополнена нулями до {len(search_bytes)} байт", 'blue')
+                    color_print(t("hp_sr_padded", s=len(search_bytes)), 'blue')
                 else:
-                    color_print("Замена длиннее поиска. Длины должны совпадать.", 'red')
+                    color_print(t("hp_sr_too_long"), 'red')
                     return
 
         elif mode == "3":
-            search_text = ask_input("Что искать (текст, без учета регистра)")
+            search_text = ask_input(t("hp_sr_text_ci"))
             if not search_text:
                 return
-            replace_text = ask_input("На что заменить (текст)")
+            replace_text = ask_input(t("hp_sr_text_rep"))
             if not replace_text:
                 return
 
@@ -1174,15 +1179,15 @@ class InteractiveCli:
             replace_bytes = replace_text.encode('utf-8')
 
             if len(replace_bytes) != len(search_bytes_lower):
-                color_print(f"Длины: поиск {len(search_bytes_lower)} байт, замена {len(replace_bytes)} байт", 'yellow')
+                color_print(t("hp_sr_len_info", s=len(search_bytes_lower), r=len(replace_bytes)), 'yellow')
                 if len(replace_bytes) < len(search_bytes_lower):
                     replace_bytes += b'\x00' * (len(search_bytes_lower) - len(replace_bytes))
-                    color_print(f"Замена дополнена нулями до {len(search_bytes_lower)} байт", 'blue')
+                    color_print(t("hp_sr_padded", s=len(search_bytes_lower)), 'blue')
                 else:
-                    color_print("Замена длиннее поиска. Длины должны совпадать.", 'red')
+                    color_print(t("hp_sr_too_long"), 'red')
                     return
 
-            color_print("Поиск...", 'blue')
+            color_print(t("hp_searching"), 'blue')
             offsets = []
             with open(self.selected_file, 'rb') as f:
                 with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
@@ -1203,10 +1208,10 @@ class InteractiveCli:
                         off += 1
 
             if not offsets:
-                color_print("Совпадений не найдено", 'yellow')
+                color_print(t("hp_no_matches"), 'yellow')
                 return
 
-            color_print(f"Найдено: {len(offsets)}", 'green')
+            color_print(t("hp_found_n", n=len(offsets)), 'green')
             self.offsets = offsets
             self.search_bytes = search_bytes_lower
             self._show_all_offsets()
@@ -1218,7 +1223,7 @@ class InteractiveCli:
 
             backup = self.engine.backup_mgr.create(self.selected_file)
             if backup is None:
-                color_print("Бэкап не создан", 'red')
+                color_print(t("hp_bak_fail"), 'red')
                 return
 
             count = 0
@@ -1238,32 +1243,32 @@ class InteractiveCli:
 
             if count > 0:
                 self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
-                color_print(f"Заменено: {count}", 'green')
+                color_print(t("hp_replaced_cnt", n=count), 'green')
                 self.has_changes = True
             else:
-                color_print("Изменений не внесено", 'yellow')
+                color_print(t("hp_no_changes"), 'yellow')
             return
 
         else:
-            search_text = ask_input("Что искать (текст)")
+            search_text = ask_input(t("hp_sr_text_find"))
             if not search_text:
                 return
-            replace_text = ask_input("На что заменить (текст)")
+            replace_text = ask_input(t("hp_sr_text_rep"))
             if not replace_text:
                 return
             search_bytes = search_text.encode('utf-8')
             replace_bytes = replace_text.encode('utf-8')
 
             if len(search_bytes) != len(replace_bytes):
-                color_print(f"Длины: поиск {len(search_bytes)} байт, замена {len(replace_bytes)} байт", 'yellow')
+                color_print(t("hp_sr_len_info", s=len(search_bytes), r=len(replace_bytes)), 'yellow')
                 if len(replace_bytes) < len(search_bytes):
                     replace_bytes += b'\x00' * (len(search_bytes) - len(replace_bytes))
-                    color_print(f"Замена дополнена нулями до {len(search_bytes)} байт", 'blue')
+                    color_print(t("hp_sr_padded", s=len(search_bytes)), 'blue')
                 else:
-                    color_print("Замена длиннее поиска. Длины должны совпадать.", 'red')
+                    color_print(t("hp_sr_too_long"), 'red')
                     return
 
-        color_print("Поиск...", 'blue')
+        color_print(t("hp_searching"), 'blue')
 
         offsets = []
         with open(self.selected_file, 'rb') as f:
@@ -1277,10 +1282,10 @@ class InteractiveCli:
                     off += 1
 
         if not offsets:
-            color_print("Совпадений не найдено", 'yellow')
+            color_print(t("hp_no_matches"), 'yellow')
             return
 
-        color_print(f"Найдено: {len(offsets)}", 'green')
+        color_print(t("hp_found_n", n=len(offsets)), 'green')
         self.offsets = offsets
         self.search_bytes = search_bytes
         self._show_all_offsets()
@@ -1292,7 +1297,7 @@ class InteractiveCli:
 
         backup = self.engine.backup_mgr.create(self.selected_file)
         if backup is None:
-            color_print("Бэкап не создан", 'red')
+            color_print(t("hp_bak_fail"), 'red')
             return
 
         count = 0
@@ -1312,17 +1317,17 @@ class InteractiveCli:
 
         if count > 0:
             self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
-            color_print(f"Заменено: {count}", 'green')
+            color_print(t("hp_replaced_cnt", n=count), 'green')
             self.has_changes = True
         else:
-            color_print("Изменений не внесено", 'yellow')
+            color_print(t("hp_no_changes"), 'yellow')
 
     def _show_last_changes(self) -> None:
         if not self.engine.last_changes:
-            color_print("Нет изменений", 'yellow')
+            color_print(t("hp_no_last"), 'yellow')
             return
 
-        color_print("\nПоследние изменения", 'cyan')
+        color_print(t("hp_last_hdr"), 'cyan')
         print("")
 
         for i, change in enumerate(self.engine.last_changes[:20], 1):
@@ -1333,24 +1338,24 @@ class InteractiveCli:
                 print("")
 
         if len(self.engine.last_changes) > 20:
-            color_print(f"  ... и еще {len(self.engine.last_changes) - 20}", 'yellow')
+            color_print(t("hp_and_more", n=len(self.engine.last_changes) - 20), 'yellow')
         print("")
 
     def _undo(self) -> None:
-        color_print("\nОткат последнего патча (Undo)", 'cyan')
+        color_print(t("hp_undo_hdr"), 'cyan')
         print("")
-        print("  1. Безопасный (с проверкой)")
-        print("  2. Принудительный (без проверки)")
+        print(t("hp_undo_1"))
+        print(t("hp_undo_2"))
         print("")
 
-        choice = ask_input("Режим", "1")
+        choice = ask_input(t("hp_mode"), "1")
         force = (choice == "2")
         try:
             result = self.engine.undo_last(force)
             for entry in result:
-                color_print(f"Откат {entry['count']} изменений в {os.path.basename(entry['file'])}", 'green')
+                color_print(t("hp_undo_ok", n=entry['count'], file=os.path.basename(entry['file'])), 'green')
         except Exception as e:
-            color_print(f"Ошибка: {e}", 'red')
+            color_print(t("hp_err", err=e), 'red')
 
     def _get_json_dir(self) -> str:
         return os.path.join(os.path.dirname(os.path.abspath(__file__)), "JSON_Patches")
@@ -1368,7 +1373,7 @@ class InteractiveCli:
                 root = tk.Tk()
                 root.withdraw()
                 patch_path = filedialog.askopenfilename(
-                    title="Выберите JSON патч",
+                    title=t("hp_json_pick_dlg"),
                     filetypes=[("JSON files", "*.json")]
                 )
                 root.destroy()
@@ -1377,13 +1382,13 @@ class InteractiveCli:
             except ImportError:
                 pass
 
-        patch_path = ask_input("Введите путь к JSON-файлу", "")
+        patch_path = ask_input(t("hp_json_enter_path"), "")
         if patch_path and os.path.isfile(patch_path):
             return patch_path
         return ""
 
     def _load_json_patch(self) -> None:
-        color_print("\nЗагрузка JSON патча", 'cyan')
+        color_print(t("hp_json_hdr"), 'cyan')
         print("")
 
         json_dir = self._get_json_dir()
@@ -1398,23 +1403,23 @@ class InteractiveCli:
         patch_path = None
 
         if json_files:
-            color_print("Найденные JSON-файлы:", 'blue')
+            color_print(t("hp_json_found"), 'blue')
             for idx, f in enumerate(json_files, 1):
                 try:
                     size = format_file_size(os.path.getsize(os.path.join(json_dir, f)))
                     color_print(f"  {idx}) {f} ({size})", 'white')
                 except Exception:
                     color_print(f"  {idx}) {f}", 'white')
-            print("  s) Выбрать другой файл")
-            print("  0) Отмена")
+            print(t("hp_json_pick_other"))
+            print(t("fe_back_0"))
 
-            choice = ask_input("Выберите файл", "1")
+            choice = ask_input(t("hp_json_sel"), "1")
             if choice == "0":
                 return
             elif choice.lower() == "s":
                 patch_path = self._pick_json_file()
                 if not patch_path:
-                    color_print("Файл не выбран.", 'yellow')
+                    color_print(t("hp_json_none_sel"), 'yellow')
                     return
             else:
                 try:
@@ -1422,36 +1427,35 @@ class InteractiveCli:
                     if 0 <= idx < len(json_files):
                         patch_path = os.path.join(json_dir, json_files[idx])
                     else:
-                        color_print("Неверный номер.", 'red')
+                        color_print(t("hp_num_oob"), 'red')
                         return
                 except ValueError:
-                    color_print("Неверный ввод.", 'red')
+                    color_print(t("invalid_input"), 'red')
                     return
         else:
-            color_print("JSON-файлы не найдены.", 'yellow')
-            color_print(f"Папка: {json_dir}", 'white')
-            if not ask_yes_no("Выбрать файл вручную?", default=True):
+            color_print(t("hp_json_not_found_list"), 'yellow')
+            color_print(t("hp_json_dir", dir=json_dir), 'white')
+            if not ask_yes_no(t("hp_json_manual_q"), default=True):
                 return
             patch_path = self._pick_json_file()
             if not patch_path:
-                color_print("Файл не выбран.", 'yellow')
+                color_print(t("hp_json_none_sel"), 'yellow')
                 return
 
         if not patch_path or not os.path.isfile(patch_path):
-            color_print(f"Файл не найден: {patch_path}", 'red')
+            color_print(t("hp_json_missing", path=patch_path), 'red')
             return
 
-        from .json_patcher import JsonPatcher
         try:
             self.engine.apply_json_patches(patch_path, False)
-            color_print("Все патчи применены", 'green')
+            color_print(t("hp_json_applied"), 'green')
             self.has_changes = True
         except Exception as e:
-            color_print(f"Ошибка: {e}", 'red')
+            color_print(t("hp_err", err=e), 'red')
 
     def _save_json_patch(self) -> None:
         if not self.current_patch:
-            color_print("Нет патча для сохранения", 'red')
+            color_print(t("hp_save_none"), 'red')
             return
 
         from .json_patcher import JsonPatcher
@@ -1461,95 +1465,89 @@ class InteractiveCli:
 
         app_name = os.path.basename(self.app_dir).replace(".app", "")
         default_name = f"{app_name}_patch.json"
-        default_path = os.path.join(json_dir, default_name)
-
-        patch_path = default_path
+        patch_path = os.path.join(json_dir, default_name)
 
         if not patch_path.endswith('.json'):
             patch_path += '.json'
 
         patch_data = {
-            "name": f"Патч для {app_name}",
+            "name": t("hp_save_name", name=app_name),
             "patches": [self.current_patch]
         }
 
         if JsonPatcher.save(patch_data, patch_path):
-            color_print(f"Сохранено: {patch_path}", 'green')
+            color_print(t("hp_save_ok", path=patch_path), 'green')
 
     def _choose_file(self) -> Optional[str]:
         if self.selected_file and os.path.isfile(self.selected_file):
-            color_print(f"[INFO] Используется файл: {os.path.basename(self.selected_file)}", 'green')
+            color_print(t("hp_editing_file", name=os.path.basename(self.selected_file)), 'green')
             return self.selected_file
 
-        color_print("\nВыбор файла", 'cyan')
+        color_print(t("hp_pick_hdr"), 'cyan')
         print("")
-        print("  1. Основной бинарник")
+        print(t("hp_pick_main"))
         print("  2. Assets.car")
-        print("  3. Другой файл")
-        choice = ask_input("Выбор", "1")
+        print(t("hp_pick_other"))
+        choice = ask_input(t("hp_choice"), "1")
         if choice == "1":
             binary_path = self.engine.get_main_binary_path(self.app_dir)
             if not binary_path or not os.path.isfile(binary_path):
-                color_print("Бинарник не найден", 'red')
+                color_print(t("hp_pick_no_bin"), 'red')
                 return None
             return binary_path
         elif choice == "2":
             selected = os.path.join(self.app_dir, "Assets.car")
             if not os.path.isfile(selected):
-                color_print("Assets.car не найден", 'red')
+                color_print(t("hp_pick_no_car"), 'red')
                 return None
             return selected
         elif choice == "3":
-            color_print("\nСканирование содержимого .app...", 'blue')
+            color_print(t("hp_pick_scan"), 'blue')
             all_files = []
-            for root, dirs, files in os.walk(self.app_dir):
+            for root, _, files in os.walk(self.app_dir):
                 for f in files:
                     full_path = os.path.join(root, f)
                     rel_path = os.path.relpath(full_path, self.app_dir)
                     try:
                         f_size = os.path.getsize(full_path)
-                        size_str = f"{f_size} B"
-                        if f_size > 1024 * 1024:
-                            size_str = f"{f_size / (1024 * 1024):.2f} MB"
-                        elif f_size > 1024:
-                            size_str = f"{f_size / 1024:.1f} KB"
+                        size_str = format_file_size(f_size)
                         all_files.append((full_path, rel_path, size_str))
                     except Exception:
                         all_files.append((full_path, rel_path, "? B"))
 
             if not all_files:
-                color_print("В папке .app не найдено файлов.", 'red')
+                color_print(t("hp_pick_empty"), 'red')
                 return None
 
-            color_print("\nНайденные файлы в .app:", 'cyan')
+            color_print(t("hp_pick_list"), 'cyan')
             for i, (_, rel_path, size_str) in enumerate(all_files, 1):
                 color_print(f"  {i:>3}. {rel_path} ({size_str})", 'white')
 
             print("")
-            idx = ask_input("Введите номер файла (или 0 для отмены)")
+            idx = ask_input(t("hp_pick_enter"))
             try:
                 num = int(idx)
                 if num == 0:
                     return None
                 if 1 <= num <= len(all_files):
                     selected = all_files[num - 1][0]
-                    color_print(f"Выбран: {os.path.basename(selected)}", 'green')
+                    color_print(t("hp_pick_chosen", name=os.path.basename(selected)), 'green')
                     return selected
                 else:
-                    color_print(f"Неверный номер (1-{len(all_files)})", 'red')
+                    color_print(t("hp_pick_oob", max=len(all_files)), 'red')
                     return None
             except Exception:
-                color_print("Неверный ввод", 'red')
+                color_print(t("invalid_input"), 'red')
                 return None
         else:
-            color_print("Неверный выбор", 'yellow')
+            color_print(t("hp_bad_choice"), 'yellow')
             return None
 
     def _single_patch(self, dry_run: bool = False) -> None:
         self.dry_run = dry_run
 
         if self.selected_file and os.path.isfile(self.selected_file):
-            color_print(f"[INFO] Редактирование: {os.path.basename(self.selected_file)}", 'cyan')
+            color_print(t("hp_editing_file", name=os.path.basename(self.selected_file)), 'cyan')
         else:
             self.selected_file = self._choose_file()
             if not self.selected_file:
@@ -1557,13 +1555,13 @@ class InteractiveCli:
 
         file_size = os.path.getsize(self.selected_file)
         if file_size == 0:
-            color_print("Файл пустой", 'red')
+            color_print(t("hp_empty_file"), 'red')
             return
 
         size_mb = file_size / (1024 * 1024)
         if size_mb > 100:
-            color_print(f"Файл большой: {size_mb:.1f} MB", 'yellow')
-            if not ask_yes_no("Продолжить?", default=False):
+            color_print(f"[WARN] {os.path.basename(self.selected_file)} ({size_mb:.1f} MB)", 'yellow')
+            if not ask_yes_no(t("fe_mt_continue"), default=False):
                 return
 
         macho_info = MachOAnalyzer.check_info(self.selected_file)
@@ -1571,82 +1569,82 @@ class InteractiveCli:
             arch_str = ', '.join(macho_info.archs)
             color_print(f"{macho_info.type}: {arch_str}", 'blue')
 
-        color_print(f"\nФайл: {os.path.basename(self.selected_file)} ({size_mb:.2f} MB)", 'cyan')
+        color_print(t("hp_sp_hdr", name=os.path.basename(self.selected_file), mb=size_mb), 'cyan')
         print("")
-        print("  1. Строгий HEX (точное совпадение)")
-        print("  2. Расширенный (маска ?, *, F?, ?3)")
-        print("  3. Текстовый (String)")
+        print(t("hp_sp_m1"))
+        print(t("hp_sp_m2"))
+        print(t("hp_sp_m3"))
         print("")
 
-        mode = ask_input("Режим", "1")
+        mode = ask_input(t("hp_mode"), "1")
         if mode == "3":
             is_hex, use_mask = False, False
-            search_raw = ask_input("Текст для поиска")
+            search_raw = ask_input(t("hp_text_search"))
             if not search_raw:
-                color_print("Поле пустое", 'red')
+                color_print(t("hp_sp_empty_in"), 'red')
                 return
             self.search_bytes = search_raw.encode('utf-8')
         elif mode == "2":
             is_hex, use_mask = True, True
-            color_print("Маска: ? - любой байт, * - любой байт, F? - nibble mask", 'yellow')
-            search_raw = ask_input("HEX с маской")
+            color_print(t("hp_sp_mask_hint"), 'yellow')
+            search_raw = ask_input(t("hp_sp_mask_in"))
             if not search_raw:
-                color_print("Поле пустое", 'red')
+                color_print(t("hp_sp_empty_in"), 'red')
                 return
             try:
                 values, masks = HexUtils.parse_wildcards(search_raw)
                 self.search_bytes = bytes(values)
             except Exception as e:
-                color_print(f"Ошибка: {e}", 'red')
+                color_print(t("hp_err", err=e), 'red')
                 return
         else:
             is_hex, use_mask = True, False
-            search_raw = ask_input("HEX для поиска")
+            search_raw = ask_input(t("hp_hex_search"))
             if not search_raw:
-                color_print("Поле пустое", 'red')
+                color_print(t("hp_sp_empty_in"), 'red')
                 return
             try:
                 self.search_bytes = HexUtils.hex_to_bytes(search_raw)
             except Exception as e:
-                color_print(f"Ошибка: {e}", 'red')
+                color_print(t("hp_err", err=e), 'red')
                 return
 
-        color_print("Сканирование...", 'blue')
+        color_print(t("hp_sp_scanning"), 'blue')
         try:
             self.offsets = self._find_matches()
         except Exception as e:
-            color_print(f"Ошибка: {e}", 'red')
+            color_print(t("hp_err", err=e), 'red')
             return
 
         if not self.offsets:
-            color_print("Совпадений не найдено", 'yellow')
+            color_print(t("hp_no_matches"), 'yellow')
             return
 
         total = len(self.offsets)
-        color_print(f"\n==========================================", 'cyan')
-        color_print(f"  Найдено совпадений: {total}", 'green')
-        color_print(f"==========================================", 'cyan')
+        color_print("\n==========================================", 'cyan')
+        color_print(t("hp_sp_found_hdr", total=total), 'green')
+        color_print("==========================================", 'cyan')
 
         self._show_preview(limit=20)
 
-        color_print("\nЧто дальше?", 'cyan')
-        print("  1. Показать все совпадения")
-        print("  2. Просмотреть/выбрать совпадения (по номерам, диапазонам)")
-        print("  3. Заменить все")
-        print("  4. Заменить выбранное")
-        print("  5. Отмена")
+        color_print(t("hp_sp_next"), 'cyan')
+        print(t("hp_sp_a1"))
+        print(t("hp_sp_a2"))
+        print(t("hp_sp_a3"))
+        print(t("hp_sp_a4"))
+        print(t("hp_sp_a5"))
         print("")
 
-        action = ask_input("Ваш выбор", "3")
+        action = ask_input(t("your_choice"), "3")
 
         allowed = None
 
         if action == "1":
             self._show_matches_range_indices(list(range(min(total, 100))))
             if total > 100:
-                color_print(f"Показано 100 из {total}", 'yellow')
+                color_print(t("hp_shown_of", shown=100, total=total), 'yellow')
             print("")
-            action = ask_input("Действие (2-выбрать, 3-заменить все, 4-выбрать, 5-отмена)", "2")
+            action = ask_input(t("hp_sp_act_in"), "2")
             if action == "3":
                 allowed = self.offsets
             elif action == "2" or action == "4":
@@ -1673,7 +1671,7 @@ class InteractiveCli:
         if allowed is None:
             return
 
-        color_print(f"\n--- ЗАМЕНА ---", 'cyan')
+        color_print(t("hp_sp_rep_hdr"), 'cyan')
 
         if not is_hex:
             with open(self.selected_file, 'rb') as f:
@@ -1686,32 +1684,32 @@ class InteractiveCli:
                 t_start, t_end, full_old_str = single_bounds
                 full_len = t_end - t_start
 
-                color_print(f"Найдена строка: \"{full_old_str}\"", 'magenta')
+                color_print(t("hp_sp_str_found", s=full_old_str), 'magenta')
                 print("")
-                print(f"  1) Заменить только найденный фрагмент \"{search_raw}\" (макс. {len(self.search_bytes)} байт)")
-                print(f"  2) Заменить ВСЮ строку целиком \"{full_old_str}\" (макс. {full_len} байт)")
+                print(t("hp_sp_str_m1", s=search_raw, m=len(self.search_bytes)))
+                print(t("hp_sp_str_m2", s=full_old_str, m=full_len))
                 print("")
 
-                replace_mode = ask_input("Режим замены", "2")
+                replace_mode = ask_input(t("hp_sp_rep_mode"), "2")
 
                 if replace_mode == "2":
-                    color_print(f"\nРедактирование всей строки целиком:", 'yellow')
-                    color_print(f"  Оригинал: \"{full_old_str}\"", 'white')
-                    color_print(f"  Доступно места: {full_len} байт", 'cyan')
+                    color_print(t("hp_sp_full_hdr"), 'yellow')
+                    color_print(t("hp_sp_orig", s=full_old_str), 'white')
+                    color_print(t("hp_sp_avail", m=full_len), 'cyan')
                     print("")
 
-                    replace_raw = ask_input("Новый текст", full_old_str)
+                    replace_raw = ask_input(t("hp_sp_new_text"), full_old_str)
                     if not replace_raw:
-                        color_print("Отменено", 'yellow')
+                        color_print(t("hp_cancelled"), 'yellow')
                         return
 
                     replace_bytes = replace_raw.encode('utf-8')
                     if len(replace_bytes) > full_len:
-                        color_print(f"[ERROR] Замена ({len(replace_bytes)} байт) длиннее оригинала ({full_len} байт)!", 'red')
+                        color_print(t("hp_sp_longer_err", r=len(replace_bytes), o=full_len), 'red')
                         return
 
                     if len(replace_bytes) < full_len:
-                        color_print(f"[INFO] Строка будет дополнена нулями ({full_len - len(replace_bytes)} байт)", 'blue')
+                        color_print(t("hp_sp_zero_pad_info", n=full_len - len(replace_bytes)), 'blue')
                         replace_bytes += b'\x00' * (full_len - len(replace_bytes))
 
                     with open(self.selected_file, 'rb') as f:
@@ -1733,28 +1731,28 @@ class InteractiveCli:
                         if changes:
                             if not self.dry_run:
                                 self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
-                                color_print(f"Изменено: {len(changes)}", 'green')
+                                color_print(t("hp_sp_changed", n=len(changes)), 'green')
                                 self._show_last_changes()
                                 self.has_changes = True
                                 if self.current_patch:
-                                    color_print("Для сохранения в JSON: пункт 5", 'blue')
+                                    color_print(t("hp_sp_save_hint"), 'blue')
                             else:
-                                color_print(f"Dry-run: {len(changes)} изменений", 'cyan')
+                                color_print(t("hp_sp_dry", n=len(changes)), 'cyan')
                                 self._show_last_changes()
                         else:
-                            color_print("Изменений не внесено", 'yellow')
+                            color_print(t("hp_no_changes"), 'yellow')
                     except Exception as e:
-                        color_print(f"Ошибка: {e}", 'red')
+                        color_print(t("hp_err", err=e), 'red')
                     return
 
             elif len(allowed) > 1:
-                color_print(f"Будет заменено совпадений: {len(allowed)}", 'yellow')
+                color_print(t("hp_sp_batch_cnt", n=len(allowed)), 'yellow')
                 print("")
-                print(f"  1) Заменить фрагмент \"{search_raw}\" во всех ({len(allowed)}) совпадениях")
-                print(f"  2) По очереди отредактировать каждую найденную строку целиком")
+                print(t("hp_sp_batch_m1", s=search_raw, n=len(allowed)))
+                print(t("hp_sp_batch_m2"))
                 print("")
 
-                batch_mode = ask_input("Режим замены", "1")
+                batch_mode = ask_input(t("hp_sp_rep_mode"), "1")
 
                 if batch_mode == "2":
                     total_applied = 0
@@ -1766,18 +1764,18 @@ class InteractiveCli:
 
                     for idx, (t_start, t_end, full_old_str) in enumerate(items_to_edit, 1):
                         full_len = t_end - t_start
-                        color_print(f"\n[#{idx}/{len(items_to_edit)}] Адрес 0x{t_start:08X}:", 'cyan')
-                        color_print(f"  Текущая строка: \"{full_old_str}\"", 'magenta')
-                        color_print(f"  Доступно: {full_len} байт", 'white')
+                        color_print(t("hp_sp_batch_item", i=idx, tot=len(items_to_edit), addr=t_start), 'cyan')
+                        color_print(t("hp_sp_batch_cur", s=full_old_str), 'magenta')
+                        color_print(t("hp_sp_batch_avail", n=full_len), 'white')
 
-                        new_text = ask_input("Новый текст (Enter = пропустить)", full_old_str)
+                        new_text = ask_input(t("hp_sp_batch_in"), full_old_str)
                         if not new_text or new_text == full_old_str:
-                            color_print("  Пропущено", 'yellow')
+                            color_print(t("hp_sp_batch_skip"), 'yellow')
                             continue
 
                         new_bytes = new_text.encode('utf-8')
                         if len(new_bytes) > full_len:
-                            color_print(f"  [ERROR] Новая строка длиннее на {len(new_bytes) - full_len} байт! Пропущено.", 'red')
+                            color_print(t("hp_sp_batch_long", d=len(new_bytes) - full_len), 'red')
                             continue
 
                         if len(new_bytes) < full_len:
@@ -1795,48 +1793,48 @@ class InteractiveCli:
                             if ch:
                                 all_changes.extend(ch)
                                 total_applied += 1
-                                color_print(f"  Строка #{idx} успешно изменена!", 'green')
+                                color_print(t("hp_sp_batch_ok", i=idx), 'green')
                         except Exception as e:
-                            color_print(f"  Ошибка: {e}", 'red')
+                            color_print("  " + t("hp_err", err=e), 'red')
 
                     if all_changes:
                         if not self.dry_run:
                             self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": all_changes}])
-                            color_print(f"\n[SUCCESS] Успешно изменено строк: {total_applied}", 'green')
+                            color_print(t("hp_sp_batch_done", n=total_applied), 'green')
                             self._show_last_changes()
                             self.has_changes = True
                         else:
-                            color_print(f"\nDry-run: {len(all_changes)} изменений", 'cyan')
+                            color_print("\n" + t("hp_sp_dry", n=len(all_changes)), 'cyan')
                     else:
-                        color_print("Изменений не внесено", 'yellow')
+                        color_print(t("hp_no_changes"), 'yellow')
                     return
 
-        color_print(f"Будет заменено: {len(allowed)} совпадений", 'yellow')
+        color_print(t("hp_sp_will_rep", n=len(allowed)), 'yellow')
         print("")
 
         if is_hex:
-            replace_raw = ask_input("HEX для замены")
+            replace_raw = ask_input(t("hp_sp_hex_rep"))
             try:
                 replace_bytes = HexUtils.hex_to_bytes(replace_raw)
             except Exception:
-                color_print("Неверный HEX формат", 'red')
+                color_print(t("hp_bad_hex"), 'red')
                 return
             if len(self.search_bytes) != len(replace_bytes):
-                color_print(f"Длины: {len(self.search_bytes)} != {len(replace_bytes)}", 'red')
+                color_print(t("hp_sp_len_neq", a=len(self.search_bytes), b=len(replace_bytes)), 'red')
                 return
         else:
-            replace_raw = ask_input("Текст для замены")
+            replace_raw = ask_input(t("hp_sp_text_rep"))
             replace_bytes = replace_raw.encode('utf-8')
             if len(replace_bytes) > len(self.search_bytes):
-                color_print("Замена длиннее оригинала", 'red')
+                color_print(t("hp_sp_longer_orig"), 'red')
                 return
             if len(replace_bytes) < len(self.search_bytes):
-                color_print("Строка будет дополнена нулевыми байтами", 'yellow')
+                color_print(t("hp_sp_null_pad_warn"), 'yellow')
             replace_bytes += b'\x00' * (len(self.search_bytes) - len(replace_bytes))
 
         count = len(allowed)
-        if count > 10 and not ask_yes_no(f"\nБудет изменено {count} мест. Продолжить?", default=False):
-            color_print("Отменено", 'yellow')
+        if count > 10 and not ask_yes_no(t("hp_sp_many_q", n=count), default=False):
+            color_print(t("hp_cancelled"), 'yellow')
             return
 
         try:
@@ -1872,18 +1870,18 @@ class InteractiveCli:
             if changes:
                 if not self.dry_run:
                     self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
-                    color_print(f"Изменено: {len(changes)}", 'green')
+                    color_print(t("hp_sp_changed", n=len(changes)), 'green')
                     self._show_last_changes()
                     self.has_changes = True
                     if self.current_patch:
-                        color_print("Для сохранения в JSON: пункт 5", 'blue')
+                        color_print(t("hp_sp_save_hint"), 'blue')
                 else:
-                    color_print(f"Dry-run: {len(changes)} изменений", 'cyan')
+                    color_print(t("hp_sp_dry", n=len(changes)), 'cyan')
                     self._show_last_changes()
             else:
-                color_print("Изменений не внесено", 'yellow')
+                color_print(t("hp_no_changes"), 'yellow')
         except Exception as e:
-            color_print(f"Ошибка: {e}", 'red')
+            color_print(t("hp_err", err=e), 'red')
 
     def _find_matches(self) -> List[int]:
         with open(self.selected_file, 'rb') as f:
@@ -1899,8 +1897,8 @@ class InteractiveCli:
         return offsets
 
     def _show_preview(self, limit: int = 20, context_size: int = DEFAULT_CONTEXT_SIZE) -> None:
-        color_print("\nПредпросмотр совпадений", 'cyan')
-        color_print(f"  Всего найдено: {len(self.offsets)}", 'yellow')
+        color_print(t("hp_prev_hdr"), 'cyan')
+        color_print(t("hp_total_found", n=len(self.offsets)), 'yellow')
         color_print("  " + "-" * 78, 'cyan')
 
         search_len = len(self.search_bytes) if self.search_bytes else 0
@@ -1910,9 +1908,9 @@ class InteractiveCli:
                 for i, off in enumerate(self.offsets[:limit], 1):
                     info = self._extract_universal_context(mm, off, search_len)
 
-                    color_print(f"\n  #{i:>3}  0x{off:08X}  (паттерн: {search_len} байт)", 'yellow')
+                    color_print(t("hp_match_hdr", idx=i, off=off, slen=search_len), 'yellow')
                     if info["text"]:
-                        color_print(f"  [Контекст текста]: \"{info['text']}\"", 'magenta')
+                        color_print(t("hp_ctx_text", text=info['text']), 'magenta')
 
                     line_start = info["line_start"]
                     line_end = info["line_end"]
@@ -1926,33 +1924,33 @@ class InteractiveCli:
                         self._print_hex_row(chunk_start, chunk, highlighted)
 
         if len(self.offsets) > limit:
-            color_print(f"\n  ... и еще {len(self.offsets) - limit}", 'yellow')
+            color_print("\n" + t("hp_and_more", n=len(self.offsets) - limit), 'yellow')
         color_print("  " + "-" * 78, 'cyan')
 
     def _choose_action(self) -> Optional[List[int]]:
-        color_print("\nВыбор действия", 'cyan')
+        color_print(t("hp_act_hdr"), 'cyan')
         print("")
-        print("  1. Заменить все")
-        print("  2. Заменить выбранное (введите номер)")
-        print("  3. Отмена")
+        print(t("hp_act_1"))
+        print(t("hp_act_2"))
+        print(t("hp_act_3"))
         print("")
 
-        action = ask_input("Выбор", "1")
+        action = ask_input(t("hp_choice"), "1")
         if action == "3":
             return None
         if action == "2":
-            idx = ask_input("Номер")
+            idx = ask_input(t("hp_num_prompt"))
             try:
                 idx = int(idx) - 1
                 if 0 <= idx < len(self.offsets):
                     selected = [self.offsets[idx]]
-                    color_print(f"Выбрано: 0x{self.offsets[idx]:08X} (#{idx+1})", 'green')
+                    color_print(t("hp_act_chosen", off=self.offsets[idx], idx=idx + 1), 'green')
                     return selected
                 else:
-                    color_print("Неверный номер", 'red')
+                    color_print(t("hp_num_oob"), 'red')
                     return None
             except Exception:
-                color_print("Неверный формат", 'red')
+                color_print(t("hp_bad_fmt"), 'red')
                 return None
         return self.offsets
 
