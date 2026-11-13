@@ -26,13 +26,22 @@ def get_user_tmp_dir():
         docs = home
     else:
         docs = os.path.join(home, 'Documents')
-    
+
     target = os.path.join(docs, 'tmp')
     try:
         os.makedirs(target, exist_ok=True)
         return target
     except Exception:
         return TEMP_DIR
+
+
+def get_web_transfer_dir():
+    home = os.path.expanduser('~')
+    if os.path.basename(home).lower() == 'documents':
+        docs = home
+    else:
+        docs = os.path.join(home, 'Documents')
+    return os.path.join(docs, 'IPA_Patcher_Files')
 
 
 class ProgressBar:
@@ -52,7 +61,7 @@ class ProgressBar:
         if self.use_tqdm:
             self.tqdm.update(n)
             return
-        
+
         self.current += n
         if self.total == 0:
             return
@@ -84,17 +93,26 @@ def show_progress(current, total, prefix="", suffix=""):
         sys.stdout.write('\n')
 
 
-def extract_ipa_with_progress(ipa_path, dest_dir):
+def _is_safe_zip_path(member_name, dest_dir):
+    real_dest = os.path.realpath(dest_dir)
+    real_target = os.path.realpath(os.path.join(dest_dir, member_name))
+    return real_target == real_dest or real_target.startswith(real_dest + os.sep)
+
+
+def extract_ipa_with_progress(ipa_path, dest_dir, delay=0.0):
     with zipfile.ZipFile(ipa_path, 'r') as zf:
         files = zf.infolist()
         pb = ProgressBar(len(files), 'Распаковка')
         for member in files:
-            zf.extract(member, dest_dir)
+            if _is_safe_zip_path(member.filename, dest_dir):
+                zf.extract(member, dest_dir)
+            if delay > 0:
+                time.sleep(delay)
             pb.update()
         pb.close()
 
 
-def pack_ipa_with_progress(source_dir, output_path):
+def pack_ipa_with_progress(source_dir, output_path, delay=0.0):
     file_list = []
     for root, _, files in os.walk(source_dir):
         for f in files:
@@ -112,28 +130,30 @@ def pack_ipa_with_progress(source_dir, output_path):
                 info._compresslevel = 6
             with open(full, 'rb') as fh:
                 zf.writestr(info, fh.read())
+            if delay > 0:
+                time.sleep(delay)
             pb.update()
     pb.close()
 
 
-def pack_ipa_with_compression(source_dir, output_path, compression=zipfile.ZIP_DEFLATED, compresslevel=6):
+def pack_ipa_with_compression(source_dir, output_path, compression=zipfile.ZIP_DEFLATED, compresslevel=6, delay=0.0):
     file_list = []
     text_extensions = ('.json', '.plist', '.strings', '.xml', '.html', '.css', '.js', '.txt', '.nib', '.xib')
-    
+
     for root, _, files in os.walk(source_dir):
         for f in files:
             full = os.path.join(root, f)
             arcname = os.path.relpath(full, source_dir)
             file_list.append((full, arcname))
-    
+
     pb = ProgressBar(len(file_list), 'Упаковка')
-    
+
     with zipfile.ZipFile(output_path, 'w', compression, allowZip64=True) as zf:
         for full, arcname in file_list:
             info = zipfile.ZipInfo(arcname)
             st = os.stat(full)
             info.external_attr = (st.st_mode & 0xFFFF) << 16
-            
+
             if compression == zipfile.ZIP_DEFLATED:
                 if arcname.lower().endswith(text_extensions):
                     info._compresslevel = 9
@@ -142,9 +162,11 @@ def pack_ipa_with_compression(source_dir, output_path, compression=zipfile.ZIP_D
                 info.compress_type = compression
             else:
                 info.compress_type = compression
-            
+
             with open(full, 'rb') as fh:
                 zf.writestr(info, fh.read())
+            if delay > 0:
+                time.sleep(delay)
             pb.update()
     pb.close()
 
@@ -153,11 +175,11 @@ def is_tipa_file(file_path):
     return file_path.lower().endswith('.tipa')
 
 
-def extract_tipa_with_progress(tipa_path, dest_dir):
-    return extract_ipa_with_progress(tipa_path, dest_dir)
+def extract_tipa_with_progress(tipa_path, dest_dir, delay=0.0):
+    return extract_ipa_with_progress(tipa_path, dest_dir, delay=delay)
 
 
-def pack_tipa_with_progress(source_dir, output_path):
+def pack_tipa_with_progress(source_dir, output_path, delay=0.0):
     file_list = []
     for root, _, files in os.walk(source_dir):
         for f in files:
@@ -173,6 +195,8 @@ def pack_tipa_with_progress(source_dir, output_path):
             info.compress_type = zipfile.ZIP_STORED
             with open(full, 'rb') as fh:
                 zf.writestr(info, fh.read())
+            if delay > 0:
+                time.sleep(delay)
             pb.update()
     pb.close()
 
@@ -180,16 +204,19 @@ def pack_tipa_with_progress(source_dir, output_path):
 def extract_with_symlinks(zip_path, dest_dir):
     with zipfile.ZipFile(zip_path, 'r') as zf:
         for info in zf.infolist():
+            if not _is_safe_zip_path(info.filename, dest_dir):
+                continue
             target_path = os.path.join(dest_dir, info.filename)
             target_dir = os.path.dirname(target_path)
             if target_dir and not os.path.exists(target_dir):
                 os.makedirs(target_dir, exist_ok=True)
-            
+
             if info.is_symlink():
                 link_target = zf.read(info).decode('utf-8')
-                if os.path.exists(target_path) or os.path.islink(target_path):
-                    os.unlink(target_path)
-                os.symlink(link_target, target_path)
+                if _is_safe_zip_path(link_target, dest_dir):
+                    if os.path.exists(target_path) or os.path.islink(target_path):
+                        os.unlink(target_path)
+                    os.symlink(link_target, target_path)
             else:
                 zf.extract(info, dest_dir)
 
@@ -222,10 +249,10 @@ def copytree_with_symlinks(src, dst, ignore=None, follow_symlinks=False):
         ignored_names = ignore(src, names)
     else:
         ignored_names = set()
-    
+
     if not os.path.exists(dst):
         os.makedirs(dst, exist_ok=True)
-    
+
     errors = []
     for name in names:
         if name in ignored_names:
@@ -275,10 +302,11 @@ def find_app_dir(payload_path):
 
 def smart_find_in_tmp(extensions):
     user_tmp = get_user_tmp_dir()
+    web_dir = get_web_transfer_dir()
     found = []
     seen = set()
 
-    search_dirs = [user_tmp, os.getcwd(), TEMP_DIR]
+    search_dirs = [user_tmp, web_dir, os.getcwd(), TEMP_DIR]
     for sdir in search_dirs:
         if not os.path.isdir(sdir):
             continue
@@ -287,9 +315,10 @@ def smart_find_in_tmp(extensions):
             if os.path.isfile(full):
                 for ext in extensions:
                     if f.lower().endswith(f'.{ext.lower()}'):
-                        if full not in seen:
+                        real_full = os.path.realpath(full)
+                        if real_full not in seen:
                             found.append((f, full))
-                            seen.add(full)
+                            seen.add(real_full)
     return found
 
 
@@ -301,21 +330,22 @@ def pick_ipa_file():
             path = None
         if path:
             if not (path.lower().endswith('.ipa') or path.lower().endswith('.tipa')):
-                print("Ошибка: нужен .ipa или .tipa файл.")
+                print("Ошибка: нужен .ipa или .tipa файл.")
                 return pick_ipa_file()
             return path
 
     user_tmp = get_user_tmp_dir()
     found = smart_find_in_tmp(['ipa', 'tipa'])
     if found:
-        print(f"\n--- Доступные IPA/TIPA в {user_tmp} ---")
-        for i, (name, _) in enumerate(found, 1):
+        print(f"\n--- Доступные IPA/TIPA ({user_tmp} / IPA_Patcher_Files) ---")
+        for i, (name, full) in enumerate(found, 1):
             try:
-                size = os.path.getsize(os.path.join(user_tmp, name))
+                size = os.path.getsize(full)
                 size_str = f"({size / (1024*1024):.1f} MB)"
             except Exception:
                 size_str = ""
-            print(f"  {i:>3}) {name} {size_str}")
+            folder_hint = f" [{os.path.basename(os.path.dirname(full))}]"
+            print(f"  {i:>3}) {name} {size_str}{folder_hint}")
         print("  0) Ввести путь вручную")
 
         try:
@@ -326,26 +356,26 @@ def pick_ipa_file():
 
         while True:
             try:
-                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
                 ch = input(prompt).strip()
-                
+
                 if not ch:
                     if len(found) == 1:
                         return found[0][1]
-                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    print("В папке несколько файлов. Введите номер нужного файла.")
                     continue
-                
+
                 if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
                     return found[num - 1][1]
-                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В папке {user_tmp} не найдено .ipa или .tipa файлов.")
-        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
+        print(f"В папке {user_tmp} не найдено .ipa или .tipa файлов.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
     try:
         import termios
@@ -353,7 +383,7 @@ def pick_ipa_file():
     except Exception:
         pass
 
-    path = input("\nВведите полный путь к .ipa: ").strip().strip('"')
+    path = input("\nВведите полный путь к .ipa: ").strip().strip('"')
     if path and path.isdigit() and found:
         idx = int(path) - 1
         if 0 <= idx < len(found):
@@ -379,9 +409,9 @@ def pick_tweak_file():
     user_tmp = get_user_tmp_dir()
     found = smart_find_in_tmp(['dylib', 'zip', 'deb', 'tar', 'lzma', 'xz', 'gz', 'tgz', 'zst'])
     if found:
-        print(f"\n--- Доступные твики в {user_tmp} ---")
-        for i, (name, _) in enumerate(found, 1):
-            print(f"  {i}) {name}")
+        print(f"\n--- Доступные твики ({user_tmp} / IPA_Patcher_Files) ---")
+        for i, (name, full) in enumerate(found, 1):
+            print(f"  {i}) {name} [{os.path.basename(os.path.dirname(full))}]")
         print("  0) Ввести путь вручную")
 
         try:
@@ -392,24 +422,24 @@ def pick_tweak_file():
 
         while True:
             try:
-                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
                 ch = input(prompt).strip()
                 if not ch:
                     if len(found) == 1:
                         return found[0][1]
-                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    print("В папке несколько файлов. Введите номер нужного файла.")
                     continue
                 if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
                     return found[num - 1][1]
-                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В папке {user_tmp} не найдено подходящих файлов твиков.")
-        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
+        print(f"В папке {user_tmp} не найдено подходящих файлов твиков.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
     try:
         import termios
@@ -417,7 +447,7 @@ def pick_tweak_file():
     except Exception:
         pass
 
-    path = input("\nВведите полный путь к твику/архиву (.deb, .dylib, .zst...): ").strip().strip('"')
+    path = input("\nВведите полный путь к твику/архиву (.deb, .dylib, .zst...): ").strip().strip('"')
     if path and path.isdigit() and found:
         idx = int(path) - 1
         if 0 <= idx < len(found):
@@ -443,9 +473,9 @@ def pick_substrate_file():
     user_tmp = get_user_tmp_dir()
     found = smart_find_in_tmp(['dylib', 'deb', 'zip', 'zst'])
     if found:
-        print(f"\n--- Доступные файлы субстрата в {user_tmp} ---")
-        for i, (name, _) in enumerate(found, 1):
-            print(f"  {i}) {name}")
+        print(f"\n--- Доступные файлы субстрата ({user_tmp} / IPA_Patcher_Files) ---")
+        for i, (name, full) in enumerate(found, 1):
+            print(f"  {i}) {name} [{os.path.basename(os.path.dirname(full))}]")
         print("  0) Ввести путь вручную")
 
         try:
@@ -456,24 +486,24 @@ def pick_substrate_file():
 
         while True:
             try:
-                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
                 ch = input(prompt).strip()
                 if not ch:
                     if len(found) == 1:
                         return found[0][1]
-                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    print("В папке несколько файлов. Введите номер нужного файла.")
                     continue
                 if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
                     return found[num - 1][1]
-                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В папке {user_tmp} не найдено файлов субстрата.")
-        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
+        print(f"В папке {user_tmp} не найдено файлов субстрата.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
     try:
         import termios
@@ -481,7 +511,7 @@ def pick_substrate_file():
     except Exception:
         pass
 
-    path = input("\nВведите полный путь к субстрату (.dylib, .deb или .zst): ").strip().strip('"')
+    path = input("\nВведите полный путь к субстрату (.dylib, .deb или .zst): ").strip().strip('"')
     if path and path.isdigit() and found:
         idx = int(path) - 1
         if 0 <= idx < len(found):
@@ -497,7 +527,7 @@ def pick_icon_file():
             path = None
         if path:
             if not path.lower().endswith('.png'):
-                print("Ошибка: нужен PNG файл.")
+                print("Ошибка: нужен PNG файл.")
                 return pick_icon_file()
             return path
 
@@ -505,8 +535,8 @@ def pick_icon_file():
     found = smart_find_in_tmp(['png'])
     if found:
         print(f"\n--- Доступные PNG в {user_tmp} ---")
-        for i, (name, _) in enumerate(found, 1):
-            print(f"  {i}) {name}")
+        for i, (name, full) in enumerate(found, 1):
+            print(f"  {i}) {name} [{os.path.basename(os.path.dirname(full))}]")
         print("  0) Ввести путь вручную")
 
         try:
@@ -517,24 +547,24 @@ def pick_icon_file():
 
         while True:
             try:
-                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
                 ch = input(prompt).strip()
                 if not ch:
                     if len(found) == 1:
                         return found[0][1]
-                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    print("В папке несколько файлов. Введите номер нужного файла.")
                     continue
                 if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
                     return found[num - 1][1]
-                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В папке {user_tmp} не найдено PNG файлов.")
-        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
+        print(f"В папке {user_tmp} не найдено PNG файлов.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
     try:
         import termios
@@ -542,7 +572,7 @@ def pick_icon_file():
     except Exception:
         pass
 
-    path = input("\nВведите полный путь к PNG: ").strip().strip('"')
+    path = input("\nВведите полный путь к PNG: ").strip().strip('"')
     if path and path.isdigit() and found:
         idx = int(path) - 1
         if 0 <= idx < len(found):
@@ -565,9 +595,9 @@ def pick_cert_zip():
     user_tmp = get_user_tmp_dir()
     found = smart_find_in_tmp(['zip'])
     if found:
-        print(f"\n--- Доступные сертификаты в {user_tmp} ---")
-        for i, (name, _) in enumerate(found, 1):
-            print(f"  {i}) {name}")
+        print(f"\n--- Доступные сертификаты ({user_tmp} / IPA_Patcher_Files) ---")
+        for i, (name, full) in enumerate(found, 1):
+            print(f"  {i}) {name} [{os.path.basename(os.path.dirname(full))}]")
         print("  0) Ввести путь вручную")
 
         try:
@@ -578,24 +608,24 @@ def pick_cert_zip():
 
         while True:
             try:
-                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
+                prompt = "Выберите файл [1]: " if len(found) == 1 else "Выберите номер файла: "
                 ch = input(prompt).strip()
                 if not ch:
                     if len(found) == 1:
                         return found[0][1]
-                    print("В папке несколько файлов. Введите номер нужного файла.")
+                    print("В папке несколько файлов. Введите номер нужного файла.")
                     continue
                 if ch == '0':
                     break
                 num = int(ch)
                 if 1 <= num <= len(found):
                     return found[num - 1][1]
-                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
+                print(f"Неверный номер. Введите число от 1 до {len(found)}.")
             except ValueError:
                 print("Введите число.")
     else:
-        print(f"В папке {user_tmp} не найдено .zip архивов.")
-        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
+        print(f"В папке {user_tmp} не найдено .zip архивов.")
+        print("  Положите файл в: На iPhone ▸ a-Shell ▸ tmp")
 
     try:
         import termios
@@ -603,7 +633,7 @@ def pick_cert_zip():
     except Exception:
         pass
 
-    path = input("\nВведите полный путь к .zip архиву с сертификатом: ").strip().strip('"')
+    path = input("\nВведите полный путь к .zip архиву с сертификатом: ").strip().strip('"')
     if path and path.isdigit() and found:
         idx = int(path) - 1
         if 0 <= idx < len(found):
