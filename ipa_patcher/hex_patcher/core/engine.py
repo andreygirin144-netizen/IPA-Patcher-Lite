@@ -8,7 +8,8 @@ from ..analyzers.search import MaskSearcher
 from ..analyzers.macho import MachOAnalyzer
 from ..managers.backup import BackupManager
 from ..managers.undo import UndoManager
-from utils import color_print, log_message
+from utils import color_print
+from i18n import t
 
 
 class PatchEngine:
@@ -51,7 +52,7 @@ class PatchEngine:
                                      b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'):
                             if not f.endswith('.dylib') and '.framework' not in f:
                                 return file_path
-                except:
+                except Exception:
                     continue
 
         for f in os.listdir(app_dir):
@@ -63,7 +64,7 @@ class PatchEngine:
                             magic = fp.read(4)
                             if magic in (b'\xcf\xfa\xed\xfe', b'\xfe\xed\xfa\xcf'):
                                 return file_path
-                except:
+                except Exception:
                     continue
 
         return ""
@@ -101,7 +102,7 @@ class PatchEngine:
                         })
             return changes
 
-        backup = self.backup_mgr.create(file_path)
+        self.backup_mgr.create(file_path)
         changes = []
 
         with open(file_path, 'r+b') as f:
@@ -230,7 +231,7 @@ class PatchEngine:
                 "new": HexUtils.bytes_to_hex(replace_bytes).replace(" ", "")
             }]
 
-        backup = self.backup_mgr.create(file_path)
+        self.backup_mgr.create(file_path)
 
         with open(file_path, 'r+b') as f:
             with mmap.mmap(f.fileno(), 0) as mm:
@@ -277,14 +278,14 @@ class PatchEngine:
                         target_file = os.path.join(self.app_dir, file_target)
                         if not os.path.isfile(target_file):
                             found = False
-                            for root, dirs, files in os.walk(self.app_dir):
+                            for root, _, files in os.walk(self.app_dir):
                                 if file_target in files:
                                     target_file = os.path.join(root, file_target)
                                     found = True
                                     break
                             if not found:
                                 base_name = os.path.splitext(file_target)[0]
-                                for root, dirs, files in os.walk(self.app_dir):
+                                for root, _, files in os.walk(self.app_dir):
                                     for f in files:
                                         if f == base_name or f.startswith(base_name + '.'):
                                             target_file = os.path.join(root, f)
@@ -293,17 +294,18 @@ class PatchEngine:
                                     if found:
                                         break
                                 if not found:
-                                    color_print(f"[WARN] Файл не найден: {file_target}", 'yellow')
+                                    color_print(t("eng_not_found", file=file_target), 'yellow')
                                     continue
 
                 if not target_file or not os.path.isfile(target_file):
-                    color_print(f"[WARN] Файл не найден: {file_target}", 'yellow')
+                    color_print(t("eng_not_found", file=file_target), 'yellow')
                     continue
 
-            file_cache[file_target] = target_file
-            color_print(f"[INFO] Применяем патч к файлу: {os.path.basename(target_file)}", 'blue')
+                file_cache[file_target] = target_file
 
             target_file = file_cache[file_target]
+            color_print(t("eng_patching", file=os.path.basename(target_file)), 'blue')
+
             ptype = patch.get("type", "hex")
             max_matches = patch.get("count", None)
             allowed_offsets = patch.get("allowed_offsets", None)
@@ -344,12 +346,12 @@ class PatchEngine:
 
                 if not dry_run and changes:
                     all_changes.append({"file": target_file, "changes": changes})
-                    color_print(f"[SUCCESS] Патч применён к {os.path.basename(target_file)}", 'green')
+                    color_print(t("eng_patched", file=os.path.basename(target_file)), 'green')
 
             except PatchError as e:
                 if stop_on_error:
                     raise
-                color_print(f"[WARN] Ошибка применения патча: {e}", 'yellow')
+                color_print(t("eng_patch_err", err=e), 'yellow')
                 continue
 
         if not dry_run and all_changes:
