@@ -187,42 +187,54 @@ The script fully supports `.tipa` for TrollStore — a special format that requi
 ```text
 ipa_patcher/
 ├── main.py                 # Main orchestrator and interactive menu
-├── utils.py                # Console utilities, colored output, logging, free space check
-├── web_transfer.py         # Local Wi-Fi server for uploading files to the device
-├── assets/                 # Persistent substrate storage (libsubstrate.dylib, libellekit.dylib)
+├── utils.py                # Console utilities, colored output, logging, free disk space check
+├── web_transfer.py         # Local Wi-Fi HTTP server for uploading files to the device
+├── i18n.py                 # Internationalization manager (auto-locale detection, config, translations)
+├── assets/                 # Permanent substrate storage (libsubstrate.dylib, libellekit.dylib)
+├── locales/                # Localization files (modular JSON dictionaries for RU/EN)
+│   ├── en.json             # Base general strings (EN)
+│   ├── ru.json             # Base general strings (RU)
+│   ├── en_core.json        # Core, entitlements, signatures, icons (EN)
+│   ├── ru_core.json        # Core, entitlements, signatures, icons (RU)
+│   ├── en_explorer.json    # File manager and SQLite databases (EN)
+│   ├── ru_explorer.json    # File manager and SQLite databases (RU)
+│   ├── en_hex.json         # Hex patcher, IPA utilities, patch engine (EN)
+│   ├── ru_hex.json         # Hex patcher, IPA utilities, patch engine (RU)
+│   ├── en_web.json         # Web transfer server and HTML interface (EN)
+│   └── ru_web.json         # Web transfer server and HTML interface (RU)
 │
 ├── core/                   # CORE — all IPA/TIPA modification logic
 │   ├── __init__.py
-│   ├── constants.py        # Mach-O constants (magic numbers, LC_*, LC_REQ_DYLD, FAT64), limits, VERSION
-│   ├── macho.py            # Mach-O parser and editor, RPATH and LOAD_DYLIB injector
+│   ├── constants.py        # Mach-O constants (magic numbers, LC_*, FAT64), limits, VERSION
+│   ├── macho.py            # Mach-O parser and editor, RPATH & LOAD_DYLIB injector
 │   ├── substrate.py        # Relinking Substrate/ElleKit dependencies to sb.dylib
-│   ├── tweak_injector.py   # Tweak injector, deb/ar/tar extractor, dependency resolver
-│   ├── zstd_lite.py        # Standalone pure-Python Zstandard decoder
-│   ├── plist_editor.py     # Safe reading/writing of bplist and xml-plist
-│   ├── entitlements.py     # entitlements.plist generator (incl. TrollStore flags), mobileprovision parser
-│   ├── advanced_patches.py # iOS downgrade, removal of plugins, Watch and URL schemes
-│   ├── patch_strings.py    # In-place binary C-string patcher via mmap
-│   ├── signature.py        # Removal of old signatures and third-party artifacts
-│   └── ipa_utils.py        # IPA/TIPA unpacking/packing, mobile file selectors
+│   ├── tweak_injector.py   # Tweak injector, deb/ar/tar unpacker, dependency resolver
+│   ├── zstd_lite.py        # Standalone Pure-Python Zstandard decoder
+│   ├── plist_editor.py     # Safe bplist and xml-plist reading/writing
+│   ├── entitlements.py     # entitlements.plist generator (including TrollStore flags), mobileprovision parser
+│   ├── advanced_patches.py # iOS downgrade, plugin removal, Watch and URL schemes removal
+│   ├── patch_strings.py    # In-place binary C-strings patcher via mmap
+│   ├── signature.py        # Removing old signatures and foreign artifacts
+│   └── ipa_utils.py        # IPA/TIPA extraction/packing, mobile file pickers
 │
-├── file_explorer/          # FILE MANAGER AND DATABASES
+├── file_explorer/          # FILE MANAGER & DATABASES
 │   ├── __init__.py
-│   ├── browser.py          # .app folder navigation, file search, change commit
-│   ├── file_actions.py     # Text/JSON editor, SQLite editor and Hex patcher launcher, Pythonista editor
+│   ├── browser.py          # .app folder navigation, file search, change tracking
+│   ├── file_actions.py     # Text/JSON editor, SQLite & Hex patcher triggers, Pythonista editor
 │   ├── sqlite_tools.py     # Interactive SQLite database editor (.db, .sqlite, .sqlite3)
-│   ├── macho_tools.py      # Viewing and batch redirection of Mach-O dependency paths
-│   ├── plist_tools.py      # Interactive plist key editor
+│   ├── macho_tools.py      # Viewing and batch-redirecting Mach-O dependency paths
+│   ├── plist_tools.py      # Interactive plist keys editor
 │   ├── text_viewer.py      # Text/binary detector and Hex viewer
-│   ├── backups.py          # Local backups with rollback and auto-rollback of corrupted files
+│   ├── backups.py          # Local backups with rollback and auto-rollback for corrupted files
 │   ├── utils.py            # File manager utilities, size formatting
 │   └── types.py            # Data types (BackupInfo, FileInfo, ChangeSummary)
 │
 ├── hex_patcher/            # HEX PATCHER
 │   ├── __init__.py
 │   ├── interactive.py      # Mobile CLI: search, context, string replacement
-│   ├── json_patcher.py     # Export and import of patches to JSON
+│   ├── json_patcher.py     # Export and import patches in JSON
 │   │
-│   ├── core/               # Search engine with masks, transaction journal (undo)
+│   ├── core/               # Mask search engine, transaction log (undo)
 │   │   ├── __init__.py
 │   │   ├── engine.py       # Patching engine
 │   │   ├── exceptions.py   # Exceptions
@@ -231,23 +243,23 @@ ipa_patcher/
 │   ├── analyzers/          # Analyzers
 │   │   ├── __init__.py
 │   │   ├── macho.py        # Mach-O offset analysis
-│   │   └── search.py       # Search with masks
+│   │   └── search.py       # Mask search
 │   │
 │   ├── managers/           # Managers
 │   │   ├── __init__.py
 │   │   ├── backup.py       # Hex patcher backups
-│   │   └── undo.py         # Change rollback
+│   │   └── undo.py         # Changes rollback
 │   │
 │   └── utils/              # Utilities
 │       ├── __init__.py
 │       └── hex_utils.py    # HEX parsing and conversion, masks
 │
-└── icon_tools/             # ICON HANDLING
+└── icon_tools/             # ICON MANAGEMENT
     ├── __init__.py
     ├── icon_manager.py     # Hybrid icon replacement pipeline
-    ├── icon_analyzer.py    # Icon analysis, build auto-increment
-    ├── icon_generator.py   # Resolution grid generator for iPhone and iPad
-    └── boms_editor.py      # In-place masking of Assets.car B-tree tokens
+    ├── icon_analyzer.py    # Icon analysis, build autoincrement
+    ├── icon_generator.py   # iPhone and iPad resolution grid generator
+    └── boms_editor.py      # In-place Assets.car BOM-tree token masking
 ```
 
 -----
