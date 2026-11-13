@@ -8,6 +8,10 @@ from .backups import backup_file, find_backups, restore_backup
 from .utils import format_file_size
 
 
+def _quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
 def _get_tables(cursor, show_all_system=False):
     if show_all_system:
         cursor.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view');")
@@ -21,7 +25,7 @@ def _get_tables(cursor, show_all_system=False):
 
 
 def _get_columns(cursor, table_name):
-    cursor.execute(f"PRAGMA table_info({table_name});")
+    cursor.execute(f"PRAGMA table_info({_quote_ident(table_name)});")
     return [row[1] for row in cursor.fetchall()]
 
 
@@ -65,7 +69,7 @@ def _render_vertical_table(columns, rows, val_col_width=20):
 
         for col_name, val in zip(columns, data):
             table_lines.append(row_sep)
-            
+
             if val is None:
                 val_lines = ["NULL"]
             else:
@@ -73,9 +77,9 @@ def _render_vertical_table(columns, rows, val_col_width=20):
                 val_lines = []
                 for paragraph in val_str.splitlines():
                     wrapped = textwrap.wrap(
-                        paragraph, 
-                        width=current_w2, 
-                        break_long_words=True, 
+                        paragraph,
+                        width=current_w2,
+                        break_long_words=True,
                         break_on_hyphens=False
                     )
                     if not wrapped:
@@ -213,8 +217,11 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
             color_print("\nТаблицы в базе данных:", 'cyan')
             if tables:
                 for i, table in enumerate(tables, 1):
-                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
-                    count = cursor.fetchone()[0]
+                    try:
+                        cursor.execute(f"SELECT COUNT(*) FROM {_quote_ident(table)}")
+                        count = cursor.fetchone()[0]
+                    except sqlite3.Error:
+                        count = "?"
                     if table == "sqlite_sequence":
                         color_print(f"  {i:>2}) {table} [AUTOINCREMENT] (строк: {count})", 'yellow')
                     elif table.startswith("sqlite_"):
@@ -238,7 +245,8 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
             if choice == "0":
                 break
             elif choice.lower() == "m":
-                if _edit_table(conn, cursor, 'sqlite_master', file_path):
+                mod, conn, cursor = _edit_table(conn, cursor, 'sqlite_master', file_path)
+                if mod:
                     any_modified = True
                 continue
             elif choice.lower() == "s":
@@ -246,6 +254,7 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
                 continue
             elif choice.lower() == "r" and backups:
                 conn.close()
+                conn = None
                 if _restore_db_backup_dialog(file_path):
                     any_modified = True
                 conn = sqlite3.connect(file_path)
@@ -256,7 +265,8 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
             try:
                 idx = int(choice) - 1
                 if 0 <= idx < len(tables):
-                    if _edit_table(conn, cursor, tables[idx], file_path):
+                    mod, conn, cursor = _edit_table(conn, cursor, tables[idx], file_path)
+                    if mod:
                         any_modified = True
                 else:
                     color_print("Неверный номер таблицы.", 'red')
@@ -268,18 +278,28 @@ def edit_sqlite_db(file_path: str, file_name: str) -> bool:
         log_message(f"SQLite Error: {e}", 'ERROR')
     finally:
         if conn:
-            conn.close()
+            if any_modified:
+                try:
+                    conn.commit()
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                except sqlite3.Error:
+                    pass
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     return any_modified
 
 
-def _edit_table(conn, cursor, table_name, file_path) -> bool:
+def _edit_table(conn, cursor, table_name, file_path):
     cursor.execute("PRAGMA writable_schema = ON;")
     columns = _get_columns(cursor, table_name)
     if not columns:
         color_print(f"Не удалось получить схему таблицы {table_name}.", 'red')
-        return False
+        return False, conn, cursor
 
+    q_table = _quote_ident(table_name)
     view_mode = "vertical"
     offset = 0
     table_modified = False
@@ -287,12 +307,16 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
     while True:
         limit = 5 if view_mode == "vertical" else 25
 
-        query = f"SELECT rowid, * FROM {table_name} LIMIT ? OFFSET ?"
-        cursor.execute(query, (limit, offset))
-        rows = cursor.fetchall()
+        try:
+            query = f"SELECT rowid, * FROM {q_table} LIMIT ? OFFSET ?"
+            cursor.execute(query, (limit, offset))
+            rows = cursor.fetchall()
 
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-        total_rows = cursor.fetchone()[0]
+            cursor.execute(f"SELECT COUNT(*) FROM {q_table}")
+            total_rows = cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            color_print(f"[ERROR] Ошибка чтения таблицы {table_name}: {e}", 'red')
+            return table_modified, conn, cursor
 
         mode_desc = "Вертикальная сетка" if view_mode == "vertical" else "Горизонтальная сетка"
         color_print(f"\n--- Таблица: {table_name} [{mode_desc}] (записи {offset+1}-{min(offset+limit, total_rows)} из {total_rows}) ---", 'cyan')
@@ -402,18 +426,22 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
 
                     backup_file(file_path)
 
-                    cursor.execute(f"UPDATE {table_name} SET {col_name} = ? WHERE rowid = ?", (new_val, actual_rowid))
+                    q_col = _quote_ident(col_name)
+                    cursor.execute(f"UPDATE {q_table} SET {q_col} = ? WHERE rowid = ?", (new_val, actual_rowid))
                     conn.commit()
                     color_print(f"[SUCCESS] Поле {col_name} обновлено: {old_val} -> {new_val}", 'green')
                     table_modified = True
                 else:
                     color_print("Неверный номер поля.", 'red')
+            except sqlite3.Error as e:
+                color_print(f"[ERROR] Ошибка SQL при обновлении: {e}", 'red')
+                log_message(f"SQLite UPDATE error: {e}", 'ERROR')
             except ValueError:
                 color_print("Неверный ввод.", 'red')
 
         elif action == "2":
             color_print("\nВНИМАНИЕ: Выполнение сырых SQL-запросов может повредить структуру!", 'yellow')
-            query = ask_input(f"Введите SQL-запрос (например: UPDATE {table_name} SET ...)")
+            query = ask_input(f"Введите SQL-запрос (например: UPDATE {q_table} SET ...)")
             if query:
                 if ask_yes_no("Выполнить запрос?", default=False):
                     try:
@@ -425,4 +453,4 @@ def _edit_table(conn, cursor, table_name, file_path) -> bool:
                     except Exception as e:
                         color_print(f"[ERROR] Ошибка SQL: {e}", 'red')
 
-    return table_modified
+    return table_modified, conn, cursor
