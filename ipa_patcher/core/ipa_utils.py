@@ -36,7 +36,7 @@ def get_user_tmp_dir():
 
 
 class ProgressBar:
-    def __init__(self, total, description="Progress", width=50):
+    def __init__(self, total, description="Progress", width=46):
         if HAVE_TQDM:
             self.tqdm = tqdm(total=total, desc=description, unit="files")
             self.use_tqdm = True
