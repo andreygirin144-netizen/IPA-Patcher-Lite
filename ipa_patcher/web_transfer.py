@@ -16,7 +16,7 @@ import threading
 import shutil
 import argparse
 
-from i18n import init_i18n, set_lang, get_lang, t
+from i18n import init_i18n, set_lang, get_lang, t, _load_lang_bundle
 
 try:
     import background
@@ -42,6 +42,8 @@ CONFIG = {
 }
 
 VERSION = '1.1.9'
+CHUNK_SIZE = 1024 * 1024
+FILE_WRITE_BUFFER = 4 * 1024 * 1024
 
 
 def _parse_cli_args():
@@ -56,6 +58,14 @@ def _get_docs_dir():
     if os.path.basename(home).lower() == 'documents':
         return home
     return os.path.join(home, 'Documents')
+
+
+def _get_html_i18n_json():
+    bundle = {}
+    for lang in ("en", "ru"):
+        data = _load_lang_bundle(lang)
+        bundle[lang] = {k: v for k, v in data.items() if k.startswith("wt_html_")}
+    return json.dumps(bundle, ensure_ascii=False).replace("</", "<\\/")
 
 
 DOCS_DIR = _get_docs_dir()
@@ -296,10 +306,35 @@ def shorten_path(path):
 class ThreadedFastHTTPServer(ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
+    request_queue_size = 32
+
+    def server_bind(self):
+        for rcv_buf in (2 * 1024 * 1024, 1024 * 1024, 512 * 1024):
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcv_buf)
+                break
+            except OSError:
+                continue
+        super().server_bind()
 
 
 class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
+    rbufsize = CHUNK_SIZE
+    wbufsize = 65536
+
+    def setup(self):
+        super().setup()
+        try:
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+        for rcv_buf in (2 * 1024 * 1024, 1024 * 1024, 512 * 1024):
+            try:
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcv_buf)
+                break
+            except OSError:
+                continue
 
     def log_message(self, format, *args):
         pass
@@ -505,19 +540,33 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             start_time = time.time()
             written = 0
             temp_path = out_path + '.tmp'
+            buf = bytearray(CHUNK_SIZE)
+            mv = memoryview(buf)
+            use_readinto1 = hasattr(self.rfile, 'readinto1')
+            check_counter = 0
 
             try:
-                with open(temp_path, 'wb') as f:
+                with open(temp_path, 'wb', buffering=FILE_WRITE_BUFFER) as f:
                     while written < content_length:
-                        chunk_size = min(65536, content_length - written)
-                        chunk = self.rfile.read(chunk_size)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        written += len(chunk)
+                        to_read = min(CHUNK_SIZE, content_length - written)
+                        if use_readinto1:
+                            n = self.rfile.readinto1(mv[:to_read])
+                            if not n:
+                                break
+                            f.write(mv[:n])
+                            written += n
+                        else:
+                            chunk = self.rfile.read(to_read)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            written += len(chunk)
 
-                        if time.time() - start_time > 3600:
-                            raise TimeoutError("Upload timeout (1 hour)")
+                        check_counter += 1
+                        if check_counter >= 32:
+                            check_counter = 0
+                            if time.time() - start_time > 3600:
+                                raise TimeoutError("Upload timeout (1 hour)")
 
                 if written < content_length:
                     raise ConnectionError("Incomplete read")
@@ -540,7 +589,7 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 })
 
                 print()
-                color_print(f"  [+] Успешно загружен: {safe_filename}", 'green')
+                color_print(f"  [+] {safe_filename} ({speed:.1f} MB/s)", 'green')
                 return
 
             except Exception as e:
@@ -556,17 +605,24 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             security.release_connection()
 
     def get_login_page(self):
+        default_lang = get_lang()
+        i18n_json = _get_html_i18n_json()
+
         return f"""
         <!DOCTYPE html>
-        <html>
+        <html lang="{default_lang}">
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>{t("wt_html_login_title")}</title>
+            <title id="pageTitle">{t("wt_html_login_title")}</title>
             <style>
                 *{{margin:0;padding:0;box-sizing:border-box}}
                 body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#1c1c1e;display:flex;justify-content:center;align-items:center;min-height:100vh}}
-                .card{{background:#2c2c2e;padding:30px;border-radius:16px;text-align:center;width:320px;color:white}}
+                .card{{background:#2c2c2e;padding:24px 30px 30px;border-radius:16px;text-align:center;width:320px;color:white}}
+                .lang-bar{{display:flex;justify-content:flex-end;margin-bottom:14px}}
+                .lang-switch{{display:inline-flex;background:#3a3a3c;border-radius:8px;padding:2px;gap:2px}}
+                .lang-btn{{border:none;background:transparent;color:#8e8e93;font-size:11px;font-weight:700;padding:4px 9px;border-radius:6px;cursor:pointer;transition:all 0.15s}}
+                .lang-btn.active{{background:#007aff;color:white}}
                 h2{{margin-bottom:20px;font-size:20px;font-weight:600}}
                 input{{width:100%;padding:12px;border:none;border-radius:10px;margin-bottom:16px;font-size:16px;text-align:center;background:#3a3a3c;color:white;font-family:monospace;letter-spacing:2px}}
                 input:focus{{outline:2px solid #007aff}}
@@ -578,23 +634,56 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         </head>
         <body>
             <div class="card">
+                <div class="lang-bar">
+                    <div class="lang-switch">
+                        <button type="button" class="lang-btn" id="btnEn">EN</button>
+                        <button type="button" class="lang-btn" id="btnRu">RU</button>
+                    </div>
+                </div>
                 <h2>Secure Transfer</h2>
                 <input type="password" id="pin" placeholder="{t("wt_html_pin_ph")}" maxlength="6" autofocus>
                 <button class="btn" id="login">{t("wt_html_login_btn")}</button>
-                <div class="hint">{t("wt_html_pin_hint")}</div>
+                <div class="hint" id="pinHint">{t("wt_html_pin_hint")}</div>
                 <div class="version">IPA Patcher Lite Transfer v{VERSION}</div>
             </div>
             <script>
-                document.getElementById('login').onclick = function() {{
-                    const pin = document.getElementById('pin').value.trim();
-                    if (!pin) return;
-                    fetch('/api/verify?token=' + encodeURIComponent(pin))
-                        .then(r => r.ok ? window.location.href='/?token='+encodeURIComponent(pin) : alert('Invalid PIN'));
-                }};
-                document.getElementById('pin').onkeydown = function(e) {{
-                    if (e.key === 'Enter') document.getElementById('login').click();
-                }};
-                setTimeout(() => document.getElementById('pin').focus(), 300);
+                (function() {{
+                    const I18N = {i18n_json};
+                    const DEFAULT_LANG = '{default_lang}';
+                    let curLang = localStorage.getItem('wt_lang') || DEFAULT_LANG;
+                    if (!I18N[curLang]) curLang = 'en';
+
+                    function tr(key) {{
+                        return (I18N[curLang] && I18N[curLang][key]) || (I18N.en && I18N.en[key]) || key;
+                    }}
+
+                    function applyLang(lang) {{
+                        curLang = lang;
+                        localStorage.setItem('wt_lang', lang);
+                        document.documentElement.lang = lang;
+                        document.getElementById('btnEn').classList.toggle('active', lang === 'en');
+                        document.getElementById('btnRu').classList.toggle('active', lang === 'ru');
+                        document.title = tr('wt_html_login_title');
+                        document.getElementById('pin').placeholder = tr('wt_html_pin_ph');
+                        document.getElementById('login').textContent = tr('wt_html_login_btn');
+                        document.getElementById('pinHint').textContent = tr('wt_html_pin_hint');
+                    }}
+
+                    document.getElementById('btnEn').onclick = function() {{ applyLang('en'); }};
+                    document.getElementById('btnRu').onclick = function() {{ applyLang('ru'); }};
+                    applyLang(curLang);
+
+                    document.getElementById('login').onclick = function() {{
+                        const pin = document.getElementById('pin').value.trim();
+                        if (!pin) return;
+                        fetch('/api/verify?token=' + encodeURIComponent(pin))
+                            .then(r => r.ok ? window.location.href='/?token='+encodeURIComponent(pin) : alert(tr('wt_html_bad_pin')));
+                    }};
+                    document.getElementById('pin').onkeydown = function(e) {{
+                        if (e.key === 'Enter') document.getElementById('login').click();
+                    }};
+                    setTimeout(() => document.getElementById('pin').focus(), 300);
+                }})();
             </script>
         </body>
         </html>
@@ -606,10 +695,12 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         port = CONFIG['PORT']
         max_size_mb = CONFIG['MAX_FILE_SIZE'] // (1024 * 1024)
         allowed_json = json.dumps(sorted(CONFIG['ALLOWED_EXTENSIONS']))
+        default_lang = get_lang()
+        i18n_json = _get_html_i18n_json()
 
         return f"""
         <!DOCTYPE html>
-        <html>
+        <html lang="{default_lang}">
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -617,15 +708,19 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
             <style>
                 *{{margin:0;padding:0;box-sizing:border-box}}
                 body{{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f2f2f7;display:flex;justify-content:center;align-items:center;min-height:100vh}}
-                .card{{background:white;padding:30px;border-radius:24px;box-shadow:0 10px 30px rgba(0,0,0,0.05);text-align:center;width:350px;max-width:90%}}
-                .badge{{display:inline-block;padding:4px 12px;border-radius:10px;font-size:12px;font-weight:600;margin-bottom:16px}}
+                .card{{background:white;padding:24px 30px 30px;border-radius:24px;box-shadow:0 10px 30px rgba(0,0,0,0.05);text-align:center;width:350px;max-width:90%}}
+                .top-bar{{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}}
+                .badge{{display:inline-block;padding:4px 12px;border-radius:10px;font-size:12px;font-weight:600}}
                 .badge.ok{{background:#34c759;color:white}}
                 .badge.error{{background:#ff3b30;color:white}}
                 .badge.waiting{{background:#ff9500;color:white}}
+                .lang-switch{{display:inline-flex;background:#e5e5ea;border-radius:8px;padding:2px;gap:2px}}
+                .lang-btn{{border:none;background:transparent;color:#8e8e93;font-size:11px;font-weight:700;padding:4px 9px;border-radius:6px;cursor:pointer;transition:all 0.15s}}
+                .lang-btn.active{{background:white;color:#1c1c1e;box-shadow:0 1px 3px rgba(0,0,0,0.12)}}
                 h2{{font-size:22px;font-weight:700;color:#1c1c1e;margin-bottom:4px}}
                 .sub{{font-size:14px;color:#8e8e93;margin-bottom:16px}}
                 .ip-box{{background:#f2f2f7;padding:10px;border-radius:10px;font-size:14px;font-weight:600;margin:12px 0}}
-                .pin-box{{font-family:monospace;font-size:24px;letter-spacing:4px;font-weight:700;background:#f2f2f7;padding:12px;border-radius:10px;margin:8px 0 16px 0;user-select:all}}
+                .pin-box{{font-family:monospace;font-size:24px;letter-spacing:4px;font-weight:700;background:#f2f2f7;padding:12px;border-radius:10px;margin:8px 0 16px 0;user-select:all;cursor:pointer}}
                 .btn{{background:#007aff;color:white;padding:14px;border-radius:12px;display:block;font-weight:600;font-size:16px;cursor:pointer;border:none;width:100%;transition:opacity 0.2s}}
                 .btn:hover{{opacity:0.8}}
                 .btn:disabled{{opacity:0.5;cursor:not-allowed}}
@@ -642,11 +737,17 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
         </head>
         <body>
             <div class="card">
-                <div class="badge ok" id="status">{t("wt_html_badge_ok")}</div>
+                <div class="top-bar">
+                    <div class="badge ok" id="status">{t("wt_html_badge_ok")}</div>
+                    <div class="lang-switch">
+                        <button type="button" class="lang-btn" id="btnEn">EN</button>
+                        <button type="button" class="lang-btn" id="btnRu">RU</button>
+                    </div>
+                </div>
                 <h2>Secure Transfer</h2>
-                <p class="sub">{t("wt_html_sub")}</p>
+                <p class="sub" id="subText">{t("wt_html_sub")}</p>
                 <div class="ip-box">{ip}:{port}</div>
-                <div class="info">{t("wt_pin_ph") if get_lang()=='ru' else "PIN CODE"}</div>
+                <div class="info" id="pinLabel">{t("wt_html_pin_ph")}</div>
                 <div class="pin-box" id="pinDisplay">{token}</div>
                 <input type="file" id="fileInput" style="display:none">
                 <button class="btn" id="uploadBtn">{t("wt_html_pick_btn")}</button>
@@ -656,14 +757,23 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 <div class="exts">
                     <span>.ipa</span><span>.tipa</span><span>.zip</span><span>.deb</span><span>.dylib</span>
                 </div>
-                <div class="size-info">{t("wt_html_max_size", size=max_size_mb)}</div>
+                <div class="size-info" id="maxSizeLabel">{t("wt_html_max_size", size=max_size_mb)}</div>
                 <div class="version">IPA Patcher Lite Transfer v{VERSION}</div>
             </div>
             <script>
                 (function() {{
                     const TOKEN = '{token}';
                     const MAX_SIZE = {CONFIG['MAX_FILE_SIZE']};
+                    const MAX_SIZE_MB = {max_size_mb};
                     const ALLOWED = {allowed_json};
+                    const I18N = {i18n_json};
+                    const DEFAULT_LANG = '{default_lang}';
+
+                    let curLang = localStorage.getItem('wt_lang') || DEFAULT_LANG;
+                    if (!I18N[curLang]) curLang = 'en';
+                    let uiState = 'idle';
+                    let lastSavedFile = '';
+                    let lastSavedSpeed = '';
 
                     const status = document.getElementById('status');
                     const btn = document.getElementById('uploadBtn');
@@ -674,10 +784,50 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     const pinDisplay = document.getElementById('pinDisplay');
                     const stopBtn = document.getElementById('stopBtn');
 
+                    function tr(key) {{
+                        return (I18N[curLang] && I18N[curLang][key]) || (I18N.en && I18N.en[key]) || key;
+                    }}
+
+                    function applyLang(lang) {{
+                        curLang = lang;
+                        localStorage.setItem('wt_lang', lang);
+                        document.documentElement.lang = lang;
+                        document.getElementById('btnEn').classList.toggle('active', lang === 'en');
+                        document.getElementById('btnRu').classList.toggle('active', lang === 'ru');
+                        document.getElementById('subText').textContent = tr('wt_html_sub');
+                        document.getElementById('pinLabel').textContent = tr('wt_html_pin_ph');
+                        stopBtn.textContent = tr('wt_html_stop_btn');
+                        document.getElementById('maxSizeLabel').textContent = tr('wt_html_max_size').replace('{{size}}', MAX_SIZE_MB);
+
+                        if (uiState === 'idle') {{
+                            status.textContent = tr('wt_html_badge_ok');
+                            btn.textContent = tr('wt_html_pick_btn');
+                        }} else if (uiState === 'uploading') {{
+                            status.textContent = tr('wt_html_status_load');
+                            btn.textContent = tr('wt_html_uploading');
+                        }} else if (uiState === 'done') {{
+                            status.textContent = tr('wt_html_status_done');
+                            btn.textContent = tr('wt_html_pick_btn');
+                            msg.textContent = tr('wt_html_saved_lbl').replace('{{name}}', lastSavedFile) + ' (' + lastSavedSpeed + ' MB/s)';
+                        }} else if (uiState === 'error') {{
+                            status.textContent = tr('wt_html_status_err');
+                            btn.textContent = tr('wt_html_retry_btn');
+                            msg.textContent = tr('wt_html_err_msg');
+                        }} else if (uiState === 'stopped') {{
+                            status.textContent = tr('wt_html_stopped_badge');
+                            btn.textContent = tr('wt_html_pick_btn');
+                            msg.textContent = tr('wt_html_stopped_msg');
+                        }}
+                    }}
+
+                    document.getElementById('btnEn').onclick = function() {{ applyLang('en'); }};
+                    document.getElementById('btnRu').onclick = function() {{ applyLang('ru'); }};
+                    applyLang(curLang);
+
                     pinDisplay.onclick = function() {{
                         navigator.clipboard.writeText(TOKEN).then(() => {{
-                            const orig = this.textContent;
-                            this.textContent = '{t("wt_html_copied")}';
+                            const orig = TOKEN;
+                            this.textContent = tr('wt_html_copied');
                             setTimeout(() => {{ this.textContent = orig; }}, 1500);
                         }});
                     }};
@@ -694,34 +844,43 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                         if (!file) return;
 
                         if (!isAllowed(file.name)) {{
-                            alert('Invalid file type.');
+                            alert(tr('wt_html_bad_type') + ALLOWED.join(', '));
                             this.value = '';
                             return;
                         }}
 
                         if (file.size > MAX_SIZE) {{
-                            alert('File too large.');
+                            alert(tr('wt_html_too_large') + MAX_SIZE_MB + ' MB');
                             this.value = '';
                             return;
                         }}
 
-                        btn.textContent = '{t("wt_html_uploading")}';
+                        uiState = 'uploading';
+                        btn.textContent = tr('wt_html_uploading');
                         btn.disabled = true;
                         status.className = 'badge waiting';
-                        status.textContent = '{t("wt_html_status_load")}';
+                        status.textContent = tr('wt_html_status_load');
                         prog.style.display = 'block';
                         msg.textContent = file.name + ' (' + (file.size/1024/1024).toFixed(1) + ' MB)';
 
                         const xhr = new XMLHttpRequest();
-                        const start = Date.now();
+                        let lastTime = Date.now();
+                        let lastLoaded = 0;
+                        let smoothSpeed = 0;
 
                         xhr.upload.onprogress = function(e) {{
                             if (e.lengthComputable) {{
                                 const pct = (e.loaded / e.total * 100);
                                 fill.style.width = pct + '%';
-                                const elapsed = (Date.now() - start) / 1000;
-                                const speed = elapsed > 0 ? (e.loaded / 1024 / 1024) / elapsed : 0;
-                                msg.textContent = pct.toFixed(0) + '%  ' + speed.toFixed(1) + ' MB/s';
+                                const now = Date.now();
+                                const dt = (now - lastTime) / 1000;
+                                if (dt >= 0.35 || e.loaded === e.total) {{
+                                    const instSpeed = dt > 0 ? ((e.loaded - lastLoaded) / 1024 / 1024) / dt : 0;
+                                    smoothSpeed = smoothSpeed === 0 ? instSpeed : (smoothSpeed * 0.6 + instSpeed * 0.4);
+                                    lastTime = now;
+                                    lastLoaded = e.loaded;
+                                }}
+                                msg.textContent = pct.toFixed(0) + '%  ' + smoothSpeed.toFixed(1) + ' MB/s';
                             }}
                         }};
 
@@ -729,12 +888,15 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                             if (xhr.status === 200) {{
                                 try {{
                                     const resp = JSON.parse(xhr.responseText);
+                                    uiState = 'done';
+                                    lastSavedFile = resp.filename;
+                                    lastSavedSpeed = resp.speed;
                                     status.className = 'badge ok';
-                                    status.textContent = '{t("wt_html_status_done")}';
-                                    btn.textContent = '{t("wt_html_pick_btn")}';
+                                    status.textContent = tr('wt_html_status_done');
+                                    btn.textContent = tr('wt_html_pick_btn');
                                     btn.className = 'btn';
                                     btn.disabled = false;
-                                    msg.textContent = '{t("wt_html_saved_lbl", name="")}' + resp.filename;
+                                    msg.textContent = tr('wt_html_saved_lbl').replace('{{name}}', resp.filename) + ' (' + resp.speed + ' MB/s)';
                                     prog.style.display = 'none';
                                     fill.style.width = '0%';
                                     fileInput.value = '';
@@ -747,12 +909,13 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                         }};
 
                         xhr.onerror = function() {{
+                            uiState = 'error';
                             status.className = 'badge error';
-                            status.textContent = '{t("wt_html_status_err")}';
-                            btn.textContent = '{t("wt_html_retry_btn")}';
+                            status.textContent = tr('wt_html_status_err');
+                            btn.textContent = tr('wt_html_retry_btn');
                             btn.className = 'btn error';
                             btn.disabled = false;
-                            msg.textContent = '{t("wt_html_err_msg")}';
+                            msg.textContent = tr('wt_html_err_msg');
                             prog.style.display = 'none';
                             fill.style.width = '0%';
                         }};
@@ -765,15 +928,16 @@ class SecureHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                     }};
 
                     stopBtn.onclick = function() {{
-                        if (confirm('{t("wt_html_stop_q")}')) {{
+                        if (confirm(tr('wt_html_stop_q'))) {{
                             fetch('/api/stop?token=' + TOKEN)
                                 .then(r => {{
                                     if (r.ok) {{
+                                        uiState = 'stopped';
                                         status.className = 'badge error';
-                                        status.textContent = '{t("wt_html_status_err")}';
+                                        status.textContent = tr('wt_html_stopped_badge');
                                         btn.disabled = true;
                                         stopBtn.disabled = true;
-                                        msg.textContent = '{t("wt_html_stopped_msg")}';
+                                        msg.textContent = tr('wt_html_stopped_msg');
                                         prog.style.display = 'none';
                                         setTimeout(() => {{ window.close(); }}, 1000);
                                     }}
@@ -1054,6 +1218,11 @@ def run_server():
     if HAVE_BACKGROUND:
         background.keep_alive()
         log_message(t("wt_bg_active"), 'INFO')
+    if HAVE_CONSOLE and hasattr(console, 'set_idle_timer_disabled'):
+        try:
+            console.set_idle_timer_disabled(True)
+        except Exception:
+            pass
 
     SERVER_INSTANCE = ThreadedFastHTTPServer(('', port), SecureHTTPRequestHandler)
 
@@ -1067,6 +1236,11 @@ def run_server():
         if SERVER_INSTANCE:
             SERVER_INSTANCE.server_close()
             SERVER_INSTANCE = None
+        if HAVE_CONSOLE and hasattr(console, 'set_idle_timer_disabled'):
+            try:
+                console.set_idle_timer_disabled(False)
+            except Exception:
+                pass
         try:
             os.chdir(orig_cwd)
         except Exception:
