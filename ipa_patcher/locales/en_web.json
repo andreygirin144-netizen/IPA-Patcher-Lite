@@ -98,12 +98,15 @@
   "wt_html_pin_ph": "PIN CODE",
   "wt_html_login_btn": "Login",
   "wt_html_pin_hint": "Enter 6-digit PIN from console",
+  "wt_html_bad_pin": "Invalid PIN",
   "wt_html_badge_ok": "Secure",
   "wt_html_sub": "Upload files to iPhone",
   "wt_html_pick_btn": "Choose file",
   "wt_html_stop_btn": "Stop server",
   "wt_html_max_size": "Max size: {size} MB",
   "wt_html_copied": "Copied!",
+  "wt_html_bad_type": "Unsupported file type. Allowed: ",
+  "wt_html_too_large": "File is too large. Max: ",
   "wt_html_uploading": "Uploading...",
   "wt_html_status_load": "Uploading",
   "wt_html_status_done": "Done",
@@ -112,5 +115,6 @@
   "wt_html_retry_btn": "Retry",
   "wt_html_err_msg": "Upload error. Try again.",
   "wt_html_stop_q": "Stop server?",
+  "wt_html_stopped_badge": "Stopped",
   "wt_html_stopped_msg": "Server stopped. Close page."
 }

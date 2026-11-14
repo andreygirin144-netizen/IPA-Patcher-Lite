@@ -98,12 +98,15 @@
   "wt_html_pin_ph": "ПИН-КОД",
   "wt_html_login_btn": "Войти",
   "wt_html_pin_hint": "Введите 6-значный ПИН из консоли",
+  "wt_html_bad_pin": "Неверный ПИН",
   "wt_html_badge_ok": "Безопасно",
   "wt_html_sub": "Загрузите файлы на iPhone",
   "wt_html_pick_btn": "Выбрать файл",
   "wt_html_stop_btn": "Остановить сервер",
   "wt_html_max_size": "Макс. размер: {size} MB",
   "wt_html_copied": "Скопировано!",
+  "wt_html_bad_type": "Неподдерживаемый тип файла. Разрешены: ",
+  "wt_html_too_large": "Файл слишком большой. Максимум: ",
   "wt_html_uploading": "Загрузка...",
   "wt_html_status_load": "Загрузка",
   "wt_html_status_done": "Готово",
@@ -112,5 +115,6 @@
   "wt_html_retry_btn": "Повторить",
   "wt_html_err_msg": "Ошибка загрузки. Попробуйте снова.",
   "wt_html_stop_q": "Остановить сервер?",
+  "wt_html_stopped_badge": "Остановлен",
   "wt_html_stopped_msg": "Сервер остановлен. Закройте страницу."
 }
