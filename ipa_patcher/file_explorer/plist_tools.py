@@ -9,7 +9,7 @@ from .text_viewer import parse_typed_value
 
 
 def _format_plist_val(value):
-    """Форматирует значение ключа для красивого полного вывода без обрезки."""
+
     if isinstance(value, bytes):
         return f"<data: {len(value)} bytes>"
     if isinstance(value, (dict, list)):
