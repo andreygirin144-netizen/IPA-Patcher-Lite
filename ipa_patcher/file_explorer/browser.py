@@ -84,7 +84,6 @@ def start_interactive_explorer(app_dir: str) -> tuple:
     if plist_data is None:
         plist_data = {}
 
-    # Сохраняем эталонный исходный снимок Info.plist на момент открытия проводника
     initial_plist = plist_data.copy()
 
     def reload_plist():
