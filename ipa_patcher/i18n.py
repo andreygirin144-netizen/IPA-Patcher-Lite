@@ -38,6 +38,7 @@ def _load_lang_bundle(lang):
                         merged.update(data)
             except Exception:
                 pass
+            
     return merged
 
 
@@ -140,15 +141,22 @@ def get_lang():
     return _CURRENT_LANG
 
 
-def t(key, **kwargs):
+def t(*args, **kwargs):
+
     if not _LOADED:
         init_i18n()
-    text = _STRINGS.get(key)
+    if not args:
+        return ""
+        
+    msg_key = args[0]
+    text = _STRINGS.get(msg_key)
     if text is None:
-        text = _FALLBACK.get(key, key)
+        text = _FALLBACK.get(msg_key, msg_key)
+        
     if kwargs:
         try:
             return text.format(**kwargs)
         except Exception:
             return text
+            
     return text
