@@ -84,6 +84,9 @@ def start_interactive_explorer(app_dir: str) -> tuple:
     if plist_data is None:
         plist_data = {}
 
+    # Сохраняем эталонный исходный снимок Info.plist на момент открытия проводника
+    initial_plist = plist_data.copy()
+
     def reload_plist():
         nonlocal plist_data
         try:
@@ -185,7 +188,10 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                                 if modified:
                                     modified_any = True
                                     changed_files.add(base_fname)
-                                    deep_flags.update(df)
+                                    if df:
+                                        for k, v in df.items():
+                                            if v:
+                                                deep_flags[k] = True
                             else:
                                 res = handle_file_actions(selected_path, base_fname, reload_plist)
                                 if isinstance(res, (tuple, list)) and len(res) == 2:
@@ -257,33 +263,38 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                         with open(plist_path, 'rb') as f:
                             current_plist = plistlib.load(f)
 
-                        old_name = plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName')
+                        old_name = initial_plist.get('CFBundleDisplayName') or initial_plist.get('CFBundleName')
                         new_name = current_plist.get('CFBundleDisplayName') or current_plist.get('CFBundleName')
-                        if new_name and old_name and new_name != old_name:
+                        if new_name != old_name:
                             plist_changes['name'] = new_name
-                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_name", val=old_name), t("fe_br_lbl_name", val=new_name))
+                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_name", val=old_name or t("not_set")), t("fe_br_lbl_name", val=new_name))
 
-                        old_version = plist_data.get('CFBundleShortVersionString')
+                        old_version = initial_plist.get('CFBundleShortVersionString')
                         new_version = current_plist.get('CFBundleShortVersionString')
-                        if new_version and old_version and new_version != old_version:
+                        if new_version != old_version:
                             plist_changes['version'] = new_version
                             plist_changes['version_old'] = old_version
                             plist_changes['version_deep'] = deep_flags.get('version_deep', False)
-                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_ver", val=old_version), t("fe_br_lbl_ver", val=new_version))
+                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_ver", val=old_version or t("not_set")), t("fe_br_lbl_ver", val=new_version))
 
-                        old_bundle = plist_data.get('CFBundleIdentifier')
+                        old_bundle = initial_plist.get('CFBundleIdentifier')
                         new_bundle = current_plist.get('CFBundleIdentifier')
-                        if new_bundle and old_bundle and new_bundle != old_bundle:
+                        if new_bundle != old_bundle:
                             plist_changes['bundle_id'] = new_bundle
                             plist_changes['bundle_old'] = old_bundle
                             plist_changes['bundle_deep'] = deep_flags.get('bundle_deep', False)
-                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_bundle", val=old_bundle), t("fe_br_lbl_bundle", val=new_bundle))
+                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_bundle", val=old_bundle or t("not_set")), t("fe_br_lbl_bundle", val=new_bundle))
 
-                        old_build = plist_data.get('CFBundleVersion')
+                        old_build = initial_plist.get('CFBundleVersion')
                         new_build = current_plist.get('CFBundleVersion')
-                        if new_build and old_build and new_build != old_build:
+                        if new_build != old_build:
                             plist_changes['build'] = new_build
-                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_build", val=old_build), t("fe_br_lbl_build", val=new_build))
+                            add_change('plist_change', 'Info.plist', t("fe_br_lbl_build", val=old_build or t("not_set")), t("fe_br_lbl_build", val=new_build))
+
+                        if deep_flags.get('version_deep'):
+                            plist_changes['version_deep'] = True
+                        if deep_flags.get('bundle_deep'):
+                            plist_changes['bundle_deep'] = True
 
                         plist_data = current_plist
                         color_print(t("fe_br_plist_exit"), 'green')
@@ -311,6 +322,16 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                             color_print(f"  {change['new']}", 'green')
                         elif change['type'] == 'file_edit':
                             color_print(t("fe_br_sum_file_edit", file=change.get('file')), 'green')
+                    color_print("=" * 49, 'cyan')
+                    if not ask_yes_no(t("fe_br_exit_q"), default=True):
+                        continue
+                elif modified_any:
+                    color_print(t("fe_br_sum_hdr"), 'yellow')
+                    color_print("=" * 49, 'cyan')
+                    if changed_files:
+                        color_print(t("fe_br_sum_files"), 'cyan')
+                        for file_name in sorted(changed_files):
+                            color_print(f"    - {file_name}", 'white')
                     color_print("=" * 49, 'cyan')
                     if not ask_yes_no(t("fe_br_exit_q"), default=True):
                         continue
@@ -392,7 +413,10 @@ def start_interactive_explorer(app_dir: str) -> tuple:
                         if modified:
                             modified_any = True
                             changed_files.add(selected_item)
-                            deep_flags.update(df)
+                            if df:
+                                for k, v in df.items():
+                                    if v:
+                                        deep_flags[k] = True
                     else:
                         res = handle_file_actions(selected_path, selected_item, reload_plist)
                         if isinstance(res, (tuple, list)) and len(res) == 2:
