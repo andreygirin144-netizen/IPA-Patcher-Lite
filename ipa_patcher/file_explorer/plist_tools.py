@@ -1,10 +1,42 @@
 # -*- coding: utf-8 -*-
 import os
+import json
 
 from utils import color_print, ask_input, ask_yes_no
 from core import load_plist_safe, save_plist_safe
 from i18n import t
 from .text_viewer import parse_typed_value
+
+
+def _format_plist_val(value):
+    """Форматирует значение ключа для красивого полного вывода без обрезки."""
+    if isinstance(value, bytes):
+        return f"<data: {len(value)} bytes>"
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def _get_val_type_str(value):
+    if isinstance(value, bool):
+        return "bool"
+    elif isinstance(value, int):
+        return "int"
+    elif isinstance(value, float):
+        return "float"
+    elif isinstance(value, list):
+        return f"array[{len(value)}]"
+    elif isinstance(value, dict):
+        return f"dict[{len(value)}]"
+    elif isinstance(value, str):
+        return "str"
+    elif isinstance(value, bytes):
+        return f"data[{len(value)}b]"
+    else:
+        return type(value).__name__
 
 
 def edit_plist_file(file_path, on_change_callback=None):
@@ -39,23 +71,8 @@ def edit_plist_file(file_path, on_change_callback=None):
                 keys = sorted(plist_data.keys())
                 for idx, key in enumerate(keys, 1):
                     value = plist_data[key]
-                    value_str = str(value)
-                    if len(value_str) > 60:
-                        value_str = value_str[:60] + "..."
-                    if isinstance(value, bool):
-                        type_str = "bool"
-                    elif isinstance(value, int):
-                        type_str = "int"
-                    elif isinstance(value, float):
-                        type_str = "float"
-                    elif isinstance(value, list):
-                        type_str = f"array[{len(value)}]"
-                    elif isinstance(value, dict):
-                        type_str = f"dict[{len(value)}]"
-                    elif isinstance(value, str):
-                        type_str = "string"
-                    else:
-                        type_str = type(value).__name__
+                    value_str = _format_plist_val(value)
+                    type_str = _get_val_type_str(value)
                     color_print(f"  {idx:>3}) {key} [{type_str}] = {value_str}", 'white')
                 input(t("fe_press_enter_nl"))
 
@@ -64,21 +81,8 @@ def edit_plist_file(file_path, on_change_callback=None):
                 color_print(t("fe_pt_avail_keys"), 'blue')
                 for idx, key in enumerate(keys, 1):
                     value = plist_data[key]
-                    value_str = str(value)
-                    if len(value_str) > 50:
-                        value_str = value_str[:50] + "..."
-                    if isinstance(value, bool):
-                        type_str = "bool"
-                    elif isinstance(value, int):
-                        type_str = "int"
-                    elif isinstance(value, float):
-                        type_str = "float"
-                    elif isinstance(value, list):
-                        type_str = f"array[{len(value)}]"
-                    elif isinstance(value, dict):
-                        type_str = f"dict[{len(value)}]"
-                    else:
-                        type_str = type(value).__name__
+                    value_str = _format_plist_val(value)
+                    type_str = _get_val_type_str(value)
                     color_print(f"  {idx:>3}) {key} [{type_str}] = {value_str}", 'white')
                 print("")
                 color_print(t("fe_pt_hint1"), 'cyan')
@@ -123,16 +127,14 @@ def edit_plist_file(file_path, on_change_callback=None):
 
                 selected_keys = [keys[idx] for idx in selected_indices]
 
-                has_version = any(k in ['CFBundleShortVersionString', 'CFBundleVersion'] for k in selected_keys)
-                has_bundle = any(k in ['CFBundleIdentifier'] for k in selected_keys)
+                has_version = any(k == 'CFBundleShortVersionString' for k in selected_keys)
+                has_bundle = any(k == 'CFBundleIdentifier' for k in selected_keys)
 
                 color_print(t("fe_pt_sel_cnt", n=len(selected_indices)), 'cyan')
                 for idx in selected_indices:
                     key = keys[idx]
                     value = plist_data[key]
-                    value_str = str(value)
-                    if len(value_str) > 80:
-                        value_str = value_str[:80] + "..."
+                    value_str = _format_plist_val(value)
                     color_print(f"  {idx+1}) {key} = {value_str}", 'white')
 
                 if not ask_yes_no(t("fe_pt_cont_q"), default=True):
@@ -177,37 +179,35 @@ def edit_plist_file(file_path, on_change_callback=None):
 
                 edited_count = 0
                 for pos_i, idx in enumerate(selected_indices, 1):
-                    key = keys[idx]
-                    current = plist_data[key]
-                    current_str = str(current)
-                    if len(current_str) > 80:
-                        current_str = current_str[:80] + "..."
+                    key_name = keys[idx]
+                    current = plist_data[key_name]
+                    current_str = _format_plist_val(current)
 
-                    color_print(t("fe_pt_key_cur", idx=pos_i, tot=len(selected_indices), key=key), 'yellow')
+                    color_print(t("fe_pt_key_cur", idx=pos_i, tot=len(selected_indices), key=key_name), 'yellow')
                     color_print(t("fe_pt_val_cur", val=current_str), 'white')
 
-                    if key in ['CFBundleShortVersionString', 'CFBundleVersion'] and deep_version:
+                    if key_name == 'CFBundleShortVersionString' and deep_version:
                         color_print(t("fe_pt_deep_note"), 'green')
-                    elif key == 'CFBundleIdentifier' and deep_bundle:
+                    elif key_name == 'CFBundleIdentifier' and deep_bundle:
                         color_print(t("fe_pt_deep_note"), 'green')
 
-                    new_value = ask_input(t("fe_pt_new_val_q", key=key), "")
+                    new_value = ask_input(t("fe_pt_new_val_q", key=key_name), "")
                     if new_value == "":
-                        color_print(t("fe_pt_skipped", key=key), 'yellow')
+                        color_print(t("fe_pt_skipped", key=key_name), 'yellow')
                         continue
 
                     try:
                         parsed = parse_typed_value(new_value)
                         if parsed != current:
-                            plist_data[key] = parsed
+                            plist_data[key_name] = parsed
                             edited_count += 1
-                            if key not in changed_keys:
-                                changed_keys.append(key)
-                            color_print(t("fe_pt_updated", key=key), 'green')
+                            if key_name not in changed_keys:
+                                changed_keys.append(key_name)
+                            color_print(t("fe_pt_updated", key=key_name), 'green')
                         else:
-                            color_print(t("fe_pt_unchanged", key=key), 'yellow')
+                            color_print(t("fe_pt_unchanged", key=key_name), 'yellow')
                     except Exception as e:
-                        color_print(t("fe_pt_key_err", key=key, err=e), 'red')
+                        color_print(t("fe_pt_key_err", key=key_name, err=e), 'red')
 
                 if edited_count > 0:
                     if save_plist_safe(plist_data, file_path):
@@ -240,9 +240,7 @@ def edit_plist_file(file_path, on_change_callback=None):
                 keys = sorted(plist_data.keys())
                 color_print(t("fe_pt_avail_keys"), 'blue')
                 for idx, key in enumerate(keys, 1):
-                    value_str = str(plist_data[key])
-                    if len(value_str) > 50:
-                        value_str = value_str[:50] + "..."
+                    value_str = _format_plist_val(plist_data[key])
                     color_print(f"  {idx:>3}) {key} = {value_str}", 'white')
                 print("")
                 color_print(t("fe_pt_hint1"), 'cyan')
@@ -287,23 +285,21 @@ def edit_plist_file(file_path, on_change_callback=None):
 
                 color_print(t("fe_pt_del_cnt", n=len(selected_indices)), 'red')
                 for idx in selected_indices:
-                    key = keys[idx]
-                    value_str = str(plist_data[key])
-                    if len(value_str) > 80:
-                        value_str = value_str[:80] + "..."
-                    color_print(f"  {idx+1}) {key} = {value_str}", 'red')
+                    key_name = keys[idx]
+                    value_str = _format_plist_val(plist_data[key_name])
+                    color_print(f"  {idx+1}) {key_name} = {value_str}", 'red')
 
                 if not ask_yes_no(t("fe_pt_del_q", n=len(selected_indices)), default=False):
                     continue
 
                 deleted_count = 0
                 for idx in selected_indices:
-                    key = keys[idx]
-                    del plist_data[key]
+                    key_name = keys[idx]
+                    del plist_data[key_name]
                     deleted_count += 1
-                    if key in changed_keys:
-                        changed_keys.remove(key)
-                    color_print(t("fe_pt_deleted_one", key=key), 'green')
+                    if key_name in changed_keys:
+                        changed_keys.remove(key_name)
+                    color_print(t("fe_pt_deleted_one", key=key_name), 'green')
 
                 if save_plist_safe(plist_data, file_path):
                     color_print(t("fe_pt_del_done", n=deleted_count), 'green')
