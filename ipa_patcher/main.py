@@ -845,7 +845,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         changes['name'] = fm_plist_changes.get('name')
                     if 'build' in fm_plist_changes:
                         changes['build'] = fm_plist_changes.get('build')
-                    plist_changes = fm_plist_changes
+                    plist_changes.update(fm_plist_changes)
 
                 if fm_plist_data:
                     plist_data = fm_plist_data
@@ -861,15 +861,41 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         elif choice == "9":
             real_changes = {}
 
+            cur_name = plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName')
+            orig_name = original.get('CFBundleDisplayName') or original.get('CFBundleName')
+            if cur_name and cur_name != orig_name and 'name' not in changes:
+                changes['name'] = cur_name
+
+            cur_ver = plist_data.get('CFBundleShortVersionString')
+            orig_ver = original.get('CFBundleShortVersionString')
+            if cur_ver and cur_ver != orig_ver and 'version' not in changes:
+                changes['version'] = cur_ver
+                if 'version_old' not in changes:
+                    changes['version_old'] = orig_ver
+
+            cur_bundle = plist_data.get('CFBundleIdentifier')
+            orig_bundle = original.get('CFBundleIdentifier')
+            if cur_bundle and cur_bundle != orig_bundle and 'bundle_id' not in changes:
+                changes['bundle_id'] = cur_bundle
+                if 'bundle_old' not in changes:
+                    changes['bundle_old'] = orig_bundle
+
+            cur_build = plist_data.get('CFBundleVersion')
+            orig_build = original.get('CFBundleVersion')
+            if cur_build and cur_build != orig_build and 'build' not in changes:
+                changes['build'] = cur_build
+
             if plist_changes:
-                if 'version' in plist_changes and 'version_deep' in plist_changes:
+                if 'version' in plist_changes:
                     changes['version'] = plist_changes.get('version')
-                    changes['version_old'] = plist_changes.get('version_old')
-                    changes['version_deep'] = plist_changes.get('version_deep')
-                if 'bundle_id' in plist_changes and 'bundle_deep' in plist_changes:
+                    changes['version_old'] = plist_changes.get('version_old', original.get('CFBundleShortVersionString', '1.0'))
+                    if 'version_deep' in plist_changes:
+                        changes['version_deep'] = plist_changes.get('version_deep')
+                if 'bundle_id' in plist_changes:
                     changes['bundle_id'] = plist_changes.get('bundle_id')
-                    changes['bundle_old'] = plist_changes.get('bundle_old')
-                    changes['bundle_deep'] = plist_changes.get('bundle_deep')
+                    changes['bundle_old'] = plist_changes.get('bundle_old', original.get('CFBundleIdentifier', ''))
+                    if 'bundle_deep' in plist_changes:
+                        changes['bundle_deep'] = plist_changes.get('bundle_deep')
                 if 'name' in plist_changes:
                     changes['name'] = plist_changes.get('name')
                 if 'build' in plist_changes:
@@ -929,38 +955,43 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     deep_version_mode = plist_changes.get('version_deep', False)
                 if 'bundle_deep' in plist_changes:
                     deep_bundle_mode = plist_changes.get('bundle_deep', False)
+            elif 'version_deep' in changes:
+                deep_version_mode = changes.get('version_deep', False)
+            if 'bundle_deep' in changes:
+                deep_bundle_mode = changes.get('bundle_deep', False)
 
             filtered_changes = {}
             for key, value in real_changes.items():
                 if key == 'name':
                     current = plist_data.get('CFBundleDisplayName') or plist_data.get('CFBundleName')
-                    if current and current != original.get('CFBundleName'):
+                    orig = original.get('CFBundleDisplayName') or original.get('CFBundleName')
+                    if current and current != orig:
                         filtered_changes[key] = current
-                    elif current and current == original.get('CFBundleName'):
+                    else:
                         continue
                 elif key == 'version':
                     current = plist_data.get('CFBundleShortVersionString')
                     if current and current != original.get('CFBundleShortVersionString'):
                         filtered_changes[key] = current
-                    elif current and current == original.get('CFBundleShortVersionString'):
+                    else:
                         continue
                 elif key == 'build':
                     current = plist_data.get('CFBundleVersion')
                     if current and current != original.get('CFBundleVersion'):
                         filtered_changes[key] = current
-                    elif current and current == original.get('CFBundleVersion'):
+                    else:
                         continue
                 elif key == 'bundle_id':
                     current = plist_data.get('CFBundleIdentifier')
                     if current and current != original.get('CFBundleIdentifier'):
                         filtered_changes[key] = current
-                    elif current and current == original.get('CFBundleIdentifier'):
+                    else:
                         continue
                 elif key == 'min_os':
                     current = plist_data.get('MinimumOSVersion')
                     if current and current != original.get('MinimumOSVersion'):
                         filtered_changes[key] = current
-                    elif current and current == original.get('MinimumOSVersion'):
+                    else:
                         continue
                 else:
                     filtered_changes[key] = value
@@ -973,7 +1004,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 has_changes = False
 
                 if "name" in real_changes:
-                    color_print(t("sum_name", old=original.get('CFBundleName'), new=real_changes['name']), 'green')
+                    old_n = original.get('CFBundleDisplayName') or original.get('CFBundleName')
+                    color_print(t("sum_name", old=old_n, new=real_changes['name']), 'green')
                     has_changes = True
                 if "version" in real_changes:
                     old_ver = changes.get('version_old', original.get('CFBundleShortVersionString', '1.0'))
@@ -1066,7 +1098,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     return (
                         plist_data,
                         modified,
-                        real_changes.get("bundle_id", original.get("CFBundleIdentifier", "")),
+                        original.get("CFBundleIdentifier", ""),
                         icon_replaced,
                         tweak_injected,
                         ("file_support" in real_changes),
@@ -1725,7 +1757,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 color_print(t("exit_summary"), 'cyan')
                 color_print("=" * 49, 'cyan')
                 if "name" in changes:
-                    color_print(t("sum_name", old=original.get('CFBundleName'), new=changes['name']), 'green')
+                    old_n = original.get('CFBundleDisplayName') or original.get('CFBundleName')
+                    color_print(t("sum_name", old=old_n, new=changes['name']), 'green')
                 if "version" in changes:
                     old_ver = changes.get('version_old', original.get('CFBundleShortVersionString', '1.0'))
                     color_print(t("sum_ver", old=old_ver, new=changes['version']), 'green')
