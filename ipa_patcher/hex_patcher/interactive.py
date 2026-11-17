@@ -34,6 +34,7 @@ class InteractiveCli:
         self.offsets: List[int] = []
         self.dry_run: bool = False
         self.current_patch: Optional[dict] = None
+        self.patches_list: List[dict] = []
         self.running: bool = True
         self.dump_mode: bool = False
         self.has_changes: bool = False
@@ -320,8 +321,26 @@ class InteractiveCli:
                         self.engine.backup_mgr.create(self.selected_file)
                         with open(self.selected_file, 'r+b') as f:
                             with mmap.mmap(f.fileno(), 0) as mm:
+                                old_bytes = bytes(mm[ent['offset']:ent['offset'] + len(new_bytes)])
                                 mm[ent['offset']:ent['offset'] + len(new_bytes)] = new_bytes
                                 mm.flush()
+
+                        changes = [{
+                            "offset": ent['offset'],
+                            "old": HexUtils.bytes_to_hex(old_bytes).replace(" ", ""),
+                            "new": HexUtils.bytes_to_hex(new_bytes).replace(" ", "")
+                        }]
+                        self.engine.last_changes = changes
+                        self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
+
+                        patch_obj = {
+                            "type": "offset",
+                            "file": os.path.basename(self.selected_file),
+                            "offset": f"0x{ent['offset']:08X}",
+                            "bytes": HexUtils.bytes_to_hex(new_bytes).replace(" ", "")
+                        }
+                        self.current_patch = patch_obj
+                        self.patches_list.append(patch_obj)
 
                         color_print(t("hp_sem_ok"), 'green')
                         self.has_changes = True
@@ -1004,8 +1023,26 @@ class InteractiveCli:
 
         with open(self.selected_file, 'r+b') as f:
             with mmap.mmap(f.fileno(), 0) as mm:
+                old_bytes = bytes(mm[offset:offset + len(new_bytes)])
                 mm[offset:offset + len(new_bytes)] = new_bytes
                 mm.flush()
+
+        changes = [{
+            "offset": offset,
+            "old": HexUtils.bytes_to_hex(old_bytes).replace(" ", ""),
+            "new": HexUtils.bytes_to_hex(new_bytes).replace(" ", "")
+        }]
+        self.engine.last_changes = changes
+        self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
+
+        patch_obj = {
+            "type": "offset",
+            "file": os.path.basename(self.selected_file),
+            "offset": f"0x{offset:08X}",
+            "bytes": HexUtils.bytes_to_hex(new_bytes).replace(" ", "")
+        }
+        self.current_patch = patch_obj
+        self.patches_list.append(patch_obj)
 
         color_print(t("hp_replaced"), 'green')
         self.has_changes = True
@@ -1110,8 +1147,26 @@ class InteractiveCli:
 
         with open(self.selected_file, 'r+b') as f:
             with mmap.mmap(f.fileno(), 0) as mm:
+                old_bytes = bytes(mm[offset:offset + len(new_bytes)])
                 mm[offset:offset + len(new_bytes)] = new_bytes
                 mm.flush()
+
+        changes = [{
+            "offset": offset,
+            "old": HexUtils.bytes_to_hex(old_bytes).replace(" ", ""),
+            "new": HexUtils.bytes_to_hex(new_bytes).replace(" ", "")
+        }]
+        self.engine.last_changes = changes
+        self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
+
+        patch_obj = {
+            "type": "offset",
+            "file": os.path.basename(self.selected_file),
+            "offset": f"0x{offset:08X}",
+            "bytes": HexUtils.bytes_to_hex(new_bytes).replace(" ", "")
+        }
+        self.current_patch = patch_obj
+        self.patches_list.append(patch_obj)
 
         color_print(t("hp_replaced"), 'green')
         self.has_changes = True
@@ -1242,7 +1297,18 @@ class InteractiveCli:
                     mm.flush()
 
             if count > 0:
+                self.engine.last_changes = changes
                 self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
+                patch_obj = {
+                    "type": "string",
+                    "file": os.path.basename(self.selected_file),
+                    "search": search_text,
+                    "replace": replace_text,
+                    "offsets": [f"0x{o:08X}" for o in offsets],
+                    "encoding": "utf-8"
+                }
+                self.current_patch = patch_obj
+                self.patches_list.append(patch_obj)
                 color_print(t("hp_replaced_cnt", n=count), 'green')
                 self.has_changes = True
             else:
@@ -1316,7 +1382,27 @@ class InteractiveCli:
                 mm.flush()
 
         if count > 0:
+            self.engine.last_changes = changes
             self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
+            if is_hex:
+                patch_obj = {
+                    "type": "hex",
+                    "file": os.path.basename(self.selected_file),
+                    "search": search_hex,
+                    "replace": replace_hex,
+                    "offsets": [f"0x{o:08X}" for o in offsets]
+                }
+            else:
+                patch_obj = {
+                    "type": "string",
+                    "file": os.path.basename(self.selected_file),
+                    "search": search_text,
+                    "replace": replace_text,
+                    "offsets": [f"0x{o:08X}" for o in offsets],
+                    "encoding": "utf-8"
+                }
+            self.current_patch = patch_obj
+            self.patches_list.append(patch_obj)
             color_print(t("hp_replaced_cnt", n=count), 'green')
             self.has_changes = True
         else:
@@ -1352,8 +1438,14 @@ class InteractiveCli:
         force = (choice == "2")
         try:
             result = self.engine.undo_last(force)
+            if not result:
+                color_print(t("hp_no_last"), 'yellow')
+                return
             for entry in result:
                 color_print(t("hp_undo_ok", n=entry['count'], file=os.path.basename(entry['file'])), 'green')
+            if self.patches_list:
+                self.patches_list.pop()
+            self.current_patch = self.patches_list[-1] if self.patches_list else None
         except Exception as e:
             color_print(t("hp_err", err=e), 'red')
 
@@ -1454,7 +1546,8 @@ class InteractiveCli:
             color_print(t("hp_err", err=e), 'red')
 
     def _save_json_patch(self) -> None:
-        if not self.current_patch:
+        patches = list(self.patches_list) if self.patches_list else ([self.current_patch] if self.current_patch else [])
+        if not patches:
             color_print(t("hp_save_none"), 'red')
             return
 
@@ -1463,16 +1556,23 @@ class InteractiveCli:
         json_dir = self._get_json_dir()
         os.makedirs(json_dir, exist_ok=True)
 
-        app_name = os.path.basename(self.app_dir).replace(".app", "")
+        app_name = os.path.basename(self.app_dir).replace(".app", "") if self.app_dir else "patch"
         default_name = f"{app_name}_patch.json"
-        patch_path = os.path.join(json_dir, default_name)
 
-        if not patch_path.endswith('.json'):
-            patch_path += '.json'
+        name_prompt = t("hp_save_name_prompt")
+        if name_prompt == "hp_save_name_prompt":
+            name_prompt = "Имя файла JSON" if get_lang() == "ru" else "JSON filename"
+
+        name_input = ask_input(name_prompt, default_name)
+        if not name_input:
+            name_input = default_name
+        if not name_input.endswith('.json'):
+            name_input += '.json'
+        patch_path = os.path.join(json_dir, os.path.basename(name_input))
 
         patch_data = {
             "name": t("hp_save_name", name=app_name),
-            "patches": [self.current_patch]
+            "patches": patches
         }
 
         if JsonPatcher.save(patch_data, patch_path):
@@ -1731,6 +1831,7 @@ class InteractiveCli:
                         if changes:
                             if not self.dry_run:
                                 self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
+                                self.patches_list.append(self.current_patch)
                                 color_print(t("hp_sp_changed", n=len(changes)), 'green')
                                 self._show_last_changes()
                                 self.has_changes = True
@@ -1794,6 +1895,14 @@ class InteractiveCli:
                                 all_changes.extend(ch)
                                 total_applied += 1
                                 color_print(t("hp_sp_batch_ok", i=idx), 'green')
+                                p_obj = {
+                                    "type": "offset",
+                                    "file": os.path.basename(self.selected_file),
+                                    "offset": f"0x{t_start:08X}",
+                                    "bytes": HexUtils.bytes_to_hex(new_bytes).replace(" ", "")
+                                }
+                                self.patches_list.append(p_obj)
+                                self.current_patch = p_obj
                         except Exception as e:
                             color_print("  " + t("hp_err", err=e), 'red')
 
@@ -1856,7 +1965,8 @@ class InteractiveCli:
                     "file": os.path.basename(self.selected_file),
                     "search": search_raw,
                     "replace": replace_raw,
-                    "use_mask": use_mask
+                    "use_mask": use_mask,
+                    "offsets": [f"0x{o:08X}" for o in allowed]
                 }
             else:
                 self.current_patch = {
@@ -1864,12 +1974,15 @@ class InteractiveCli:
                     "file": os.path.basename(self.selected_file),
                     "search": search_raw,
                     "replace": replace_raw,
+                    "offsets": [f"0x{o:08X}" for o in allowed],
                     "encoding": "utf-8"
                 }
 
             if changes:
                 if not self.dry_run:
                     self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
+                    if self.current_patch:
+                        self.patches_list.append(self.current_patch)
                     color_print(t("hp_sp_changed", n=len(changes)), 'green')
                     self._show_last_changes()
                     self.has_changes = True
