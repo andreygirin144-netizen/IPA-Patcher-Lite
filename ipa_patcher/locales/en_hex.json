@@ -180,6 +180,7 @@
   "hp_json_applied": "All patches applied",
   "hp_save_none": "No patch to save",
   "hp_save_name": "Patch for {name}",
+  "hp_save_name_prompt": "JSON filename",
   "hp_save_ok": "Saved: {path}",
   "hp_pick_hdr": "\nSelect file",
   "hp_pick_main": "  1. Main executable",
