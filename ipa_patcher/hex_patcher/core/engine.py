@@ -238,11 +238,13 @@ class PatchEngine:
                 mm[offset:offset + len(replace_bytes)] = replace_bytes
                 mm.flush()
 
-        return [{
+        changes = [{
             "offset": offset,
             "old": HexUtils.bytes_to_hex(old_bytes).replace(" ", ""),
             "new": HexUtils.bytes_to_hex(replace_bytes).replace(" ", "")
         }]
+        self.last_changes = changes
+        return changes
 
     def apply_va(self, file_path: str, va: int, bytes_hex: str,
                  arch_offset: int = 0, dry_run: bool = False) -> List[Dict[str, Any]]:
@@ -308,7 +310,16 @@ class PatchEngine:
 
             ptype = patch.get("type", "hex")
             max_matches = patch.get("count", None)
-            allowed_offsets = patch.get("allowed_offsets", None)
+            allowed_offsets = patch.get("allowed_offsets") or patch.get("offsets", None)
+            if allowed_offsets:
+                parsed_offsets = []
+                for o in allowed_offsets:
+                    if isinstance(o, int):
+                        parsed_offsets.append(o)
+                    else:
+                        s_o = str(o).strip()
+                        parsed_offsets.append(int(s_o, 16) if (s_o.startswith(("0x", "0X")) or not s_o.isdigit()) else int(s_o, 10))
+                allowed_offsets = parsed_offsets
 
             try:
                 if ptype == "hex":
@@ -322,8 +333,14 @@ class PatchEngine:
                         patch.get("encoding", "utf-8"), max_matches, dry_run, allowed_offsets
                     )
                 elif ptype == "offset":
+                    raw_off = patch["offset"]
+                    if isinstance(raw_off, int):
+                        off_val = raw_off
+                    else:
+                        s_off = str(raw_off).strip()
+                        off_val = int(s_off, 16) if (s_off.startswith(("0x", "0X")) or not s_off.isdigit()) else int(s_off, 10)
                     changes = self.apply_offset(
-                        target_file, int(patch["offset"], 16), patch["bytes"], dry_run
+                        target_file, off_val, patch["bytes"], dry_run
                     )
                 elif ptype == "va":
                     arch_name = patch.get("arch", "arm64")
@@ -338,7 +355,7 @@ class PatchEngine:
                         arch_offset = macho_info.offsets[0]
 
                     changes = self.apply_va(
-                        target_file, int(patch["address"], 16), patch["bytes"],
+                        target_file, int(str(patch["address"]), 16), patch["bytes"],
                         arch_offset, dry_run
                     )
                 else:
