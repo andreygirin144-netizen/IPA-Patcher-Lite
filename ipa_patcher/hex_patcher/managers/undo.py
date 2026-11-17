@@ -70,24 +70,31 @@ class UndoManager:
             file_changes = file_entry["changes"]
 
             if not os.path.isfile(file_path):
-                continue
+                base = os.path.basename(file_path)
+                if os.path.isfile(base):
+                    file_path = os.path.abspath(base)
+                else:
+                    continue
 
             try:
+                reverted_count = 0
                 with open(file_path, 'r+b') as f:
                     with mmap.mmap(f.fileno(), 0) as mm:
                         for change in file_changes:
                             offset = change["offset"]
                             old_bytes = binascii.unhexlify(change["old"])
-                            current = mm[offset:offset + len(old_bytes)]
                             new_bytes = binascii.unhexlify(change["new"])
+                            current = bytes(mm[offset:offset + len(new_bytes)])
 
                             if not force and current != new_bytes:
                                 continue
 
                             mm[offset:offset + len(old_bytes)] = old_bytes
+                            reverted_count += 1
                         mm.flush()
 
-                result.append({"file": file_path, "count": len(file_changes)})
+                if reverted_count > 0:
+                    result.append({"file": file_path, "count": reverted_count})
             except Exception as e:
                 raise UndoError(f"Failed to undo changes in {file_path}: {e}")
 
