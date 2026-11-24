@@ -166,6 +166,61 @@ def update_version_in_extensions(app_dir, version, build):
         color_print(t("pe_ext_synced", n=updated), 'green')
 
 
+def update_localized_app_name(app_dir, new_name):
+    if not app_dir or not os.path.isdir(app_dir) or not new_name:
+        return 0
+
+    updated = 0
+    esc_name = new_name.replace("\\", "\\\\").replace('"', '\\"')
+    str_pattern = re.compile(
+        r'((?:"(?:CFBundleDisplayName|CFBundleName)"|CFBundleDisplayName|CFBundleName)\s*=\s*")([^"]*(?:\\.[^"]*)*)(")'
+    )
+
+    for entry in sorted(os.listdir(app_dir)):
+        if not entry.lower().endswith(".lproj"):
+            continue
+        strings_path = os.path.join(app_dir, entry, "InfoPlist.strings")
+        if not os.path.isfile(strings_path):
+            continue
+        try:
+            with open(strings_path, "rb") as f:
+                raw = f.read()
+
+            if raw.startswith(b"bplist") or raw.lstrip().startswith(b"<?xml"):
+                data = load_plist_safe(strings_path)
+                if isinstance(data, dict):
+                    chg = False
+                    for key in ("CFBundleDisplayName", "CFBundleName"):
+                        if key in data and data[key] != new_name:
+                            data[key] = new_name
+                            chg = True
+                    if chg and save_plist_safe(data, strings_path):
+                        updated += 1
+                        log_message(f"Localized name updated: {entry}/InfoPlist.strings", 'INFO')
+                continue
+
+            if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+                enc = "utf-16"
+            elif raw.startswith(b"\xef\xbb\xbf"):
+                enc = "utf-8-sig"
+            elif b"\x00" in raw[:64]:
+                enc = "utf-16-le"
+            else:
+                enc = "utf-8"
+
+            text = raw.decode(enc, errors="replace")
+            new_text, count = str_pattern.subn(lambda m: m.group(1) + esc_name + m.group(3), text)
+            if count > 0 and new_text != text:
+                with open(strings_path, "wb") as wf:
+                    wf.write(new_text.encode(enc))
+                updated += 1
+                log_message(f"Localized name updated: {entry}/InfoPlist.strings", 'INFO')
+        except Exception as e:
+            log_message(f"Failed to update {entry}/InfoPlist.strings: {e}", 'WARN')
+
+    return updated
+
+
 def get_plist_value(plist_data, key, default=None):
     if not isinstance(plist_data, dict):
         return default
