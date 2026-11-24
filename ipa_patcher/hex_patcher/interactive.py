@@ -2,6 +2,7 @@
 import os
 import re
 import mmap
+import struct
 import sys
 import textwrap
 from typing import Optional, List, Dict, Any, Tuple
@@ -9,7 +10,7 @@ from .core.engine import PatchEngine
 from .utils.hex_utils import HexUtils
 from .analyzers.macho import MachOAnalyzer
 from utils import color_print, ask_input, ask_yes_no, format_file_size
-from i18n import t
+from i18n import t, get_lang
 
 DEFAULT_CONTEXT_SIZE = 16
 
@@ -23,6 +24,32 @@ except ImportError:
 
 def _visible_len(text: str) -> int:
     return len(re.sub(r'\033\[\d+m', '', text))
+
+
+def _encode_arm64_return_int32(val: int) -> str:
+    if val < 0:
+        if val < -65536:
+            u = val & 0xFFFFFFFF
+            lo = u & 0xFFFF
+            hi = (u >> 16) & 0xFFFF
+            i1 = 0x52800000 | (lo << 5)
+            i2 = 0x72A00000 | (hi << 5)
+            raw = struct.pack('<III', i1, i2, 0xD65F03C0)
+        else:
+            imm16 = (~val) & 0xFFFF
+            i1 = 0x12800000 | (imm16 << 5)
+            raw = struct.pack('<II', i1, 0xD65F03C0)
+    elif val <= 0xFFFF:
+        i1 = 0x52800000 | ((val & 0xFFFF) << 5)
+        raw = struct.pack('<II', i1, 0xD65F03C0)
+    else:
+        u = val & 0xFFFFFFFF
+        lo = u & 0xFFFF
+        hi = (u >> 16) & 0xFFFF
+        i1 = 0x52800000 | (lo << 5)
+        i2 = 0x72A00000 | (hi << 5)
+        raw = struct.pack('<III', i1, i2, 0xD65F03C0)
+    return raw.hex().upper()
 
 
 class InteractiveCli:
@@ -118,6 +145,7 @@ class InteractiveCli:
         print(t("hp_ed_m5"))
         print(t("hp_ed_m6"))
         print(t("hp_ed_m7"))
+        print(t("hp_ed_m8"))
         print(t("hp_m0"))
         print("")
 
@@ -139,8 +167,179 @@ class InteractiveCli:
             self._show_all_offsets()
         elif choice == "7":
             self._go_to_line()
+        elif choice == "8":
+            self._va_arm64_helper()
         else:
             color_print(t("hp_bad_choice"), 'red')
+
+    def _parse_addr_input(self, raw: str, default_hex: bool = True) -> int:
+        s = raw.strip()
+        if s.startswith(("0x", "0X")):
+            return int(s, 16)
+        if default_hex:
+            try:
+                return int(s, 16)
+            except ValueError:
+                return int(s, 10)
+        return int(s, 10)
+
+    def _va_arm64_helper(self) -> None:
+        macho_info = MachOAnalyzer.check_info(self.selected_file)
+        if not macho_info:
+            color_print(t("hp_va_not_macho"), 'yellow')
+            return
+
+        arch_name = "arm64"
+        arch_offset = 0
+        if macho_info.type == "Fat Binary":
+            off = MachOAnalyzer.get_arch_offset(self.selected_file, "arm64")
+            if off is not None:
+                arch_offset = off
+            elif macho_info.offsets:
+                arch_offset = macho_info.offsets[0]
+                arch_name = macho_info.archs[0]
+        elif macho_info.offsets:
+            arch_offset = macho_info.offsets[0]
+            arch_name = macho_info.archs[0]
+
+        while True:
+            color_print(t("hp_va_hdr", arch=arch_name), 'cyan')
+            print(t("hp_va_m1"))
+            print(t("hp_va_m2"))
+            print(t("hp_va_m3"))
+            print(t("hp_m0"))
+            print("")
+
+            sub = ask_input(t("hp_choice"), "0")
+            if sub == "0":
+                break
+
+            elif sub == "1":
+                va_in = ask_input(t("hp_va_enter_va"))
+                if not va_in:
+                    continue
+                try:
+                    va_val = self._parse_addr_input(va_in, default_hex=True)
+                    off_val = MachOAnalyzer.va_to_offset(self.selected_file, va_val, arch_offset)
+                    if off_val is None:
+                        color_print(t("hp_va_not_found"), 'red')
+                        continue
+                    color_print(t("hp_va_res_off", va=va_val, off=off_val), 'green')
+                    self._show_context_line(off_val)
+                except Exception as e:
+                    color_print(t("hp_err", err=e), 'red')
+
+            elif sub == "2":
+                off_in = ask_input(t("hp_va_enter_off"))
+                if not off_in:
+                    continue
+                try:
+                    off_val = self._parse_addr_input(off_in, default_hex=True)
+                    va_val = MachOAnalyzer.offset_to_va(self.selected_file, off_val, arch_offset)
+                    if va_val is None:
+                        color_print(t("hp_va_off_not_found"), 'red')
+                        continue
+                    color_print(t("hp_va_res_va", off=off_val, va=va_val), 'green')
+                except Exception as e:
+                    color_print(t("hp_err", err=e), 'red')
+
+            elif sub == "3":
+                print(t("hp_va_target_type"))
+                print(t("hp_va_t1"))
+                print(t("hp_va_t2"))
+                t_mode = ask_input(t("hp_mode"), "1")
+
+                va_val = None
+                target_offset = None
+                try:
+                    if t_mode == "1":
+                        va_in = ask_input(t("hp_va_enter_va"))
+                        if not va_in:
+                            continue
+                        va_val = self._parse_addr_input(va_in, default_hex=True)
+                        target_offset = MachOAnalyzer.va_to_offset(self.selected_file, va_val, arch_offset)
+                        if target_offset is None:
+                            color_print(t("hp_va_not_found"), 'red')
+                            continue
+                        color_print(t("hp_va_res_off", va=va_val, off=target_offset), 'cyan')
+                    else:
+                        off_in = ask_input(t("hp_va_enter_off"))
+                        if not off_in:
+                            continue
+                        target_offset = self._parse_addr_input(off_in, default_hex=True)
+                except Exception as e:
+                    color_print(t("hp_err", err=e), 'red')
+                    continue
+
+                print("")
+                print(t("hp_arm_presets"))
+                print("  1) RET             (C0 03 5F D6)")
+                print("  2) NOP             (1F 20 03 D5)")
+                print("  3) RETURN TRUE (1) (20 00 80 52 C0 03 5F D6)")
+                print("  4) RETURN FALSE(0) (00 00 80 52 C0 03 5F D6)")
+                print(t("hp_arm_p5"))
+                preset = ask_input(t("hp_choice"), "1")
+
+                if preset == "1":
+                    bytes_hex = "C0035FD6"
+                elif preset == "2":
+                    bytes_hex = "1F2003D5"
+                elif preset == "3":
+                    bytes_hex = "20008052C0035FD6"
+                elif preset == "4":
+                    bytes_hex = "00008052C0035FD6"
+                elif preset == "5":
+                    num_in = ask_input(t("hp_arm_int_prompt"), "999999")
+                    try:
+                        iv = int(num_in, 0)
+                        bytes_hex = _encode_arm64_return_int32(iv)
+                    except ValueError:
+                        color_print(t("hp_bad_fmt"), 'red')
+                        continue
+                else:
+                    color_print(t("hp_bad_choice"), 'red')
+                    continue
+
+                try:
+                    rep_len = len(HexUtils.hex_to_bytes(bytes_hex))
+                    with open(self.selected_file, 'rb') as f:
+                        f.seek(target_offset)
+                        old_bytes = f.read(rep_len)
+                    if len(old_bytes) < rep_len:
+                        color_print(t("hp_off_oob", off=target_offset, size=os.path.getsize(self.selected_file)), 'red')
+                        continue
+
+                    color_print(f"  Offset: 0x{target_offset:08X}", 'cyan')
+                    color_print(f"  Old:    {HexUtils.bytes_to_hex(old_bytes)}", 'red')
+                    color_print(f"  New:    {HexUtils.bytes_to_hex(HexUtils.hex_to_bytes(bytes_hex))}", 'green')
+
+                    if not ask_yes_no(t("hp_confirm_off", off=target_offset), default=True):
+                        continue
+
+                    changes = self.engine.apply_offset(self.selected_file, target_offset, bytes_hex, dry_run=False)
+                    if changes:
+                        self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
+                        if va_val is not None:
+                            patch_obj = {
+                                "type": "va",
+                                "file": os.path.basename(self.selected_file),
+                                "arch": arch_name,
+                                "address": f"0x{va_val:X}",
+                                "bytes": bytes_hex,
+                            }
+                        else:
+                            patch_obj = {
+                                "type": "offset",
+                                "file": os.path.basename(self.selected_file),
+                                "offset": f"0x{target_offset:08X}",
+                                "bytes": bytes_hex,
+                            }
+                        self.current_patch = patch_obj
+                        self.patches_list.append(patch_obj)
+                        self.has_changes = True
+                        color_print(t("hp_replaced"), 'green')
+                except Exception as e:
+                    color_print(t("hp_err", err=e), 'red')
 
     def _extract_semantic_entities(self, min_len: int = 4) -> List[Dict[str, Any]]:
         entities = []
@@ -1085,20 +1284,14 @@ class InteractiveCli:
             else:
                 offset_str = ask_input(t("hp_off_hex_prompt"))
                 try:
-                    if offset_str.startswith('0x'):
-                        offset = int(offset_str, 16)
-                    else:
-                        offset = int(offset_str)
+                    offset = self._parse_addr_input(offset_str, default_hex=True)
                 except Exception:
                     color_print(t("hp_bad_fmt"), 'red')
                     return
         else:
             offset_str = ask_input(t("hp_off_hex_prompt"))
             try:
-                if offset_str.startswith('0x'):
-                    offset = int(offset_str, 16)
-                else:
-                    offset = int(offset_str)
+                offset = self._parse_addr_input(offset_str, default_hex=True)
             except Exception:
                 color_print(t("hp_bad_fmt"), 'red')
                 return
@@ -1384,7 +1577,7 @@ class InteractiveCli:
         if count > 0:
             self.engine.last_changes = changes
             self.engine.undo_mgr.save_transaction([{"file": self.selected_file, "changes": changes}])
-            if is_hex:
+            if mode == "1":
                 patch_obj = {
                     "type": "hex",
                     "file": os.path.basename(self.selected_file),
