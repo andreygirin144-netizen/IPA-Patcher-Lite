@@ -3,6 +3,8 @@ import os
 import plistlib
 import shutil
 from .constants import SIGNATURE_DIRS, SIGNATURE_FILES
+from .macho import get_main_executable, extract_entitlements_from_binary
+from .plist_editor import load_plist_safe
 from utils import color_print, log_message
 from i18n import t
 
@@ -92,9 +94,19 @@ def merge_tipa_entitlements(app_dir, bundle_id=None, team_id=None, silent=False)
                 color_print(t("sig_ent_load_warn", err=e), 'yellow')
             data = {}
     else:
-        log_message("No existing entitlements found, creating new", 'INFO')
-        if not silent:
-            color_print(t("sig_ent_new"), 'blue')
+        info_path = os.path.join(app_dir, "Info.plist")
+        pl = load_plist_safe(info_path) if os.path.isfile(info_path) else {}
+        main_exec = get_main_executable(app_dir, pl or {})
+        bin_ent = extract_entitlements_from_binary(main_exec) if main_exec else None
+        if isinstance(bin_ent, dict):
+            data = bin_ent
+            log_message("Extracted embedded entitlements from Mach-O for TIPA merge", 'INFO')
+            if not silent:
+                color_print(t("ent_extracted_bin", count=len(data)), 'green')
+        else:
+            log_message("No existing entitlements found, creating new", 'INFO')
+            if not silent:
+                color_print(t("sig_ent_new"), 'blue')
 
     if bundle_id and team_id:
         data['application-identifier'] = f"{team_id}.{bundle_id}"
