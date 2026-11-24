@@ -2,6 +2,8 @@
 import os
 import plistlib
 from .constants import VERSION
+from .plist_editor import load_plist_safe
+from .macho import get_main_executable, extract_entitlements_from_binary
 from utils import log_message, ask_input, ask_yes_no, color_print
 from i18n import t
 
@@ -22,6 +24,29 @@ def extract_team_id(provision_path):
     return None
 
 
+def get_base_entitlements(app_dir):
+    entitlements_path = os.path.join(app_dir, "entitlements.plist")
+    if os.path.exists(entitlements_path):
+        try:
+            with open(entitlements_path, "rb") as f:
+                data = plistlib.load(f)
+            if isinstance(data, dict):
+                return data, "file"
+        except Exception as e:
+            log_message(f"Failed to read existing entitlements.plist: {e}", 'WARN')
+
+    info_path = os.path.join(app_dir, "Info.plist")
+    if os.path.isfile(info_path):
+        pl = load_plist_safe(info_path) or {}
+        main_exec = get_main_executable(app_dir, pl)
+        if main_exec:
+            bin_ent = extract_entitlements_from_binary(main_exec)
+            if isinstance(bin_ent, dict):
+                return bin_ent, "binary"
+
+    return {}, "none"
+
+
 def generate_custom_entitlements(app_dir, bundle_id):
     entitlements_path = os.path.join(app_dir, "entitlements.plist")
     provision_path = os.path.join(app_dir, "embedded.mobileprovision")
@@ -29,16 +54,13 @@ def generate_custom_entitlements(app_dir, bundle_id):
 
     effective_team_id = team_id if team_id else "TEAMID12345"
 
-    entitlements_data = {}
-    if os.path.exists(entitlements_path):
-        try:
-            with open(entitlements_path, "rb") as f:
-                entitlements_data = plistlib.load(f)
-            log_message("Original entitlements loaded as base", 'INFO')
-            color_print(t("ent_loaded_base"), 'blue')
-        except Exception as e:
-            log_message(f"Failed to read existing entitlements.plist: {e}", 'WARN')
-            color_print(t("ent_read_warn", err=e), 'yellow')
+    entitlements_data, source = get_base_entitlements(app_dir)
+    if source == "file":
+        log_message("Original entitlements.plist loaded as base", 'INFO')
+        color_print(t("ent_loaded_base"), 'blue')
+    elif source == "binary":
+        log_message("Extracted embedded entitlements from Mach-O LC_CODE_SIGNATURE", 'INFO')
+        color_print(t("ent_extracted_bin", count=len(entitlements_data)), 'green')
 
     entitlements_data["application-identifier"] = f"{effective_team_id}.{bundle_id}"
     entitlements_data["com.apple.developer.team-identifier"] = effective_team_id
