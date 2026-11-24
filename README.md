@@ -213,7 +213,7 @@ ipa_patcher/
 │   ├── en_hex.json         # Hex-патчер, утилиты IPA, движок патчей (EN)
 │   ├── ru_hex.json         # Hex-патчер, утилиты IPA, движок патчей (RU)
 │   ├── ru_web.json         # Web_Transfer (RU)
-│   └── en_web.json         # Web Transfer (EN)
+│   └── en_web.json         # Web_Transfer (EN)
 │ 
 ├── core/                   # ЯДРО — вся логика модификации IPA/TIPA
 │   ├── __init__.py
