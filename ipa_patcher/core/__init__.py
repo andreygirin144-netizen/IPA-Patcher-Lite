@@ -3,6 +3,9 @@ from .macho import (
     is_macho_binary,
     get_load_dylibs,
     inject_lc_load_dylib,
+    weaken_load_dylib,
+    get_rpaths,
+    extract_entitlements_from_binary,
     get_macho_summary,
     is_fat_binary,
     thin_binary_to_arm64,
@@ -27,6 +30,7 @@ from .plist_editor import (
     has_info_plist_backup,
     cleanup_info_plist_backup,
     update_version_in_extensions,
+    update_localized_app_name,
     add_file_support,
 )
 
@@ -54,9 +58,17 @@ from .tweak_injector import (
     patch_all_macho_in_dir,
 )
 
+from .tweak_remover import (
+    analyze_injected_tweaks,
+    remove_tweaks_deep,
+    remove_load_dylib,
+    resolve_dylib_in_app,
+)
+
 from .entitlements import (
     generate_custom_entitlements,
     extract_team_id,
+    get_base_entitlements,
 )
 
 from .advanced_patches import (
@@ -147,6 +159,9 @@ __all__ = [
     'is_macho_binary',
     'get_load_dylibs',
     'inject_lc_load_dylib',
+    'weaken_load_dylib',
+    'get_rpaths',
+    'extract_entitlements_from_binary',
     'get_macho_summary',
     'is_fat_binary',
     'thin_binary_to_arm64',
@@ -169,6 +184,7 @@ __all__ = [
     'has_info_plist_backup',
     'cleanup_info_plist_backup',
     'update_version_in_extensions',
+    'update_localized_app_name',
     'add_file_support',
 
     'safe_patch_dylib_path',
@@ -191,8 +207,14 @@ __all__ = [
     'reset_ios_cache',
     'patch_all_macho_in_dir',
 
+    'analyze_injected_tweaks',
+    'remove_tweaks_deep',
+    'remove_load_dylib',
+    'resolve_dylib_in_app',
+
     'generate_custom_entitlements',
     'extract_team_id',
+    'get_base_entitlements',
 
     'apply_advanced_patches',
     'check_patch_availability',
