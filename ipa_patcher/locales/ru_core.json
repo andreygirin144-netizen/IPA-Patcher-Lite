@@ -25,6 +25,7 @@
   "sig_saved_short": "Файл сохранён на диск",
   "sig_ts_fallback_manual": "[INFO] Файл сохранён на диск. Установите вручную через TrollStore.",
   "ent_loaded_base": "[INFO] Существующие entitlements загружены как основа",
+  "ent_extracted_bin": "[INFO] Извлечены оригинальные entitlements из бинарника ({count} ключей)",
   "ent_read_warn": "[WARN] Не удалось прочитать существующий entitlements: {err}",
   "ent_key_removed": "[INFO] Удален ключ: {key}",
   "ent_keychain_upd": "[INFO] Обновлен keychain-access-groups: {val}",

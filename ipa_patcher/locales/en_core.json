@@ -25,6 +25,7 @@
   "sig_saved_short": "File saved to disk",
   "sig_ts_fallback_manual": "[INFO] File saved to disk. Install manually via TrollStore.",
   "ent_loaded_base": "[INFO] Existing entitlements loaded as base",
+  "ent_extracted_bin": "[INFO] Extracted original entitlements from binary ({count} keys)",
   "ent_read_warn": "[WARN] Failed to read existing entitlements: {err}",
   "ent_key_removed": "[INFO] Removed key: {key}",
   "ent_keychain_upd": "[INFO] Updated keychain-access-groups: {val}",
