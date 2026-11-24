@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import struct
 
-VERSION = "1.1.9"
+VERSION = "1.2.0"
 
 MH_MAGIC_64 = 0xfeedfacf
 MH_CIGAM_64 = 0xcffaedfe
