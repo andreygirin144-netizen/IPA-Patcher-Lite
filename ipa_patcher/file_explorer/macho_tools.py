@@ -2,8 +2,11 @@
 import os
 
 from utils import color_print, ask_input, ask_yes_no, log_message
-from core import is_macho_binary, get_load_dylibs, inject_lc_load_dylib, get_macho_summary
-from core import safe_patch_dylib_path
+from core import (
+    is_macho_binary, get_load_dylibs, inject_lc_load_dylib,
+    get_macho_summary, safe_patch_dylib_path, weaken_load_dylib,
+    get_rpaths, inject_rpath,
+)
 from hex_patcher import start_hex_patcher
 from i18n import t
 from .backups import backup_file, restore_backup, rollback_after_failed_patch, find_backups
@@ -102,6 +105,8 @@ def handle_macho_file(file_path: str) -> tuple:
         print(t("fe_mt_m4"))
         print(t("fe_mt_m5"))
         print(t("fe_mt_m6"))
+        print(t("fe_mt_m7"))
+        print(t("fe_mt_m8"))
         print(t("fe_fa_act_0"))
         choice = ask_input(t("fe_select_action"), "0")
 
@@ -418,6 +423,8 @@ def handle_macho_file(file_path: str) -> tuple:
                 archs = info.get('archs', [])
                 print(t("fe_mt_archs", archs=', '.join(archs) if archs else t("fe_unknown")))
                 print(t("fe_mt_deps_cnt", n=info.get('dylibs_count', 0)))
+                rpaths = info.get('rpaths', [])
+                print(t("fe_mt_rpaths_list", vals=', '.join(rpaths) if rpaths else t("fe_unknown")))
             except Exception as e:
                 color_print(t("fe_mt_info_err", err=e), 'red')
 
@@ -461,6 +468,63 @@ def handle_macho_file(file_path: str) -> tuple:
         elif choice == "6":
             color_print(t("fe_fa_hex_launch"), 'blue')
             start_hex_patcher(os.path.dirname(file_path), file_path)
+
+        elif choice == "7":
+            dylibs = get_load_dylibs(file_path)
+            if not dylibs:
+                color_print(t("fe_mt_no_deps"), 'yellow')
+                continue
+            color_print(t("fe_mt_weak_hdr"), 'cyan')
+            for idx, d in enumerate(dylibs, 1):
+                print(f"  {idx}) {d}")
+            print(t("fe_cancel_0"))
+            sel = ask_input(t("fe_mt_enter_nums"), "0")
+            if sel == "0":
+                continue
+            indices = parse_number_input(sel, len(dylibs))
+            if not indices:
+                continue
+            backup_info = backup_file(file_path)
+            for idx in indices:
+                target_d = dylibs[idx]
+                if weaken_load_dylib(file_path, target_d):
+                    color_print(t("fe_mt_weak_ok", path=target_d), 'green')
+                    modified = True
+                    changes_summary.append({
+                        'type': 'macho_path_change',
+                        'old': f"LOAD: {target_d}",
+                        'new': f"WEAK: {target_d}"
+                    })
+                else:
+                    color_print(t("fe_mt_weak_skip", path=target_d), 'yellow')
+            if backup_info:
+                cleanup_old_backups(file_path, keep_latest=True)
+
+        elif choice == "8":
+            rpaths = get_rpaths(file_path)
+            color_print(t("fe_mt_rpath_hdr"), 'cyan')
+            if rpaths:
+                for idx, rp in enumerate(rpaths, 1):
+                    print(f"  {idx}) {rp}")
+            else:
+                color_print(t("fe_mt_rpath_none"), 'yellow')
+            print("")
+            print(t("fe_mt_rpath_add"))
+            print(t("fe_back_0"))
+            rp_choice = ask_input(t("fe_select_action"), "0")
+            if rp_choice == "1":
+                new_rp = ask_input(t("fe_mt_rpath_prompt"), "@executable_path/Frameworks")
+                if not new_rp:
+                    continue
+                backup_info = backup_file(file_path)
+                if inject_rpath(file_path, new_rp):
+                    color_print(t("fe_mt_rpath_ok", path=new_rp), 'green')
+                    modified = True
+                    changes_summary.append({'type': 'macho_add_dependency', 'path': f"LC_RPATH {new_rp}"})
+                else:
+                    color_print(t("fe_mt_add_err"), 'red')
+                if backup_info:
+                    cleanup_old_backups(file_path, keep_latest=True)
 
         elif choice == "0":
             break
