@@ -33,6 +33,7 @@ from core.plist_editor import (
     save_plist,
     add_file_support,
     update_version_in_extensions,
+    update_localized_app_name,
     backup_info_plist,
     restore_info_plist,
     has_info_plist_backup,
@@ -41,6 +42,7 @@ from core.plist_editor import (
 from core.signature import clean_signature_files, sign_app_bundle_with_path, open_tipa_with_trollstore, merge_tipa_entitlements
 from core.macho import is_ipa_encrypted, is_macho_binary, get_main_executable, is_fat_binary, list_all_archs, thin_binary_to_arm64, get_macho_summary
 from core.tweak_injector import inject_tweaks, check_header_space, count_modules_in_tweak
+from core.tweak_remover import analyze_injected_tweaks, remove_tweaks_deep
 from core.entitlements import generate_custom_entitlements
 from core.advanced_patches import apply_advanced_patches, check_patch_availability
 from core.patch_strings import patch_strings_in_binary
@@ -363,7 +365,7 @@ def prepare_tipa_info_plist(plist_data, app_dir):
         return False
 
 
-def edit_menu(plist_data, app_dir, script_dir, temp_dir):
+def edit_menu(plist_data, app_dir, script_dir, temp_dir, is_tipa=False):
     global hex_patcher_used, substrate_mode, custom_substrate_path, use_rpath, use_loader_path
     original = plist_data.copy()
     changes = {}
@@ -372,6 +374,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
     tweak_injected = False
     deep_bundle_mode = False
     deep_version_mode = False
+    target_is_tipa = bool(is_tipa)
     info_plist_path = os.path.join(app_dir, "Info.plist")
     plist_changes = {}
 
@@ -413,6 +416,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             path_display = "@executable_path"
 
         cur_lang_display = get_lang().upper()
+        fmt_display = "TIPA (TrollStore)" if target_is_tipa else "IPA"
 
         color_print("\n" + "=" * 49, 'cyan')
         color_print(t("menu_title"), 'cyan')
@@ -439,6 +443,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
         print(t("menu_16"))
         print(t("menu_17"))
         print(t("menu_18", lang=cur_lang_display))
+        print(t("menu_19", fmt=fmt_display))
+        print(t("menu_20"))
         print(t("menu_0"))
         color_print("=" * 49, 'yellow')
         choice = ask_input(t("your_choice"), "9")
@@ -451,6 +457,13 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                 changes["name"] = new_name
                 modified = True
                 color_print(t("name_changed"), 'green')
+                if ask_yes_no(t("name_loc_q"), default=True):
+                    loc_cnt = update_localized_app_name(app_dir, new_name)
+                    if loc_cnt > 0:
+                        changes["name_loc_count"] = loc_cnt
+                        color_print(t("name_loc_ok", count=loc_cnt), 'green')
+                    else:
+                        color_print(t("name_loc_none"), 'yellow')
 
         elif choice == "2":
             old_ver = plist_data.get("CFBundleShortVersionString", "1.0")
@@ -944,10 +957,10 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                         real_changes[key] = value
                 elif key in ['version_deep', 'bundle_deep', 'version_old', 'bundle_old']:
                     continue
-                elif key in ['icon', 'tweak', 'entitlements', 'advanced_patched', 'thinned', 'file_support', 'custom_edit', 'file_manager_changes', 'restored_backups']:
+                elif key in ['icon', 'tweak', 'entitlements', 'advanced_patched', 'thinned', 'file_support', 'custom_edit', 'file_manager_changes', 'restored_backups', 'name_loc_count', 'tweaks_removed']:
                     if value:
                         real_changes[key] = value
-                elif key == 'substrate_mode':
+                elif key in ('substrate_mode', 'target_format'):
                     real_changes[key] = value
 
             if plist_changes:
@@ -998,11 +1011,15 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
 
             real_changes = filtered_changes
 
-            if modified or icon_replaced or tweak_injected or ("custom_edit" in real_changes) or ("entitlements" in real_changes) or ("advanced_patched" in real_changes) or hex_patcher_used or ("file_manager_changes" in real_changes) or deep_version_mode or deep_bundle_mode:
+            if modified or icon_replaced or tweak_injected or ("custom_edit" in real_changes) or ("entitlements" in real_changes) or ("advanced_patched" in real_changes) or hex_patcher_used or ("file_manager_changes" in real_changes) or deep_version_mode or deep_bundle_mode or ("target_format" in real_changes) or ("tweaks_removed" in real_changes):
 
                 color_print(t("sum_title"), 'cyan')
                 has_changes = False
 
+                if "target_format" in real_changes:
+                    fmt_lbl = "TIPA (TrollStore)" if real_changes["target_format"] == "tipa" else "IPA"
+                    color_print(t("sum_fmt", fmt=fmt_lbl), 'green')
+                    has_changes = True
                 if "name" in real_changes:
                     old_n = original.get('CFBundleDisplayName') or original.get('CFBundleName')
                     color_print(t("sum_name", old=old_n, new=real_changes['name']), 'green')
@@ -1036,6 +1053,9 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     has_changes = True
                 if "tweak" in real_changes:
                     color_print(t("sum_tweak", sub=mode_display, path=path_display), 'green')
+                    has_changes = True
+                if "tweaks_removed" in real_changes:
+                    color_print(t("sum_tweaks_rm", count=real_changes["tweaks_removed"]), 'green')
                     has_changes = True
                 if "custom_edit" in real_changes:
                     color_print(t("sum_custom_edit"), 'green')
@@ -1752,10 +1772,95 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
             set_lang(new_lang, persist=True)
             color_print(t("lang_switched"), 'green')
 
+        elif choice == "19":
+            target_is_tipa = not target_is_tipa
+            changes["target_format"] = "tipa" if target_is_tipa else "ipa"
+            if target_is_tipa:
+                prepare_tipa_info_plist(plist_data, app_dir)
+                merge_tipa_entitlements(app_dir, silent=False)
+                modified = True
+                color_print(t("fmt_switched_tipa"), 'green')
+            else:
+                color_print(t("fmt_switched_ipa"), 'yellow')
+
+        elif choice == "20":
+            color_print(t("trm_scanning"), 'cyan')
+            report = analyze_injected_tweaks(app_dir, plist_data)
+            tweaks_list = report.get("tweaks", [])
+            all_ns = report.get("all_non_system", [])
+
+            if not all_ns:
+                color_print(t("trm_none_found"), 'green')
+                continue
+
+            show_list = tweaks_list if tweaks_list else all_ns
+            if tweaks_list:
+                color_print(t("trm_found_hdr", count=len(tweaks_list)), 'yellow')
+            else:
+                color_print(t("trm_only_low_hdr", count=len(all_ns)), 'yellow')
+
+            for idx, tw in enumerate(show_list, 1):
+                sz = format_file_size(tw["size"]) if tw["size"] else "?"
+                tag = f"[{tw['kind'].upper()} • {tw['confidence']}]"
+                color_print(f"  {idx}) {tw['name']} ({sz}) {tag}", 'cyan' if tw["confidence"] == "HIGH" else 'white')
+                if tw["reasons"]:
+                    color_print(f"     {'; '.join(tw['reasons'])}", 'yellow')
+                if tw["loaded_by"]:
+                    print(f"     Loaded by: {', '.join(tw['loaded_by'])}")
+                if tw["associated_files"]:
+                    print(f"     Resources: {', '.join(tw['associated_files'])}")
+
+            print("")
+            print(t("trm_opt_all"))
+            if len(all_ns) > len(show_list):
+                print(t("trm_opt_show_all"))
+            print(t("fe_cancel_0"))
+
+            sel = ask_input(t("trm_pick_prompt"), "0").strip()
+            if sel == "0":
+                continue
+
+            if sel.lower() == "s" and len(all_ns) > len(show_list):
+                show_list = all_ns
+                for idx, tw in enumerate(show_list, 1):
+                    sz = format_file_size(tw["size"]) if tw["size"] else "?"
+                    print(f"  {idx}) {tw['name']} ({sz}) [{tw['confidence']}]")
+                sel = ask_input(t("trm_pick_prompt"), "0").strip()
+                if sel == "0":
+                    continue
+
+            if sel.lower() == "all":
+                chosen_ids = [x["id"] for x in show_list]
+            else:
+                from file_explorer.macho_tools import parse_number_input
+                indices = parse_number_input(sel, len(show_list))
+                if not indices:
+                    color_print(t("invalid_choice"), 'red')
+                    continue
+                chosen_ids = [show_list[i]["id"] for i in indices]
+
+            if not ask_yes_no(t("trm_confirm_q", count=len(chosen_ids)), default=True):
+                continue
+
+            rm_res = remove_tweaks_deep(app_dir, plist_data, chosen_ids, remove_orphan_substrates=True, remove_associated=True)
+            color_print(t("trm_done_hdr"), 'green')
+            for cmd in rm_res["removed_commands"]:
+                color_print(f"  - Removed LC_LOAD_DYLIB: {cmd}", 'green')
+            for cmd in rm_res["weakened_commands"]:
+                color_print(f"  - Weakened LC_LOAD_DYLIB: {cmd}", 'yellow')
+            for df in rm_res["deleted_files"]:
+                color_print(f"  - Deleted file: {df}", 'green')
+            color_print(t("trm_freed", size=format_file_size(rm_res["freed_bytes"])), 'cyan')
+            modified = True
+            changes["tweaks_removed"] = changes.get("tweaks_removed", 0) + len(chosen_ids)
+
         elif choice == "0":
             if modified:
                 color_print(t("exit_summary"), 'cyan')
                 color_print("=" * 49, 'cyan')
+                if "target_format" in changes:
+                    fmt_lbl = "TIPA (TrollStore)" if changes["target_format"] == "tipa" else "IPA"
+                    color_print(t("sum_fmt", fmt=fmt_lbl), 'green')
                 if "name" in changes:
                     old_n = original.get('CFBundleDisplayName') or original.get('CFBundleName')
                     color_print(t("sum_name", old=old_n, new=changes['name']), 'green')
@@ -1773,6 +1878,8 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print(t("sum_icon"), 'green')
                 if "tweak" in changes:
                     color_print(t("sum_tweak", sub=mode_display, path=path_display), 'green')
+                if "tweaks_removed" in changes:
+                    color_print(t("sum_tweaks_rm", count=changes["tweaks_removed"]), 'green')
                 if "custom_edit" in changes:
                     color_print(t("sum_custom_edit"), 'green')
                 if "entitlements" in changes:
@@ -1783,7 +1890,7 @@ def edit_menu(plist_data, app_dir, script_dir, temp_dir):
                     color_print(t("sum_hex"), 'green')
                 if "file_manager_changes" in changes:
                     color_print(t("sum_fm"), 'green')
-                if "thinned" in changes:
+                if "thinned" in real_changes if False else "thinned" in changes:
                     color_print(t("sum_thinned"), 'green')
                 if "restored_backups" in changes:
                     color_print(t("sum_restored"), 'green')
@@ -1905,7 +2012,10 @@ def main():
             changes,
             deep_bundle_mode,
             deep_version_mode,
-        ) = edit_menu(plist, app_dir, script_dir, temp_dir)
+        ) = edit_menu(plist, app_dir, script_dir, temp_dir, is_tipa=is_tipa)
+
+        if "target_format" in changes:
+            is_tipa = (changes["target_format"] == "tipa")
 
         if "bundle_id" in changes:
             updated_plist["CFBundleIdentifier"] = changes["bundle_id"]
