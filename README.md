@@ -211,8 +211,10 @@ ipa_patcher/
 │   ├── en_explorer.json    # Файловый менеджер и базы данных SQLite (EN)
 │   ├── ru_explorer.json    # Файловый менеджер и базы данных SQLite (RU)
 │   ├── en_hex.json         # Hex-патчер, утилиты IPA, движок патчей (EN)
-│   └── ru_hex.json         # Hex-патчер, утилиты IPA, движок патчей (RU)
-│
+│   ├── ru_hex.json         # Hex-патчер, утилиты IPA, движок патчей (RU)
+│   ├── ru_web.json         # Web_Transfer (RU)
+│   └── en_web.json         # Web Transfer (EN)
+│ 
 ├── core/                   # ЯДРО — вся логика модификации IPA/TIPA
 │   ├── __init__.py
 │   ├── constants.py        # Константы Mach-O (магические числа, LC_*, LC_REQ_DYLD, FAT64), лимиты, VERSION (1.2.0)
