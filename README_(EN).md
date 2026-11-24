@@ -211,7 +211,9 @@ ipa_patcher/
 │   ├── en_explorer.json    # File manager and SQLite databases (EN)
 │   ├── ru_explorer.json    # File manager and SQLite databases (RU)
 │   ├── en_hex.json         # Hex patcher, IPA utilities, patch engine (EN)
-│   └── ru_hex.json         # Hex patcher, IPA utilities, patch engine (RU)
+│   ├── ru_hex.json         # Hex patcher, IPA utilities, patch engine (RU)
+│   ├── ru_web.json         # Web_Transfer (RU)
+│   └── en_web.json         # Web_Transfer (EN)
 │
 ├── core/                   # CORE — all IPA/TIPA modification logic
 │   ├── __init__.py
